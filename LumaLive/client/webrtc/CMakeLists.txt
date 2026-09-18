@@ -50,7 +50,10 @@ if(WIN32 AND NOT _luma_webrtc_enabled AND
   if(EXISTS "${LUMALIVE_WEBRTC_ROOT}/api/peer_connection_interface.h" AND
      EXISTS "${LUMALIVE_WEBRTC_OUT}/obj/webrtc.lib")
     set(_luma_webrtc_enabled TRUE)
-    target_compile_definitions(luma_client_webrtc PUBLIC LUMALIVE_HAS_WEBRTC=1)
+    target_compile_definitions(luma_client_webrtc PUBLIC
+      LUMALIVE_HAS_WEBRTC=1
+      WEBRTC_WIN=1
+    )
     set(_luma_webrtc_absl "${LUMALIVE_WEBRTC_ROOT}/third_party/abseil-cpp")
     if(NOT EXISTS "${_luma_webrtc_absl}/absl/strings/string_view.h")
       message(FATAL_ERROR
