@@ -82,7 +82,7 @@ public:
     void OnDataChannel(::webrtc::scoped_refptr<::webrtc::DataChannelInterface>) override {}
     void OnIceGatheringChange(::webrtc::PeerConnectionInterface::IceGatheringState) override {}
     void OnConnectionChange(::webrtc::PeerConnectionInterface::PeerConnectionState state) override { if(cb_.on_connection_state) cb_.on_connection_state(std::string(::webrtc::PeerConnectionInterface::AsString(state))); }
-    void OnIceCandidate(const ::webrtc::IceCandidate* c) override { if(cb_.on_local_ice_candidate){std::string s; c->ToString(&s); cb_.on_local_ice_candidate(c->sdp_mid(), c->sdp_mline_index(), s);} }
+    void OnIceCandidate(const ::webrtc::IceCandidate* c) override { if(cb_.on_local_ice_candidate && c){ const std::string s = c->candidate().ToCandidateAttribute(true); cb_.on_local_ice_candidate(c->sdp_mid(), c->sdp_mline_index(), s); } }
     void OnTrack(::webrtc::scoped_refptr<::webrtc::RtpTransceiverInterface> transceiver) override {
         if(!transceiver || !transceiver->receiver()) return; auto track=transceiver->receiver()->track(); if(!track) return;
         if(track->kind()==::webrtc::MediaStreamTrackInterface::kVideoKind){ auto video=static_cast<::webrtc::VideoTrackInterface*>(track.get()); video->AddOrUpdateSink(&video_sink_,::webrtc::VideoSinkWants()); }
