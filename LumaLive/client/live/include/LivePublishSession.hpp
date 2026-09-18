@@ -6,6 +6,7 @@
 #include "TcpSignalingClient.hpp"
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 
 namespace luma::client::live {
