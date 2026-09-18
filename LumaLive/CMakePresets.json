@@ -9,7 +9,7 @@
     {
       "name": "windows-vs2026-x64",
       "displayName": "Windows Visual Studio 2026 x64",
-      "description": "Visual Studio 18 2026 generator with MSVC v145 targeting x64 and the external LumaLive WebRTC Release build.",
+      "description": "Visual Studio 18 2026 generator with MSVC v145 targeting x64 and an external WebRTC checkout/build supplied through environment variables.",
       "generator": "Visual Studio 18 2026",
       "architecture": "x64",
       "toolset": "v145",
@@ -18,9 +18,7 @@
         "CMAKE_CXX_STANDARD": "20",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_CXX_EXTENSIONS": "OFF",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "LUMALIVE_WEBRTC_ROOT": "${sourceDir}/../LumaLive_Environment_Installer/third_party/src",
-        "LUMALIVE_WEBRTC_OUT": "${sourceDir}/../LumaLive_Environment_Installer/third_party/src/out/Release"
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     }
   ],
