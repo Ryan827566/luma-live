@@ -119,21 +119,65 @@ bool NativeWebRtcPeerConnection::AddVideoFrame(const luma::client::media::pipeli
 bool NativeWebRtcPeerConnection::AddAudioFrame(const luma::client::media::pipeline::AudioFrame& f){if(!impl_->audio_source||f.format!=luma::client::media::pipeline::AudioSampleFormat::S16||f.sample_rate<=0||f.channels==0)return false; const std::size_t bytes_per_sample=2; const std::size_t frames=f.data.size()/(bytes_per_sample*f.channels); if(frames==0)return false; impl_->audio_source->Push(f.data.data(),16,f.sample_rate,f.channels,frames); return true;}
 bool NativeWebRtcPeerConnection::CreateOffer(){
     if(!impl_->pc) return false;
-    auto obs=::webrtc::scoped_refptr<DescriptionObserver>(new DescriptionObserver([this](auto*d){
-        std::string sdp; if(!d->ToString(&sdp)) return;
-        impl_->pc->SetLocalDescription(::webrtc::scoped_refptr<SetObserver>(new SetObserver([this,sdp](){ if(impl_->cb.on_local_description) impl_->cb.on_local_description("offer",sdp); },[](const std::string&){}),d);
-    },[](const std::string&){});
-    impl_->pc->CreateOffer(obs.get(),::webrtc::RTCOfferAnswerOptions()); return true;
+    auto obs=::webrtc::scoped_refptr<DescriptionObserver>(
+        new DescriptionObserver(
+            [this](auto* d){
+                std::string sdp;
+                if(!d->ToString(&sdp)) return;
+                impl_->pc->SetLocalDescription(
+                    ::webrtc::scoped_refptr<SetObserver>(
+                        new SetObserver(
+                            [this,sdp](){
+                                if(impl_->cb.on_local_description)
+                                    impl_->cb.on_local_description("offer",sdp);
+                            },
+                            [](const std::string&){})),
+                    d);
+            },
+            [](const std::string&){}));
+    impl_->pc->CreateOffer(obs.get(),::webrtc::RTCOfferAnswerOptions());
+    return true;
 }
+
 bool NativeWebRtcPeerConnection::CreateAnswer(){
     if(!impl_->pc) return false;
-    auto obs=::webrtc::scoped_refptr<DescriptionObserver>(new DescriptionObserver)([this](auto*d){
-        std::string sdp; if(!d->ToString(&sdp)) return;
-        impl_->pc->SetLocalDescription(::webrtc::scoped_refptr<SetObserver>(new SetObserver)([this,sdp](){ if(impl_->cb.on_local_description) impl_->cb.on_local_description("answer",sdp); },[](const std::string&){}),d);
-    },[](const std::string&){});
-    impl_->pc->CreateAnswer(obs.get(),::webrtc::RTCOfferAnswerOptions()); return true;
+    auto obs=::webrtc::scoped_refptr<DescriptionObserver>(
+        new DescriptionObserver(
+            [this](auto* d){
+                std::string sdp;
+                if(!d->ToString(&sdp)) return;
+                impl_->pc->SetLocalDescription(
+                    ::webrtc::scoped_refptr<SetObserver>(
+                        new SetObserver(
+                            [this,sdp](){
+                                if(impl_->cb.on_local_description)
+                                    impl_->cb.on_local_description("answer",sdp);
+                            },
+                            [](const std::string&){})),
+                    d);
+            },
+            [](const std::string&){}));
+    impl_->pc->CreateAnswer(obs.get(),::webrtc::RTCOfferAnswerOptions());
+    return true;
 }
-bool NativeWebRtcPeerConnection::SetRemoteDescription(const std::string& type,const std::string&sdp){if(!impl_->pc)return false;::webrtc::SdpType t; if(type=="offer")t=::webrtc::SdpType::kOffer;else if(type=="answer")t=::webrtc::SdpType::kAnswer;else return false;::webrtc::SdpParseError e;auto d=::webrtc::CreateSessionDescription(t,sdp,&e);if(!d)return false;impl_->pc->SetRemoteDescription(::webrtc::scoped_refptr<SetObserver>(new SetObserver([](){},[](const std::string&){}),d.release());return true;}
+
+bool NativeWebRtcPeerConnection::SetRemoteDescription(
+    const std::string& type,const std::string&sdp){
+    if(!impl_->pc) return false;
+    ::webrtc::SdpType t;
+    if(type=="offer") t=::webrtc::SdpType::kOffer;
+    else if(type=="answer") t=::webrtc::SdpType::kAnswer;
+    else return false;
+    ::webrtc::SdpParseError e;
+    auto d=::webrtc::CreateSessionDescription(t,sdp,&e);
+    if(!d) return false;
+    impl_->pc->SetRemoteDescription(
+        ::webrtc::scoped_refptr<SetObserver>(
+            new SetObserver([](){},[](const std::string&){})),
+        d.release());
+    return true;
+}
+
 bool NativeWebRtcPeerConnection::AddRemoteIceCandidate(const std::string&mid,int mline,const std::string&candidate){if(!impl_->pc)return false;::webrtc::SdpParseError e;std::unique_ptr<::webrtc::IceCandidate> c(::webrtc::CreateIceCandidate(mid,mline,candidate,&e));return c&&impl_->pc->AddIceCandidate(c.get());}
 void NativeWebRtcPeerConnection::Close(){if(impl_&&impl_->pc){impl_->pc->Close();impl_->pc=nullptr;}if(impl_){impl_->factory=nullptr;impl_->video_source=nullptr;impl_->audio_source=nullptr;impl_->observer.reset();}}
 bool NativeWebRtcPeerConnection::IsInitialized()const noexcept{return impl_&&impl_->pc!=nullptr;}
