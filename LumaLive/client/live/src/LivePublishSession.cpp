@@ -68,4 +68,3 @@ void LivePublishSession::Cleanup(){
 }
 void LivePublishSession::Stop(){std::lock_guard lock(mutex_); Cleanup();}
 }
-}
