@@ -1,5 +1,8 @@
 add_library(luma_client_media_pipeline STATIC src/MediaPipelineService.cpp src/DeviceCaptureService.cpp src/MediaCaptureSession.cpp)
-target_include_directories(luma_client_media_pipeline PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(luma_client_media_pipeline PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../shared
+)
 if(WIN32)
   target_link_libraries(luma_client_media_pipeline PRIVATE mfplat mfuuid mfreadwrite ole32)
 endif()
