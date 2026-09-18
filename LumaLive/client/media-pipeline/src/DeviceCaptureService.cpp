@@ -10,7 +10,6 @@
 #include <algorithm>
 
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <mfapi.h>
 #include <mfidl.h>
@@ -206,7 +205,7 @@ private:
 #ifdef _WIN32
     shared::contracts::Result StartStream(CaptureDeviceType type, const CameraCaptureConfig& camera, const AudioCaptureConfig& audio, VideoFrameCallback video_cb, AudioFrameCallback audio_cb) {
         IMFActivate* activate = nullptr;
-        HRESULT hr = FindDevice(type, type == CaptureDeviceType::Camera ? camera.device_id : audio.device_id, &activate);
+        HRESULT hr = FindDevice(type == CaptureDeviceType::Camera ? camera.device_id : audio.device_id, type, &activate);
         if (FAILED(hr)) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidArgument, "capture device not found");
         IMFMediaSource* source = nullptr;
         hr = activate->ActivateObject(IID_PPV_ARGS(&source));
