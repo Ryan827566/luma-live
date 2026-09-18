@@ -51,8 +51,15 @@ if(WIN32 AND NOT _luma_webrtc_enabled AND
      EXISTS "${LUMALIVE_WEBRTC_OUT}/obj/webrtc.lib")
     set(_luma_webrtc_enabled TRUE)
     target_compile_definitions(luma_client_webrtc PUBLIC LUMALIVE_HAS_WEBRTC=1)
+    set(_luma_webrtc_absl "${LUMALIVE_WEBRTC_ROOT}/third_party/abseil-cpp")
+    if(NOT EXISTS "${_luma_webrtc_absl}/absl/strings/string_view.h")
+      message(FATAL_ERROR
+        "WebRTC Abseil headers were not found at ${_luma_webrtc_absl}. "
+        "Set LUMALIVE_WEBRTC_ROOT to the root of the WebRTC checkout (the directory containing api/ and third_party/).")
+    endif()
     target_include_directories(luma_client_webrtc PUBLIC
-      "${LUMALIVE_WEBRTC_ROOT}")
+      "${LUMALIVE_WEBRTC_ROOT}"
+      "${_luma_webrtc_absl}")
     target_link_libraries(luma_client_webrtc PRIVATE
       "${LUMALIVE_WEBRTC_OUT}/obj/webrtc.lib"
       ws2_32 winmm dmoguids msdmo wmcodecdspuuid)
