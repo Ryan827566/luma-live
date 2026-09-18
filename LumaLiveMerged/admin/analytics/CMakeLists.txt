@@ -1,0 +1,6 @@
+add_library(luma_admin_analytics STATIC src/AdminAnalyticsService.cpp)
+target_include_directories(luma_admin_analytics PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_admin_analytics PUBLIC cxx_std_20)
+add_executable(luma_admin_analytics_tests tests/AdminAnalyticsServiceTests.cpp)
+target_link_libraries(luma_admin_analytics_tests PRIVATE luma_admin_analytics)
+add_test(NAME luma_admin_analytics_tests COMMAND luma_admin_analytics_tests)

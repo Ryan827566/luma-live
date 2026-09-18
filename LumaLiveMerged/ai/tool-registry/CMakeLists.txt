@@ -1,0 +1,4 @@
+add_library(luma_tool_registry STATIC src/ToolRegistryImpl.cpp)
+target_include_directories(luma_tool_registry PUBLIC include)
+target_link_libraries(luma_tool_registry PUBLIC luma_shared)
+target_compile_features(luma_tool_registry PUBLIC cxx_std_20)

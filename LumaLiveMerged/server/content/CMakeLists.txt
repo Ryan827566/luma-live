@@ -1,0 +1,6 @@
+add_library(luma_server_content STATIC src/ContentService.cpp)
+target_include_directories(luma_server_content PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_server_content PUBLIC cxx_std_20)
+add_executable(luma_server_content_tests tests/ContentServiceTests.cpp)
+target_link_libraries(luma_server_content_tests PRIVATE luma_server_content)
+add_test(NAME luma_server_content_tests COMMAND luma_server_content_tests)

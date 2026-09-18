@@ -1,0 +1,16 @@
+add_library(luma_client_media_pipeline STATIC src/MediaPipelineService.cpp src/DeviceCaptureService.cpp src/MediaCaptureSession.cpp)
+target_include_directories(luma_client_media_pipeline PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+if(WIN32)
+  target_link_libraries(luma_client_media_pipeline PRIVATE mfplat mfuuid mfreadwrite ole32)
+endif()
+target_compile_features(luma_client_media_pipeline PUBLIC cxx_std_20)
+
+add_executable(luma_client_media_pipeline_tests tests/MediaPipelineServiceTests.cpp)
+target_link_libraries(luma_client_media_pipeline_tests PRIVATE luma_client_media_pipeline)
+target_compile_features(luma_client_media_pipeline_tests PRIVATE cxx_std_20)
+add_test(NAME luma_client_media_pipeline_tests COMMAND luma_client_media_pipeline_tests)
+
+add_executable(luma_device_capture_tests tests/DeviceCaptureServiceTests.cpp)
+target_link_libraries(luma_device_capture_tests PRIVATE luma_client_media_pipeline)
+target_compile_features(luma_device_capture_tests PRIVATE cxx_std_20)
+add_test(NAME luma_device_capture_tests COMMAND luma_device_capture_tests)

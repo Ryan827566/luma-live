@@ -1,0 +1,6 @@
+add_library(luma_adapters_websocket STATIC src/WebSocketAdapterService.cpp)
+target_include_directories(luma_adapters_websocket PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_adapters_websocket PUBLIC cxx_std_20)
+add_executable(luma_adapters_websocket_tests tests/WebSocketAdapterServiceTests.cpp)
+target_link_libraries(luma_adapters_websocket_tests PRIVATE luma_adapters_websocket)
+add_test(NAME luma_adapters_websocket_tests COMMAND luma_adapters_websocket_tests)

@@ -1,0 +1,6 @@
+add_library(luma_admin_auth STATIC src/AdminAuthService.cpp)
+target_include_directories(luma_admin_auth PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_admin_auth PUBLIC cxx_std_20)
+add_executable(luma_admin_auth_tests tests/AdminAuthServiceTests.cpp)
+target_link_libraries(luma_admin_auth_tests PRIVATE luma_admin_auth)
+add_test(NAME luma_admin_auth_tests COMMAND luma_admin_auth_tests)

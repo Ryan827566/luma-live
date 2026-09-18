@@ -1,0 +1,4 @@
+add_library(luma_memory STATIC src/MemoryStoreImpl.cpp)
+target_include_directories(luma_memory PUBLIC include)
+target_link_libraries(luma_memory PUBLIC luma_shared)
+target_compile_features(luma_memory PUBLIC cxx_std_20)

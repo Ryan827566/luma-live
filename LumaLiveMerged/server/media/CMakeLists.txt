@@ -1,0 +1,4 @@
+add_library(luma_server_media STATIC src/MediaServiceImpl.cpp)
+target_include_directories(luma_server_media PUBLIC include)
+target_link_libraries(luma_server_media PUBLIC luma_shared)
+target_compile_features(luma_server_media PUBLIC cxx_std_20)

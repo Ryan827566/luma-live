@@ -1,0 +1,6 @@
+add_library(luma_ai_analytics STATIC src/AiAnalyticsService.cpp)
+target_include_directories(luma_ai_analytics PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_ai_analytics PUBLIC cxx_std_20)
+add_executable(luma_ai_analytics_tests tests/AiAnalyticsServiceTests.cpp)
+target_link_libraries(luma_ai_analytics_tests PRIVATE luma_ai_analytics)
+add_test(NAME luma_ai_analytics_tests COMMAND luma_ai_analytics_tests)

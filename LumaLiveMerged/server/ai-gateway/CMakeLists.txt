@@ -1,0 +1,4 @@
+add_library(luma_ai_gateway STATIC src/AiGatewayServiceImpl.cpp)
+target_include_directories(luma_ai_gateway PUBLIC include)
+target_link_libraries(luma_ai_gateway PUBLIC luma_shared)
+target_compile_features(luma_ai_gateway PUBLIC cxx_std_20)

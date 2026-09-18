@@ -1,0 +1,6 @@
+add_library(luma_adapters_stun_turn STATIC src/StunTurnAdapterService.cpp)
+target_include_directories(luma_adapters_stun_turn PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_adapters_stun_turn PUBLIC cxx_std_20)
+add_executable(luma_adapters_stun_turn_tests tests/StunTurnAdapterServiceTests.cpp)
+target_link_libraries(luma_adapters_stun_turn_tests PRIVATE luma_adapters_stun_turn)
+add_test(NAME luma_adapters_stun_turn_tests COMMAND luma_adapters_stun_turn_tests)

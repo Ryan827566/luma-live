@@ -1,0 +1,6 @@
+add_library(luma_client_studio_copilot STATIC src/StudioCopilotService.cpp)
+target_include_directories(luma_client_studio_copilot PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_client_studio_copilot PUBLIC cxx_std_20)
+add_executable(luma_client_studio_copilot_tests tests/StudioCopilotServiceTests.cpp)
+target_link_libraries(luma_client_studio_copilot_tests PRIVATE luma_client_studio_copilot)
+add_test(NAME luma_client_studio_copilot_tests COMMAND luma_client_studio_copilot_tests)

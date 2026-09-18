@@ -1,0 +1,4 @@
+add_library(luma_connect STATIC src/ConnectServiceImpl.cpp)
+target_include_directories(luma_connect PUBLIC include)
+target_link_libraries(luma_connect PUBLIC luma_shared)
+target_compile_features(luma_connect PUBLIC cxx_std_20)

@@ -1,0 +1,4 @@
+add_library(luma_moderation STATIC src/ModerationServiceImpl.cpp)
+target_include_directories(luma_moderation PUBLIC include)
+target_link_libraries(luma_moderation PUBLIC luma_shared)
+target_compile_features(luma_moderation PUBLIC cxx_std_20)
