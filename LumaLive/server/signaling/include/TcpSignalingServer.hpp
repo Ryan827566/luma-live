@@ -32,6 +32,7 @@ private:
     std::atomic<bool> running_{false};
     std::thread accept_thread_;
     mutable std::mutex mutex_;
+    mutable std::mutex send_mutex_;
     std::unordered_map<int, Client> clients_;
     std::unordered_map<std::string, std::unordered_set<std::string>> rooms_;
 };
