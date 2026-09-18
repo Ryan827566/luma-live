@@ -7,20 +7,41 @@ LivePublishSession::LivePublishSession() = default;
 LivePublishSession::~LivePublishSession(){Stop();}
 std::string LivePublishSession::LastError() const { std::lock_guard lock(mutex_); return last_error_; }
 bool LivePublishSession::Start(const LivePublishConfig& cfg){
-    if(running_) return false; if(cfg.room_id.empty()||cfg.peer_id.empty()) return false;
-    room_id_=cfg.room_id; peer_id_=cfg.peer_id;
-    capture_=luma::client::media::CreateDeviceCaptureService(); pipeline_=luma::client::media::pipeline::CreateMediaPipelineService(); rtc_=std::make_shared<luma::client::webrtc::NativeWebRtcPeerConnection>(); signaling_=std::make_unique<luma::client::signaling::TcpSignalingClient>();
+    std::lock_guard lock(mutex_);
+    if(running_) return false;
+    if(cfg.room_id.empty()||cfg.peer_id.empty()){ last_error_="room_id and peer_id are required"; return false; }
+
+    room_id_=cfg.room_id; peer_id_=cfg.peer_id; remote_peer_id_.clear();
+    capture_=luma::client::media::CreateDeviceCaptureService();
+    pipeline_=luma::client::media::pipeline::CreateMediaPipelineService();
+    rtc_=std::make_shared<luma::client::webrtc::NativeWebRtcPeerConnection>();
+    signaling_=std::make_unique<luma::client::signaling::TcpSignalingClient>();
+
     luma::client::webrtc::WebRtcCallbacks cb;
-    cb.on_local_description=[this](const std::string&type,const std::string&sdp){if(!signaling_)return;luma::contracts::SignalingMessage m;m.type=type=="offer"?luma::contracts::SignalingMessageType::Offer:luma::contracts::SignalingMessageType::Answer;m.room_id=room_id_;m.peer_id=peer_id_;m.target_peer_id=remote_peer_id_;m.sdp=sdp;signaling_->Send(m);};
-    cb.on_local_ice_candidate=[this](const std::string&mid,int line,const std::string&candidate){if(!signaling_)return;luma::contracts::SignalingMessage m;m.type=luma::contracts::SignalingMessageType::IceCandidate;m.room_id=room_id_;m.peer_id=peer_id_;m.target_peer_id=remote_peer_id_;m.value=std::to_string(line);m.candidate=candidate;m.candidate_mid=mid;signaling_->Send(m);};
-    if(!rtc_->Initialize(cfg.rtc,std::move(cb))){last_error_="WebRTC initialization failed";return false;}
+    cb.on_local_description=[this](const std::string&type,const std::string&sdp){
+        if(!signaling_||!signaling_->IsConnected())return;
+        luma::contracts::SignalingMessage m;m.type=type=="offer"?luma::contracts::SignalingMessageType::Offer:luma::contracts::SignalingMessageType::Answer;
+        m.room_id=room_id_;m.peer_id=peer_id_;m.target_peer_id=remote_peer_id_;m.sdp=sdp;signaling_->Send(m);
+    };
+    cb.on_local_ice_candidate=[this](const std::string&mid,int line,const std::string&candidate){
+        if(!signaling_||!signaling_->IsConnected())return;
+        luma::contracts::SignalingMessage m;m.type=luma::contracts::SignalingMessageType::IceCandidate;m.room_id=room_id_;m.peer_id=peer_id_;m.target_peer_id=remote_peer_id_;
+        m.value=std::to_string(line);m.candidate=candidate;m.candidate_mid=mid;signaling_->Send(m);
+    };
+
+    if(!rtc_->Initialize(cfg.rtc,std::move(cb))){last_error_="WebRTC initialization failed";Stop();return false;}
     pipeline_->SetFrameSink(rtc_);
-    if(!signaling_->Connect(cfg.signaling_host,cfg.signaling_port,[this](const auto&m){HandleSignal(m);})){last_error_="signaling connection failed";return false;}
-    luma::contracts::SignalingMessage join;join.type=luma::contracts::SignalingMessageType::JoinRoom;join.room_id=room_id_;join.peer_id=peer_id_;if(!signaling_->Send(join)){last_error_="join room failed";return false;}
-    if(!capture_->Start().IsOk()){last_error_="capture start failed";return false;} if(!pipeline_->Start().success){last_error_="pipeline start failed";return false;}
-    if(!capture_->StartCamera(cfg.camera,[this](auto f){pipeline_->PushVideoFrame(std::move(f));}).IsOk()){last_error_="camera start failed";return false;}
-    if(!capture_->StartMicrophone(cfg.audio,[this](auto f){pipeline_->PushAudioFrame(std::move(f));}).IsOk()){last_error_="microphone start failed";return false;}
-    running_=true; return true;
+    if(!pipeline_->Start().success){last_error_="pipeline start failed";Stop();return false;}
+    if(!capture_->Start().IsOk()){last_error_="capture start failed";Stop();return false;}
+    if(!capture_->StartCamera(cfg.camera,[this](auto f){pipeline_->PushVideoFrame(std::move(f));}).IsOk()){last_error_="camera start failed";Stop();return false;}
+    if(!capture_->StartMicrophone(cfg.audio,[this](auto f){pipeline_->PushAudioFrame(std::move(f));}).IsOk()){last_error_="microphone start failed";Stop();return false;}
+
+    if(!signaling_->Connect(cfg.signaling_host,cfg.signaling_port,[this](const auto&m){HandleSignal(m);})){last_error_="signaling connection failed";Stop();return false;}
+    luma::contracts::SignalingMessage join;join.type=luma::contracts::SignalingMessageType::JoinRoom;join.room_id=room_id_;join.peer_id=peer_id_;
+    if(!signaling_->Send(join)){last_error_="join room failed";Stop();return false;}
+
+    running_=true;
+    return true;
 }
 void LivePublishSession::HandleSignal(const luma::contracts::SignalingMessage&m){
     if(m.room_id!=room_id_)return;
