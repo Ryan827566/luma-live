@@ -5,6 +5,9 @@
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
 #pragma comment(lib,"Ws2_32.lib")
 #else
 #include <arpa/inet.h>
