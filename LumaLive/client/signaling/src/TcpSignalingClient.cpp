@@ -1,4 +1,5 @@
 #include "TcpSignalingClient.hpp"
+#include "runtime-contracts/SignalingWireCodec.hpp"
 #include <cstring>
 #include <vector>
 #ifdef _WIN32
@@ -29,14 +30,6 @@ bool send_all(int s, const std::uint8_t* p, std::size_t n) {
 bool recv_all(int s, std::uint8_t* p, std::size_t n) {
     while (n) { int r = ::recv(s, reinterpret_cast<char*>(p), static_cast<int>(n), 0); if (r <= 0) return false; p += r; n -= static_cast<std::size_t>(r); } return true;
 }
-void put_u32(std::vector<std::uint8_t>& b, std::uint32_t v) { v=htonl(v); auto p=reinterpret_cast<std::uint8_t*>(&v); b.insert(b.end(),p,p+4); }
-void put_u64(std::vector<std::uint8_t>& b, std::uint64_t v) { std::uint32_t hi=htonl(static_cast<std::uint32_t>(v>>32)), lo=htonl(static_cast<std::uint32_t>(v)); auto a=reinterpret_cast<std::uint8_t*>(&hi), c=reinterpret_cast<std::uint8_t*>(&lo); b.insert(b.end(),a,a+4); b.insert(b.end(),c,c+4); }
-void put_s(std::vector<std::uint8_t>& b, const std::string& s) { put_u32(b, static_cast<std::uint32_t>(s.size())); b.insert(b.end(), s.begin(), s.end()); }
-bool get_u32(const std::vector<std::uint8_t>& b,std::size_t& o,std::uint32_t& v){if(o+4>b.size())return false; std::memcpy(&v,b.data()+o,4);o+=4;v=ntohl(v);return true;}
-bool get_u64(const std::vector<std::uint8_t>& b,std::size_t& o,std::uint64_t& v){std::uint32_t hi,lo;if(!get_u32(b,o,hi)||!get_u32(b,o,lo))return false;v=(static_cast<std::uint64_t>(hi)<<32)|lo;return true;}
-bool get_s(const std::vector<std::uint8_t>& b,std::size_t& o,std::string& s){std::uint32_t n;if(!get_u32(b,o,n)||o+n>b.size())return false;s.assign(reinterpret_cast<const char*>(b.data()+o),n);o+=n;return true;}
-std::vector<std::uint8_t> encode(const luma::contracts::SignalingMessage& m){std::vector<std::uint8_t>b; b.reserve(64+m.room_id.size()+m.peer_id.size()+m.target_peer_id.size()+m.sdp.size()+m.candidate.size()+m.value.size()); b.push_back(static_cast<std::uint8_t>(m.type)); put_u64(b,static_cast<std::uint64_t>(m.sequence)); put_s(b,m.room_id);put_s(b,m.peer_id);put_s(b,m.target_peer_id);put_s(b,m.sdp);put_s(b,m.candidate);put_s(b,m.value);return b;}
-bool decode(const std::vector<std::uint8_t>&b,luma::contracts::SignalingMessage&m){std::size_t o=0; if(b.size()<9)return false;m.type=static_cast<luma::contracts::SignalingMessageType>(b[o++]);std::uint64_t seq;if(!get_u64(b,o,seq))return false;m.sequence=static_cast<std::int64_t>(seq);return get_s(b,o,m.room_id)&&get_s(b,o,m.peer_id)&&get_s(b,o,m.target_peer_id)&&get_s(b,o,m.sdp)&&get_s(b,o,m.candidate)&&get_s(b,o,m.candidate_mid)&&get_s(b,o,m.value)&&o==b.size();}
 }
 
 namespace luma::client::signaling {
@@ -49,7 +42,25 @@ bool TcpSignalingClient::Connect(const std::string& host,std::uint16_t port,Mess
     for(auto* p=res;p;p=p->ai_next){ int s=static_cast<int>(::socket(p->ai_family,p->ai_socktype,p->ai_protocol)); if(s<0) continue; if(::connect(s,p->ai_addr,static_cast<socket_len_t>(p->ai_addrlen))==0){socket_=s;break;} close_socket(s); }
     freeaddrinfo(res); if(socket_<0)return false; connected_=true; receive_thread_=std::thread(&TcpSignalingClient::ReceiveLoop,this); return true;
 }
-bool TcpSignalingClient::Send(const luma::contracts::SignalingMessage&m){if(!connected_)return false;auto payload=encode(m);if(payload.size()>16*1024*1024)return false;std::uint32_t n=htonl(static_cast<std::uint32_t>(payload.size()));return send_all(socket_,reinterpret_cast<std::uint8_t*>(&n),4)&&send_all(socket_,payload.data(),payload.size());}
-void TcpSignalingClient::ReceiveLoop(){while(connected_){std::uint32_t n=0;if(!recv_all(socket_,reinterpret_cast<std::uint8_t*>(&n),4))break;n=ntohl(n);if(n==0||n>16*1024*1024)break;std::vector<std::uint8_t>b(n);if(!recv_all(socket_,b.data(),b.size()))break;luma::contracts::SignalingMessage m;if(decode(b,m)&&handler_)handler_(m);}connected_=false;}
+bool TcpSignalingClient::Send(const luma::contracts::SignalingMessage&m){
+    if(!connected_)return false;
+    auto payload=luma::contracts::wire::encode(m);
+    if(payload.size()>16*1024*1024)return false;
+    std::uint32_t n=htonl(static_cast<std::uint32_t>(payload.size()));
+    return send_all(socket_,reinterpret_cast<std::uint8_t*>(&n),4)&&send_all(socket_,payload.data(),payload.size());
+}
+void TcpSignalingClient::ReceiveLoop(){
+    while(connected_){
+        std::uint32_t n=0;
+        if(!recv_all(socket_,reinterpret_cast<std::uint8_t*>(&n),4))break;
+        n=ntohl(n);
+        if(n==0||n>16*1024*1024)break;
+        std::vector<std::uint8_t>b(n);
+        if(!recv_all(socket_,b.data(),b.size()))break;
+        luma::contracts::SignalingMessage m;
+        if(luma::contracts::wire::decode(b,m)&&handler_)handler_(m);
+    }
+    connected_=false;
+}
 void TcpSignalingClient::Close(){if(!connected_&&socket_<0){if(receive_thread_.joinable())receive_thread_.join();return;}connected_=false;if(socket_>=0){shutdown(socket_,2);close_socket(socket_);socket_=-1;}if(receive_thread_.joinable())receive_thread_.join();}
 }
