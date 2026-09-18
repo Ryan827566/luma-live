@@ -1,3 +1,4 @@
+#include <vector>
 #include "TcpSignalingServer.hpp"
 #include "runtime-contracts/SignalingWireCodec.hpp"
 #include <algorithm>
