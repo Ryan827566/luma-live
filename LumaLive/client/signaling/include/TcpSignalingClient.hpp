@@ -3,6 +3,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -23,6 +24,7 @@ private:
     std::atomic<bool> connected_{false};
     std::thread receive_thread_;
     MessageHandler handler_;
+    mutable std::mutex send_mutex_;
 };
 
 } // namespace luma::client::signaling
