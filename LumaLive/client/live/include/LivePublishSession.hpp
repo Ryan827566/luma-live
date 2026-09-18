@@ -30,6 +30,7 @@ public:
     std::string LastError() const;
 private:
     void HandleSignal(const luma::contracts::SignalingMessage& message);
+    void Cleanup();
     std::unique_ptr<luma::client::media::IDeviceCaptureService> capture_;
     std::unique_ptr<luma::client::media::pipeline::IMediaPipelineService> pipeline_;
     std::shared_ptr<luma::client::webrtc::NativeWebRtcPeerConnection> rtc_;
