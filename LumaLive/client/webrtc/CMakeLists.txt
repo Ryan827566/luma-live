@@ -34,14 +34,14 @@ if(WIN32 AND LUMALIVE_WEBRTC_SDK_ROOT)
     target_compile_definitions(luma_client_webrtc PUBLIC LUMALIVE_HAS_WEBRTC=1)
     target_include_directories(luma_client_webrtc PUBLIC
       "${LUMALIVE_WEBRTC_SDK_ROOT}/include")
-    target_link_libraries(luma_client_webrtc PUBLIC
-      "${_luma_webrtc_lib}"
-      ws2_32 winmm dmoguids msdmo wmcodecdspuuid)
     if(MSVC)
-      # WebRTC's GN //:webrtc target is a complete static library. Keep the
-      # complete archive visible to final executables that consume
-      # luma_client_webrtc, avoiding MSVC archive extraction/order issues.
-      target_link_options(luma_client_webrtc INTERFACE "/WHOLEARCHIVE:${_luma_webrtc_lib}")
+      target_link_libraries(luma_client_webrtc PUBLIC
+        "$<LINK_LIBRARY:WHOLE_ARCHIVE,${_luma_webrtc_lib}>"
+        ws2_32 winmm dmoguids msdmo wmcodecdspuuid)
+    else()
+      target_link_libraries(luma_client_webrtc PUBLIC
+        "${_luma_webrtc_lib}"
+        ws2_32 winmm dmoguids msdmo wmcodecdspuuid)
     endif()
     message(STATUS "LumaLive: using prebuilt WebRTC SDK: ${LUMALIVE_WEBRTC_SDK_ROOT}")
   else()
@@ -70,14 +70,14 @@ if(WIN32 AND NOT _luma_webrtc_enabled AND
       "${LUMALIVE_WEBRTC_ROOT}"
       "${_luma_webrtc_absl}")
     set(_luma_webrtc_lib "${LUMALIVE_WEBRTC_OUT}/obj/webrtc.lib")
-    target_link_libraries(luma_client_webrtc PUBLIC
-      "${_luma_webrtc_lib}"
-      ws2_32 winmm dmoguids msdmo wmcodecdspuuid)
     if(MSVC)
-      # The GN //:webrtc target is built with complete_static_lib=true.
-      # Propagate the archive to final consumers and force complete extraction
-      # so luma_publisher/luma_studio do not lose WebRTC objects at final link.
-      target_link_options(luma_client_webrtc INTERFACE "/WHOLEARCHIVE:${_luma_webrtc_lib}")
+      target_link_libraries(luma_client_webrtc PUBLIC
+        "$<LINK_LIBRARY:WHOLE_ARCHIVE,${_luma_webrtc_lib}>"
+        ws2_32 winmm dmoguids msdmo wmcodecdspuuid)
+    else()
+      target_link_libraries(luma_client_webrtc PUBLIC
+        "${_luma_webrtc_lib}"
+        ws2_32 winmm dmoguids msdmo wmcodecdspuuid)
     endif()
     message(STATUS "LumaLive: using GN WebRTC build: ${LUMALIVE_WEBRTC_OUT}/obj/webrtc.lib")
   else()
