@@ -1,5 +1,8 @@
 add_library(luma_client_webrtc STATIC src/WebRtcClientService.cpp src/NativeWebRtcPeerConnection.cpp)
-target_include_directories(luma_client_webrtc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(luma_client_webrtc PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/../media-pipeline/include
+)
 target_compile_features(luma_client_webrtc PUBLIC cxx_std_20)
 
 # Optional native WebRTC integration.
