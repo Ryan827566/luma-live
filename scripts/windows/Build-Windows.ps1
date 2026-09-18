@@ -1,46 +1,19 @@
 $ErrorActionPreference = 'Stop'
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Root = Join-Path $RepoRoot 'LumaLive'
+$WebRtcSdkRoot = Join-Path $RepoRoot 'third_party\webrtc\windows-x64'
 Set-Location $Root
 
-$WebRtcRoot = $env:LUMALIVE_WEBRTC_ROOT
-$WebRtcOut  = $env:LUMALIVE_WEBRTC_OUT
-if (-not $WebRtcRoot) {
-    $candidate = 'D:\project\luma-live\LumaLive_Environment_Installer\third_party\src'
-    if (Test-Path (Join-Path $candidate 'api\peer_connection_interface.h')) { $WebRtcRoot = $candidate }
-}
-if (-not $WebRtcOut -and $WebRtcRoot) {
-    $candidateOut = Join-Path $WebRtcRoot 'out\Release'
-    if (Test-Path (Join-Path $candidateOut 'obj\webrtc.lib')) { $WebRtcOut = $candidateOut }
+$WebRtcHeader = Join-Path $WebRtcSdkRoot 'include\api\peer_connection_interface.h'
+$WebRtcLib = Join-Path $WebRtcSdkRoot 'lib\webrtc.lib'
+
+if (-not (Test-Path $WebRtcHeader) -or -not (Test-Path $WebRtcLib)) {
+    throw "Vendored WebRTC SDK is missing. Expected files under $WebRtcSdkRoot. Run scripts\windows\Import-WebRTC-SDK.ps1 once to import the existing WebRTC build into this repository."
 }
 
-if (-not $WebRtcRoot -or -not (Test-Path (Join-Path $WebRtcRoot 'api\peer_connection_interface.h'))) {
-    throw 'WebRTC source was not found. Set LUMALIVE_WEBRTC_ROOT to the WebRTC checkout root.'
-}
-if (-not $WebRtcOut -or -not (Test-Path (Join-Path $WebRtcOut 'obj\webrtc.lib'))) {
-    throw 'WebRTC library was not found. Build the WebRTC GN target //:webrtc first (obj\webrtc.lib).' 
-}
-
-$ninjaPath = $null
-$autoninja = Get-Command autoninja.exe -ErrorAction SilentlyContinue
-if ($autoninja) {
-    $ninjaPath = $autoninja.Source
-} else {
-    $localNinja = Join-Path $RepoRoot 'LumaLive_Environment_Installer\third_party\ninja\ninja.exe'
-    if (Test-Path $localNinja) { $ninjaPath = $localNinja }
-}
-if ($ninjaPath) {
-    Write-Host 'Checking existing WebRTC build (incremental; no rebuild when up-to-date)...' -ForegroundColor Cyan
-    & $ninjaPath -C $WebRtcOut webrtc
-    if ($LASTEXITCODE -ne 0) { throw 'Incremental WebRTC build failed.' }
-} else {
-    Write-Warning 'Ninja/autoninja was not found; using the existing WebRTC library without refreshing it.'
-}
-
-Write-Host "WebRTC source: $WebRtcRoot" -ForegroundColor DarkGray
-Write-Host "WebRTC output: $WebRtcOut" -ForegroundColor DarkGray
+Write-Host "Using repository WebRTC SDK: $WebRtcSdkRoot" -ForegroundColor Cyan
 Write-Host 'Configuring LumaLive with Visual Studio 2026 x64...' -ForegroundColor Cyan
-cmake --preset windows-vs2026-x64 -DLUMALIVE_WEBRTC_ROOT="$WebRtcRoot" -DLUMALIVE_WEBRTC_OUT="$WebRtcOut"
+cmake --preset windows-vs2026-x64 -DLUMALIVE_WEBRTC_SDK_ROOT="$WebRtcSdkRoot"
 if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed.' }
 
 cmake --build --preset windows-vs2026-release --parallel
