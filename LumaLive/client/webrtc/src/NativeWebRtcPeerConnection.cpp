@@ -20,9 +20,9 @@
 namespace luma::client::webrtc {
 namespace {
 
-class LocalVideoSource final : public ::webrtc::Notifier<::webrtc::VideoTrackSourceInterface> {
+class LocalVideoSource : public ::webrtc::Notifier<::webrtc::VideoTrackSourceInterface> {
 public:
-    static ::webrtc::scoped_refptr<LocalVideoSource> Create() { return new ::webrtc::RefCountedObject<LocalVideoSource>(); }
+    static ::webrtc::scoped_refptr<LocalVideoSource> Create() { return ::webrtc::scoped_refptr<LocalVideoSource>(new ::webrtc::RefCountedObject<LocalVideoSource>()); }
     ::webrtc::MediaSourceInterface::SourceState state() const override { return state_; }
     bool remote() const override { return false; }
     void RegisterObserver(::webrtc::ObserverInterface* o) override { observers_.insert(o); }
@@ -32,6 +32,10 @@ public:
     bool is_screencast() const override { return false; }
     std::optional<bool> needs_denoising() const override { return std::nullopt; }
     bool GetStats(::webrtc::VideoTrackSourceInterface::Stats* stats) override { if (!stats || width_ == 0) return false; stats->input_width=width_; stats->input_height=height_; return true; }
+    bool SupportsEncodedOutput() const override { return false; }
+    void GenerateKeyFrame() override {}
+    void AddEncodedSink(::webrtc::VideoSinkInterface<::webrtc::RecordableEncodedFrame>*) override {}
+    void RemoveEncodedSink(::webrtc::VideoSinkInterface<::webrtc::RecordableEncodedFrame>*) override {}
     void Push(const ::webrtc::VideoFrame& frame) { width_=frame.width(); height_=frame.height(); broadcaster_.OnFrame(frame); }
 private:
     ::webrtc::VideoBroadcaster broadcaster_;
@@ -40,7 +44,7 @@ private:
     int width_{0}, height_{0};
 };
 
-class LocalAudioSource final : public ::webrtc::Notifier<::webrtc::AudioSourceInterface> {
+class LocalAudioSource : public ::webrtc::Notifier<::webrtc::AudioSourceInterface> {
 public:
     ::webrtc::MediaSourceInterface::SourceState state() const override { return ::webrtc::MediaSourceInterface::kLive; }
     bool remote() const override { return false; }
@@ -54,7 +58,7 @@ private:
     std::set<::webrtc::AudioTrackSinkInterface*> sinks_;
 };
 
-class DescriptionObserver final : public ::webrtc::CreateSessionDescriptionObserver {
+class DescriptionObserver : public ::webrtc::CreateSessionDescriptionObserver {
 public:
     explicit DescriptionObserver(std::function<void(::webrtc::SessionDescriptionInterface*)> ok,std::function<void(const std::string&)> fail):ok_(std::move(ok)),fail_(std::move(fail)){}
     void OnSuccess(::webrtc::SessionDescriptionInterface* d) override { ok_(d); }
@@ -62,7 +66,7 @@ public:
 protected: ~DescriptionObserver() override = default;
 private: std::function<void(::webrtc::SessionDescriptionInterface*)> ok_; std::function<void(const std::string&)> fail_;
 };
-class SetObserver final : public ::webrtc::SetSessionDescriptionObserver {
+class SetObserver : public ::webrtc::SetSessionDescriptionObserver {
 public:
     explicit SetObserver(std::function<void()> ok,std::function<void(const std::string&)> fail):ok_(std::move(ok)),fail_(std::move(fail)){}
     void OnSuccess() override {ok_();}
@@ -71,7 +75,7 @@ protected: ~SetObserver() override = default;
 private: std::function<void()> ok_; std::function<void(const std::string&)> fail_;
 };
 
-class PcObserver final : public ::webrtc::PeerConnectionObserver {
+class PcObserver : public ::webrtc::PeerConnectionObserver {
 public:
     explicit PcObserver(WebRtcCallbacks& cb):cb_(cb){}
     void OnSignalingChange(::webrtc::PeerConnectionInterface::SignalingState) override {}
@@ -130,7 +134,7 @@ bool NativeWebRtcPeerConnection::CreateOffer(){
                                 if(impl_->cb.on_local_description)
                                     impl_->cb.on_local_description("offer",sdp);
                             },
-                            [](const std::string&){})),
+                            [](const std::string&){}),
                     d);
             },
             [](const std::string&){}));
