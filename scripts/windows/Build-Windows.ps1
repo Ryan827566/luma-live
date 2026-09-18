@@ -6,7 +6,7 @@ Set-Location $Root
 $WebRtcRoot = $env:LUMALIVE_WEBRTC_ROOT
 $WebRtcOut  = $env:LUMALIVE_WEBRTC_OUT
 if (-not $WebRtcRoot) {
-    $candidate = 'D:\project\luma\LumaLive_Environment_Installer\third_party\src'
+    $candidate = 'D:\project\luma-live\LumaLive_Environment_Installer\third_party\src'
     if (Test-Path (Join-Path $candidate 'api\peer_connection_interface.h')) { $WebRtcRoot = $candidate }
 }
 if (-not $WebRtcOut -and $WebRtcRoot) {
@@ -35,5 +35,5 @@ ctest --test-dir build\vs2026-x64 -C Release --output-on-failure
 if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
 
 Write-Host 'Build and tests completed.' -ForegroundColor Green
-Write-Host 'Studio: build\vs2026-x64\apps\luma-studio\Release\luma_studio.exe'
+Write-Host 'Final artifacts: output\Release'
 Write-Host 'Server: build\vs2026-x64\apps\luma-server\Release\luma_server.exe'
