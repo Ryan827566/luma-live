@@ -28,7 +28,18 @@ struct AudioFrame {
     std::vector<std::uint8_t> data;
 
     bool IsValid() const noexcept {
-        return sample_rate > 0 && channels > 0 && !data.empty();
+        if (sample_rate == 0 || channels == 0 || data.empty()) return false;
+
+        std::size_t bytes_per_sample = 0;
+        switch (format) {
+        case AudioSampleFormat::S16: bytes_per_sample = sizeof(std::int16_t); break;
+        case AudioSampleFormat::S32: bytes_per_sample = sizeof(std::int32_t); break;
+        case AudioSampleFormat::Float32: bytes_per_sample = sizeof(float); break;
+        default: return false;
+        }
+
+        const std::size_t bytes_per_frame = bytes_per_sample * channels;
+        return bytes_per_frame != 0 && data.size() % bytes_per_frame == 0;
     }
 };
 
