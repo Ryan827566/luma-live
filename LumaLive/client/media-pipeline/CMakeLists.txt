@@ -4,7 +4,7 @@ target_include_directories(luma_client_media_pipeline PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/../../shared
 )
 if(WIN32)
-  target_link_libraries(luma_client_media_pipeline PRIVATE mfplat mfuuid mfreadwrite ole32)
+  target_link_libraries(luma_client_media_pipeline PUBLIC mfplat mfuuid mfreadwrite ole32)
 endif()
 target_compile_features(luma_client_media_pipeline PUBLIC cxx_std_20)
 
