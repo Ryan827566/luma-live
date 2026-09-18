@@ -43,6 +43,7 @@ bool TcpSignalingClient::Connect(const std::string& host,std::uint16_t port,Mess
     freeaddrinfo(res); if(socket_<0)return false; connected_=true; receive_thread_=std::thread(&TcpSignalingClient::ReceiveLoop,this); return true;
 }
 bool TcpSignalingClient::Send(const luma::contracts::SignalingMessage&m){
+    std::lock_guard lock(send_mutex_);
     if(!connected_)return false;
     auto payload=luma::contracts::wire::encode(m);
     if(payload.size()>16*1024*1024)return false;
