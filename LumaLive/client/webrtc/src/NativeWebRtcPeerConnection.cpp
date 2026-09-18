@@ -137,7 +137,7 @@ bool NativeWebRtcPeerConnection::CreateOffer(){
                             [](const std::string&){}),
                     d);
             },
-            [](const std::string&){}));
+            [](const std::string&){});
     impl_->pc->CreateOffer(obs,::webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
     return true;
 }
@@ -154,10 +154,10 @@ bool NativeWebRtcPeerConnection::CreateAnswer(){
                                 if(impl_->cb.on_local_description)
                                     impl_->cb.on_local_description("answer",sdp);
                             },
-                            [](const std::string&){})),
+                            [](const std::string&){}),
                     d);
             },
-            [](const std::string&){}));
+            [](const std::string&){});
     impl_->pc->CreateAnswer(obs,::webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
     return true;
 }
