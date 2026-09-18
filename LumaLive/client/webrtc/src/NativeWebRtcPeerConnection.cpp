@@ -21,7 +21,7 @@ namespace {
 
 class LocalVideoSource final : public ::webrtc::Notifier<::webrtc::VideoTrackSourceInterface> {
 public:
-    static ::webrtc::scoped_refptr<LocalVideoSource> Create() { return ::webrtc::scoped_refptr<LocalVideoSource>(new LocalVideoSource)(); }
+    static ::webrtc::scoped_refptr<LocalVideoSource> Create() { return ::webrtc::scoped_refptr<LocalVideoSource>(new LocalVideoSource()); }
     ::webrtc::MediaSourceInterface::SourceState state() const override { return state_; }
     bool remote() const override { return false; }
     void RegisterObserver(::webrtc::ObserverInterface* o) override { observers_.insert(o); }
@@ -106,7 +106,7 @@ bool NativeWebRtcPeerConnection::Initialize(const luma::contracts::PeerConnectio
     ::webrtc::PeerConnectionFactoryDependencies deps; deps.env=::webrtc::CreateEnvironment(); ::webrtc::EnableMediaWithDefaults(deps); impl_->factory=::webrtc::CreateModularPeerConnectionFactory(std::move(deps)); if(!impl_->factory)return false;
     ::webrtc::PeerConnectionInterface::RTCConfiguration rtc_config; rtc_config.sdp_semantics=::webrtc::SdpSemantics::kUnifiedPlan; for(const auto& url:config.stun_servers){::webrtc::PeerConnectionInterface::IceServer s;s.urls.push_back(url);rtc_config.servers.push_back(s);} if(!config.turn_url.empty()){::webrtc::PeerConnectionInterface::IceServer s;s.urls.push_back(config.turn_url);s.username=config.turn_username;s.password=config.turn_password;rtc_config.servers.push_back(s);}
     ::webrtc::PeerConnectionDependencies pdeps(impl_->observer.get()); auto result=impl_->factory->CreatePeerConnectionOrError(rtc_config,std::move(pdeps)); if(!result.ok())return false; impl_->pc=result.MoveValue();
-    impl_->video_source=LocalVideoSource::Create(); impl_->audio_source=::webrtc::scoped_refptr<LocalAudioSource>(new LocalAudioSource)(); auto vt=impl_->factory->CreateVideoTrack(impl_->video_source,"luma-video"); auto at=impl_->factory->CreateAudioTrack("luma-audio",impl_->audio_source.get()); if(!vt||!at)return false; if(!impl_->pc->AddTrack(vt,{"luma-stream"}).ok()||!impl_->pc->AddTrack(at,{"luma-stream"}).ok())return false; return true;
+    impl_->video_source=LocalVideoSource::Create(); impl_->audio_source=::webrtc::scoped_refptr<LocalAudioSource>(new LocalAudioSource()); auto vt=impl_->factory->CreateVideoTrack(impl_->video_source,"luma-video"); auto at=impl_->factory->CreateAudioTrack("luma-audio",impl_->audio_source.get()); if(!vt||!at)return false; if(!impl_->pc->AddTrack(vt,{"luma-stream"}).ok()||!impl_->pc->AddTrack(at,{"luma-stream"}).ok())return false; return true;
 }
 bool NativeWebRtcPeerConnection::AddVideoFrame(const luma::client::media::pipeline::VideoFrame& f){
     if(!impl_->video_source||f.width==0||f.height==0||((f.width&1u)!=0)||((f.height&1u)!=0)) return false;
@@ -119,9 +119,9 @@ bool NativeWebRtcPeerConnection::AddVideoFrame(const luma::client::media::pipeli
 bool NativeWebRtcPeerConnection::AddAudioFrame(const luma::client::media::pipeline::AudioFrame& f){if(!impl_->audio_source||f.format!=luma::client::media::pipeline::AudioSampleFormat::S16||f.sample_rate<=0||f.channels==0)return false; const std::size_t bytes_per_sample=2; const std::size_t frames=f.data.size()/(bytes_per_sample*f.channels); if(frames==0)return false; impl_->audio_source->Push(f.data.data(),16,f.sample_rate,f.channels,frames); return true;}
 bool NativeWebRtcPeerConnection::CreateOffer(){
     if(!impl_->pc) return false;
-    auto obs=::webrtc::scoped_refptr<DescriptionObserver>(new DescriptionObserver)([this](auto*d){
+    auto obs=::webrtc::scoped_refptr<DescriptionObserver>(new DescriptionObserver([this](auto*d){
         std::string sdp; if(!d->ToString(&sdp)) return;
-        impl_->pc->SetLocalDescription(::webrtc::scoped_refptr<SetObserver>(new SetObserver)([this,sdp](){ if(impl_->cb.on_local_description) impl_->cb.on_local_description("offer",sdp); },[](const std::string&){}),d);
+        impl_->pc->SetLocalDescription(::webrtc::scoped_refptr<SetObserver>(new SetObserver([this,sdp](){ if(impl_->cb.on_local_description) impl_->cb.on_local_description("offer",sdp); },[](const std::string&){}),d);
     },[](const std::string&){});
     impl_->pc->CreateOffer(obs.get(),::webrtc::RTCOfferAnswerOptions()); return true;
 }
@@ -133,7 +133,7 @@ bool NativeWebRtcPeerConnection::CreateAnswer(){
     },[](const std::string&){});
     impl_->pc->CreateAnswer(obs.get(),::webrtc::RTCOfferAnswerOptions()); return true;
 }
-bool NativeWebRtcPeerConnection::SetRemoteDescription(const std::string& type,const std::string&sdp){if(!impl_->pc)return false;::webrtc::SdpType t; if(type=="offer")t=::webrtc::SdpType::kOffer;else if(type=="answer")t=::webrtc::SdpType::kAnswer;else return false;::webrtc::SdpParseError e;auto d=::webrtc::CreateSessionDescription(t,sdp,&e);if(!d)return false;impl_->pc->SetRemoteDescription(::webrtc::scoped_refptr<SetObserver>(new SetObserver)([](){},[](const std::string&){}),d.release());return true;}
+bool NativeWebRtcPeerConnection::SetRemoteDescription(const std::string& type,const std::string&sdp){if(!impl_->pc)return false;::webrtc::SdpType t; if(type=="offer")t=::webrtc::SdpType::kOffer;else if(type=="answer")t=::webrtc::SdpType::kAnswer;else return false;::webrtc::SdpParseError e;auto d=::webrtc::CreateSessionDescription(t,sdp,&e);if(!d)return false;impl_->pc->SetRemoteDescription(::webrtc::scoped_refptr<SetObserver>(new SetObserver([](){},[](const std::string&){}),d.release());return true;}
 bool NativeWebRtcPeerConnection::AddRemoteIceCandidate(const std::string&mid,int mline,const std::string&candidate){if(!impl_->pc)return false;::webrtc::SdpParseError e;std::unique_ptr<::webrtc::IceCandidate> c(::webrtc::CreateIceCandidate(mid,mline,candidate,&e));return c&&impl_->pc->AddIceCandidate(c.get());}
 void NativeWebRtcPeerConnection::Close(){if(impl_&&impl_->pc){impl_->pc->Close();impl_->pc=nullptr;}if(impl_){impl_->factory=nullptr;impl_->video_source=nullptr;impl_->audio_source=nullptr;impl_->observer.reset();}}
 bool NativeWebRtcPeerConnection::IsInitialized()const noexcept{return impl_&&impl_->pc!=nullptr;}
