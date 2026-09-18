@@ -5,9 +5,12 @@
 #include "api/enable_media_with_defaults.h"
 #include "api/environment/environment_factory.h"
 #include "api/media_stream_interface.h"
+#include "api/notifier.h"
+#include "api/scoped_refptr.h"
 #include "api/peer_connection_interface.h"
 #include "api/video/i420_buffer.h"
 #include "api/video/video_frame.h"
+#include "api/video/video_sink_interface.h"
 #include "api/video/video_broadcaster.h"
 #include "rtc_base/ref_counted_object.h"
 #include "rtc_base/thread.h"
@@ -25,14 +28,14 @@ public:
     bool remote() const override { return false; }
     void RegisterObserver(::webrtc::ObserverInterface* o) override { observers_.insert(o); }
     void UnregisterObserver(::webrtc::ObserverInterface* o) override { observers_.erase(o); }
-    void AddOrUpdateSink(::rtc::VideoSinkInterface<::webrtc::VideoFrame>* sink, const ::rtc::VideoSinkWants& wants) override { broadcaster_.AddOrUpdateSink(sink, wants); }
-    void RemoveSink(::rtc::VideoSinkInterface<::webrtc::VideoFrame>* sink) override { broadcaster_.RemoveSink(sink); }
+    void AddOrUpdateSink(::webrtc::VideoSinkInterface<::webrtc::VideoFrame>* sink, const ::webrtc::VideoSinkWants& wants) override { broadcaster_.AddOrUpdateSink(sink, wants); }
+    void RemoveSink(::webrtc::VideoSinkInterface<::webrtc::VideoFrame>* sink) override { broadcaster_.RemoveSink(sink); }
     bool is_screencast() const override { return false; }
     std::optional<bool> needs_denoising() const override { return std::nullopt; }
     bool GetStats(::webrtc::VideoTrackSourceInterface::Stats* stats) override { if (!stats || width_ == 0) return false; stats->input_width=width_; stats->input_height=height_; return true; }
     void Push(const ::webrtc::VideoFrame& frame) { width_=frame.width(); height_=frame.height(); broadcaster_.OnFrame(frame); }
 private:
-    ::rtc::VideoBroadcaster broadcaster_;
+    ::webrtc::VideoBroadcaster broadcaster_;
     ::webrtc::MediaSourceInterface::SourceState state_{::webrtc::MediaSourceInterface::kLive};
     std::set<::webrtc::ObserverInterface*> observers_;
     int width_{0}, height_{0};
@@ -79,11 +82,11 @@ public:
     void OnIceCandidate(const ::webrtc::IceCandidate* c) override { if(cb_.on_local_ice_candidate){std::string s; c->ToString(&s); cb_.on_local_ice_candidate(c->sdp_mid(), c->sdp_mline_index(), s);} }
     void OnTrack(::rtc::scoped_refptr<::webrtc::RtpTransceiverInterface> transceiver) override {
         if(!transceiver || !transceiver->receiver()) return; auto track=transceiver->receiver()->track(); if(!track) return;
-        if(track->kind()==::webrtc::MediaStreamTrackInterface::kVideoKind){ auto video=static_cast<::webrtc::VideoTrackInterface*>(track.get()); video->AddOrUpdateSink(&video_sink_,::rtc::VideoSinkWants()); }
+        if(track->kind()==::webrtc::MediaStreamTrackInterface::kVideoKind){ auto video=static_cast<::webrtc::VideoTrackInterface*>(track.get()); video->AddOrUpdateSink(&video_sink_,::webrtc::VideoSinkWants()); }
         else if(track->kind()==::webrtc::MediaStreamTrackInterface::kAudioKind){ auto audio=static_cast<::webrtc::AudioTrackInterface*>(track.get()); audio->AddSink(&audio_sink_); }
     }
 private:
-    class VideoSink final : public ::rtc::VideoSinkInterface<::webrtc::VideoFrame> { public: explicit VideoSink(WebRtcCallbacks& cb):cb_(cb){} void OnFrame(const ::webrtc::VideoFrame&) override { if(cb_.on_remote_video_frame) cb_.on_remote_video_frame(); } private: WebRtcCallbacks& cb_; };
+    class VideoSink final : public ::webrtc::VideoSinkInterface<::webrtc::VideoFrame> { public: explicit VideoSink(WebRtcCallbacks& cb):cb_(cb){} void OnFrame(const ::webrtc::VideoFrame&) override { if(cb_.on_remote_video_frame) cb_.on_remote_video_frame(); } private: WebRtcCallbacks& cb_; };
     class AudioSink final : public ::webrtc::AudioTrackSinkInterface { public: explicit AudioSink(WebRtcCallbacks& cb):cb_(cb){} void OnData(const void*,int,int,size_t,size_t) override { if(cb_.on_remote_audio_frame) cb_.on_remote_audio_frame(); } private: WebRtcCallbacks& cb_; };
     WebRtcCallbacks& cb_; VideoSink video_sink_{cb_}; AudioSink audio_sink_{cb_};
 };
