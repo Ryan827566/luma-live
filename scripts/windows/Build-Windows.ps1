@@ -21,6 +21,19 @@ if (-not $WebRtcOut -or -not (Test-Path (Join-Path $WebRtcOut 'obj\webrtc.lib'))
     throw 'WebRTC library was not found. Build the WebRTC GN target //:webrtc first (obj\webrtc.lib).' 
 }
 
+$ninja = Get-Command autoninja.exe -ErrorAction SilentlyContinue
+if (-not $ninja) {
+    $localNinja = Join-Path $RepoRoot 'LumaLive_Environment_Installer\third_party\ninja\ninja.exe'
+    if (Test-Path $localNinja) { $ninja = Get-Item $localNinja }
+}
+if ($ninja) {
+    Write-Host 'Checking existing WebRTC build (incremental; no rebuild when up-to-date)...' -ForegroundColor Cyan
+    & $ninja.Source -C $WebRtcOut webrtc
+    if ($LASTEXITCODE -ne 0) { throw 'Incremental WebRTC build failed.' }
+} else {
+    Write-Warning 'Ninja/autoninja was not found; using the existing WebRTC library without refreshing it.'
+}
+
 Write-Host "WebRTC source: $WebRtcRoot" -ForegroundColor DarkGray
 Write-Host "WebRTC output: $WebRtcOut" -ForegroundColor DarkGray
 Write-Host 'Configuring LumaLive with Visual Studio 2026 x64...' -ForegroundColor Cyan
