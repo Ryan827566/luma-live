@@ -13,6 +13,7 @@
 #include "api/video/video_sink_interface.h"
 #include "api/video/video_broadcaster.h"
 #include "rtc_base/ref_counted_object.h"
+#include <atomic>
 #include <mutex>
 #include <set>
 #include <vector>
@@ -31,18 +32,19 @@ public:
     void RemoveSink(::webrtc::VideoSinkInterface<::webrtc::VideoFrame>* sink) override { broadcaster_.RemoveSink(sink); }
     bool is_screencast() const override { return false; }
     std::optional<bool> needs_denoising() const override { return std::nullopt; }
-    bool GetStats(::webrtc::VideoTrackSourceInterface::Stats* stats) override { if (!stats || width_ == 0) return false; stats->input_width=width_; stats->input_height=height_; return true; }
+    bool GetStats(::webrtc::VideoTrackSourceInterface::Stats* stats) override { if (!stats) return false; const int width=width_.load(std::memory_order_relaxed); const int height=height_.load(std::memory_order_relaxed); if (width==0 || height==0) return false; stats->input_width=width; stats->input_height=height; return true; }
     bool SupportsEncodedOutput() const override { return false; }
     void GenerateKeyFrame() override {}
     void AddEncodedSink(::webrtc::VideoSinkInterface<::webrtc::RecordableEncodedFrame>*) override {}
     void RemoveEncodedSink(::webrtc::VideoSinkInterface<::webrtc::RecordableEncodedFrame>*) override {}
-    void Push(const ::webrtc::VideoFrame& frame) { width_=frame.width(); height_=frame.height(); broadcaster_.OnFrame(frame); }
+    void Push(const ::webrtc::VideoFrame& frame) { width_.store(frame.width(), std::memory_order_relaxed); height_.store(frame.height(), std::memory_order_relaxed); broadcaster_.OnFrame(frame); }
 private:
     ::webrtc::VideoBroadcaster broadcaster_;
     ::webrtc::MediaSourceInterface::SourceState state_{::webrtc::MediaSourceInterface::kLive};
     std::mutex observer_mutex_;
     std::set<::webrtc::ObserverInterface*> observers_;
-    int width_{0}, height_{0};
+    std::atomic<int> width_{0};
+    std::atomic<int> height_{0};
 };
 
 class LocalAudioSource : public ::webrtc::Notifier<::webrtc::AudioSourceInterface> {
