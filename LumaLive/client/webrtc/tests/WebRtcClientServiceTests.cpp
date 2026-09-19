@@ -1,6 +1,7 @@
 #include "NativeWebRtcPeerConnection.hpp"
 #include <cassert>
 #include <cstdint>
+#include <utility>
 
 int main() {
     using namespace luma::client::webrtc;
