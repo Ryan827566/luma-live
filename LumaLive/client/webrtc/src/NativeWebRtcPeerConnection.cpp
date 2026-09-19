@@ -13,7 +13,6 @@
 #include "api/video/video_sink_interface.h"
 #include "api/video/video_broadcaster.h"
 #include "rtc_base/ref_counted_object.h"
-#include <condition_variable>
 #include <mutex>
 #include <set>
 
@@ -25,8 +24,8 @@ public:
     static ::webrtc::scoped_refptr<LocalVideoSource> Create() { return ::webrtc::scoped_refptr<LocalVideoSource>(new ::webrtc::RefCountedObject<LocalVideoSource>()); }
     ::webrtc::MediaSourceInterface::SourceState state() const override { return state_; }
     bool remote() const override { return false; }
-    void RegisterObserver(::webrtc::ObserverInterface* o) override { observers_.insert(o); }
-    void UnregisterObserver(::webrtc::ObserverInterface* o) override { observers_.erase(o); }
+    void RegisterObserver(::webrtc::ObserverInterface* o) override { std::lock_guard lock(observer_mutex_); observers_.insert(o); }
+    void UnregisterObserver(::webrtc::ObserverInterface* o) override { std::lock_guard lock(observer_mutex_); observers_.erase(o); }
     void AddOrUpdateSink(::webrtc::VideoSinkInterface<::webrtc::VideoFrame>* sink, const ::webrtc::VideoSinkWants& wants) override { broadcaster_.AddOrUpdateSink(sink, wants); }
     void RemoveSink(::webrtc::VideoSinkInterface<::webrtc::VideoFrame>* sink) override { broadcaster_.RemoveSink(sink); }
     bool is_screencast() const override { return false; }
@@ -40,6 +39,7 @@ public:
 private:
     ::webrtc::VideoBroadcaster broadcaster_;
     ::webrtc::MediaSourceInterface::SourceState state_{::webrtc::MediaSourceInterface::kLive};
+    std::mutex observer_mutex_;
     std::set<::webrtc::ObserverInterface*> observers_;
     int width_{0}, height_{0};
 };
@@ -64,7 +64,9 @@ public:
     void OnSuccess(::webrtc::SessionDescriptionInterface* d) override { ok_(d); }
     void OnFailure(::webrtc::RTCError e) override { fail_(e.message()); }
 protected: ~DescriptionObserver() override = default;
-private: std::function<void(::webrtc::SessionDescriptionInterface*)> ok_; std::function<void(const std::string&)> fail_;
+private:
+    std::function<void(::webrtc::SessionDescriptionInterface*)> ok_;
+    std::function<void(const std::string&)> fail_;
 };
 class SetObserver : public ::webrtc::SetSessionDescriptionObserver {
 public:
@@ -72,7 +74,9 @@ public:
     void OnSuccess() override {ok_();}
     void OnFailure(::webrtc::RTCError e) override {fail_(e.message());}
 protected: ~SetObserver() override = default;
-private: std::function<void()> ok_; std::function<void(const std::string&)> fail_;
+private:
+    std::function<void()> ok_;
+    std::function<void(const std::string&)> fail_;
 };
 
 class PcObserver : public ::webrtc::PeerConnectionObserver {
@@ -121,18 +125,28 @@ bool NativeWebRtcPeerConnection::AddVideoFrame(const luma::client::media::pipeli
     else return false;
     impl_->video_source->Push(::webrtc::VideoFrame::Builder().set_video_frame_buffer(b).set_timestamp_us(f.timestamp_us).build()); return true;
 }
-bool NativeWebRtcPeerConnection::AddAudioFrame(const luma::client::media::pipeline::AudioFrame& f){if(!impl_->audio_source||f.format!=luma::client::media::pipeline::AudioSampleFormat::S16||f.sample_rate<=0||f.channels==0)return false; const std::size_t bytes_per_sample=2; const std::size_t frames=f.data.size()/(bytes_per_sample*f.channels); if(frames==0)return false; impl_->audio_source->Push(f.data.data(),16,f.sample_rate,f.channels,frames); return true;}
+bool NativeWebRtcPeerConnection::AddAudioFrame(const luma::client::media::pipeline::AudioFrame& f){
+    if(!impl_->audio_source||f.format!=luma::client::media::pipeline::AudioSampleFormat::S16||f.sample_rate<=0||f.channels==0)return false;
+    constexpr std::size_t bytes_per_sample=2;
+    const std::size_t frame_bytes=bytes_per_sample*static_cast<std::size_t>(f.channels);
+    if(frame_bytes==0||f.data.empty()||f.data.size()%frame_bytes!=0)return false;
+    const std::size_t frames=f.data.size()/frame_bytes;
+    impl_->audio_source->Push(f.data.data(),16,f.sample_rate,f.channels,frames); return true;
+}
 bool NativeWebRtcPeerConnection::CreateOffer(){
     if(!impl_->pc) return false;
+    auto weak=weak_from_this();
     auto* obs = new ::webrtc::RefCountedObject<DescriptionObserver>(
-            [this](auto* d){
+            [weak](auto* d){
+                auto self=weak.lock(); if(!self||!d)return;
                 std::string sdp;
                 if(!d->ToString(&sdp)) return;
-                impl_->pc->SetLocalDescription(
+                self->impl_->pc->SetLocalDescription(
                     new ::webrtc::RefCountedObject<SetObserver>(
-                            [this,sdp](){
-                                if(impl_->cb.on_local_description)
-                                    impl_->cb.on_local_description("offer",sdp);
+                            [weak,sdp](){
+                                auto self=weak.lock(); if(!self)return;
+                                if(self->impl_->cb.on_local_description)
+                                    self->impl_->cb.on_local_description("offer",sdp);
                             },
                             [](const std::string&){}),
                     d);
@@ -144,15 +158,18 @@ bool NativeWebRtcPeerConnection::CreateOffer(){
 
 bool NativeWebRtcPeerConnection::CreateAnswer(){
     if(!impl_->pc) return false;
+    auto weak=weak_from_this();
     auto* obs = new ::webrtc::RefCountedObject<DescriptionObserver>(
-            [this](auto* d){
+            [weak](auto* d){
+                auto self=weak.lock(); if(!self||!d)return;
                 std::string sdp;
                 if(!d->ToString(&sdp)) return;
-                impl_->pc->SetLocalDescription(
+                self->impl_->pc->SetLocalDescription(
                     new ::webrtc::RefCountedObject<SetObserver>(
-                            [this,sdp](){
-                                if(impl_->cb.on_local_description)
-                                    impl_->cb.on_local_description("answer",sdp);
+                            [weak,sdp](){
+                                auto self=weak.lock(); if(!self)return;
+                                if(self->impl_->cb.on_local_description)
+                                    self->impl_->cb.on_local_description("answer",sdp);
                             },
                             [](const std::string&){}),
                     d);
