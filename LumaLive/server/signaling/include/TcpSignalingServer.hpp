@@ -43,6 +43,7 @@ private:
     std::thread accept_thread_;
     mutable std::mutex mutex_;
     mutable std::mutex send_mutex_;
+    mutable std::mutex listen_mutex_;
     std::unordered_map<luma_socket_t, Client> clients_;
     std::unordered_map<std::string, std::unordered_set<std::string>> rooms_;
     std::vector<std::thread> client_threads_;
