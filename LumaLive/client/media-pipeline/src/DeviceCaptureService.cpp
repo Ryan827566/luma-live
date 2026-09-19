@@ -218,15 +218,18 @@ private:
         hr = ConfigureReader(reader, type, camera, audio);
         if (FAILED(hr)) { reader->Release(); return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidArgument, "requested capture format is not supported"); }
 
+        auto& active = type == CaptureDeviceType::Camera ? camera_running_ : microphone_running_;
+        active = true;
         auto& reader_slot = type == CaptureDeviceType::Camera ? camera_reader_ : microphone_reader_;
         {
             std::lock_guard reader_lock(reader_mutex_);
             reader_slot = reader;
         }
-        std::thread worker([this, reader, type, video_cb = std::move(video_cb), audio_cb = std::move(audio_cb)]() mutable {
+        std::thread worker;
+        try {
+            worker = std::thread([this, reader, type, video_cb = std::move(video_cb), audio_cb = std::move(audio_cb)]() mutable {
             const HRESULT com_hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
             auto& active = type == CaptureDeviceType::Camera ? camera_running_ : microphone_running_;
-            active = true;
             while (active && running_) {
                 DWORD stream = 0, flags = 0; LONGLONG timestamp = 0; IMFSample* sample = nullptr;
                 const HRESULT read_hr = reader->ReadSample(type == CaptureDeviceType::Camera ? MF_SOURCE_READER_FIRST_VIDEO_STREAM : MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &stream, &flags, &timestamp, &sample);
@@ -277,7 +280,16 @@ private:
             reader->Release();
             active = false;
             if (SUCCEEDED(com_hr)) CoUninitialize();
-        });
+            });
+        } catch (...) {
+            active = false;
+            {
+                std::lock_guard reader_lock(reader_mutex_);
+                if (reader_slot == reader) reader_slot = nullptr;
+            }
+            reader->Release();
+            return shared::contracts::Result::Failure(shared::contracts::ErrorCode::Internal, "failed to create capture worker thread");
+        }
         if (type == CaptureDeviceType::Camera) camera_thread_ = std::move(worker); else microphone_thread_ = std::move(worker);
         return shared::contracts::Result::Ok();
     }
