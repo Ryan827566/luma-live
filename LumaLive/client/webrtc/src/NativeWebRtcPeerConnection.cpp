@@ -115,6 +115,7 @@ struct NativeWebRtcPeerConnection::Impl {
     std::unique_ptr<PcObserver> observer;
 };
 
+std::shared_ptr<NativeWebRtcPeerConnection> NativeWebRtcPeerConnection::Create() { return std::shared_ptr<NativeWebRtcPeerConnection>(new NativeWebRtcPeerConnection()); }
 NativeWebRtcPeerConnection::NativeWebRtcPeerConnection():impl_(std::make_unique<Impl>()){}
 NativeWebRtcPeerConnection::~NativeWebRtcPeerConnection(){Close();}
 bool NativeWebRtcPeerConnection::Initialize(const luma::contracts::PeerConnectionConfig& config, WebRtcCallbacks callbacks){
