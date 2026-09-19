@@ -18,13 +18,16 @@ struct WebRtcCallbacks {
 
 class NativeWebRtcPeerConnection : public luma::client::media::pipeline::IMediaFrameSink, public std::enable_shared_from_this<NativeWebRtcPeerConnection> {
 public:
-    NativeWebRtcPeerConnection();
+    static std::shared_ptr<NativeWebRtcPeerConnection> Create();
     ~NativeWebRtcPeerConnection();
     bool Initialize(const luma::contracts::PeerConnectionConfig& config, WebRtcCallbacks callbacks);
     void OnVideoFrame(luma::client::media::pipeline::VideoFrame frame) override { (void)AddVideoFrame(frame); }
     void OnAudioFrame(luma::client::media::pipeline::AudioFrame frame) override { (void)AddAudioFrame(frame); }
     bool AddVideoFrame(const luma::client::media::pipeline::VideoFrame& frame);
     bool AddAudioFrame(const luma::client::media::pipeline::AudioFrame& frame);
+    // Returns true when the asynchronous operation was successfully submitted.
+    // SDP success/failure is reported through WebRtcCallbacks::on_local_description
+    // and WebRtcCallbacks::on_connection_state respectively.
     bool CreateOffer();
     bool CreateAnswer();
     bool SetRemoteDescription(const std::string& type, const std::string& sdp);
@@ -32,6 +35,7 @@ public:
     void Close();
     bool IsInitialized() const noexcept;
 private:
+    NativeWebRtcPeerConnection();
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
