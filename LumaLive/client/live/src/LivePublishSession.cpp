@@ -14,7 +14,7 @@ bool LivePublishSession::Start(const LivePublishConfig& cfg){
     room_id_=cfg.room_id; peer_id_=cfg.peer_id; remote_peer_id_.clear();
     capture_=luma::client::media::CreateDeviceCaptureService();
     pipeline_=luma::client::media::pipeline::CreateMediaPipelineService();
-    rtc_=std::make_shared<luma::client::webrtc::NativeWebRtcPeerConnection>();
+    rtc_=luma::client::webrtc::NativeWebRtcPeerConnection::Create();
     signaling_=std::make_unique<luma::client::signaling::TcpSignalingClient>();
     callback_gate_=std::make_shared<CallbackGate>();
     auto gate=callback_gate_;
