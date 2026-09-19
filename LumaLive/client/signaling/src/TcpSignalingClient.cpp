@@ -41,7 +41,7 @@ bool valid_socket(luma_client_socket_t s) {
 
 bool send_all(luma_client_socket_t s, const std::uint8_t* p, std::size_t n) {
     while (n) {
-        const int r = ::send(s, reinterpret_cast<const char*>(p), static_cast<int>(n), 0);
+        const int r = ::send(s, reinterpret_cast<const char*>(p), static_cast<int>(n), MSG_NOSIGNAL);
         if (r <= 0) return false;
         p += r;
         n -= static_cast<std::size_t>(r);
