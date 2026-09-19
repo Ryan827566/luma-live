@@ -29,11 +29,16 @@ public:
     bool IsConnected() const noexcept { return connected_.load(); }
 private:
     void ReceiveLoop();
+    void JoinReceiveThreadIfNeeded();
+    void CloseSocketLocked();
+
     luma_client_socket_t socket_{kLumaClientInvalidSocket};
     std::atomic<bool> connected_{false};
     std::thread receive_thread_;
     MessageHandler handler_;
-    mutable std::mutex send_mutex_;
+    mutable std::mutex lifecycle_mutex_;
+    mutable std::mutex socket_mutex_;
+    std::mutex send_mutex_;
 };
 
 } // namespace luma::client::signaling
