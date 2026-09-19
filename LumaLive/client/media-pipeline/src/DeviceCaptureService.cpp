@@ -218,8 +218,13 @@ private:
         hr = ConfigureReader(reader, type, camera, audio);
         if (FAILED(hr)) { reader->Release(); return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidArgument, "requested capture format is not supported"); }
 
+        auto& reader_slot = type == CaptureDeviceType::Camera ? camera_reader_ : microphone_reader_;
+        {
+            std::lock_guard reader_lock(reader_mutex_);
+            reader_slot = reader;
+        }
         std::thread worker([this, reader, type, video_cb = std::move(video_cb), audio_cb = std::move(audio_cb)]() mutable {
-            CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+            const HRESULT com_hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
             auto& active = type == CaptureDeviceType::Camera ? camera_running_ : microphone_running_;
             active = true;
             while (active && running_) {
@@ -264,9 +269,14 @@ private:
                 }
                 sample->Release();
             }
+            auto& reader_slot = type == CaptureDeviceType::Camera ? camera_reader_ : microphone_reader_;
+            {
+                std::lock_guard reader_lock(reader_mutex_);
+                if (reader_slot == reader) reader_slot = nullptr;
+            }
             reader->Release();
             active = false;
-            CoUninitialize();
+            if (SUCCEEDED(com_hr)) CoUninitialize();
         });
         if (type == CaptureDeviceType::Camera) camera_thread_ = std::move(worker); else microphone_thread_ = std::move(worker);
         return shared::contracts::Result::Ok();
@@ -274,8 +284,18 @@ private:
 #endif
 
     shared::contracts::Result StopStream(std::atomic_bool& active, std::thread& worker) {
-        if (!active) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidState, "capture stream is not running");
+        if (!active && !worker.joinable()) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidState, "capture stream is not running");
         active = false;
+#ifdef _WIN32
+        {
+            std::lock_guard reader_lock(reader_mutex_);
+            IMFSourceReader* reader = (&worker == &camera_thread_) ? camera_reader_ : microphone_reader_;
+            if (reader) {
+                const DWORD stream = (&worker == &camera_thread_) ? MF_SOURCE_READER_FIRST_VIDEO_STREAM : MF_SOURCE_READER_FIRST_AUDIO_STREAM;
+                reader->Flush(stream);
+            }
+        }
+#endif
         if (worker.joinable()) worker.join();
         return shared::contracts::Result::Ok();
     }
@@ -286,6 +306,11 @@ private:
     std::mutex mutex_;
     std::thread camera_thread_;
     std::thread microphone_thread_;
+#ifdef _WIN32
+    std::mutex reader_mutex_;
+    IMFSourceReader* camera_reader_{nullptr};
+    IMFSourceReader* microphone_reader_{nullptr};
+#endif
 };
 
 std::unique_ptr<IDeviceCaptureService> CreateDeviceCaptureService() { return std::make_unique<DeviceCaptureService>(); }
