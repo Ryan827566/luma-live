@@ -13,6 +13,9 @@ using socket_len_t = int;
 #include <netdb.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
 using socket_len_t = socklen_t;
 #endif
 
