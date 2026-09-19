@@ -10,7 +10,7 @@ int main() {
     using luma::client::media::pipeline::PixelFormat;
     using luma::client::media::pipeline::VideoFrame;
 
-    auto peer = std::make_shared<NativeWebRtcPeerConnection>();
+    auto peer = NativeWebRtcPeerConnection::Create();
 
     assert(!peer->IsInitialized());
     assert(!peer->CreateOffer());
