@@ -16,14 +16,20 @@ bool LivePublishSession::Start(const LivePublishConfig& cfg){
     pipeline_=luma::client::media::pipeline::CreateMediaPipelineService();
     rtc_=std::make_shared<luma::client::webrtc::NativeWebRtcPeerConnection>();
     signaling_=std::make_unique<luma::client::signaling::TcpSignalingClient>();
+    callback_gate_=std::make_shared<CallbackGate>();
+    auto gate=callback_gate_;
 
     luma::client::webrtc::WebRtcCallbacks cb;
-    cb.on_local_description=[this](const std::string&type,const std::string&sdp){
+    cb.on_local_description=[this,gate](const std::string&type,const std::string&sdp){
+        if(!gate->Enter())return;
+        struct Guard { std::shared_ptr<CallbackGate> g; ~Guard(){g->Leave();} } guard{gate};
         if(!signaling_||!signaling_->IsConnected())return;
         luma::contracts::SignalingMessage m;m.type=type=="offer"?luma::contracts::SignalingMessageType::Offer:luma::contracts::SignalingMessageType::Answer;
         m.room_id=room_id_;m.peer_id=peer_id_;m.target_peer_id=remote_peer_id_;m.sdp=sdp;signaling_->Send(m);
     };
-    cb.on_local_ice_candidate=[this](const std::string&mid,int line,const std::string&candidate){
+    cb.on_local_ice_candidate=[this,gate](const std::string&mid,int line,const std::string&candidate){
+        if(!gate->Enter())return;
+        struct Guard { std::shared_ptr<CallbackGate> g; ~Guard(){g->Leave();} } guard{gate};
         if(!signaling_||!signaling_->IsConnected())return;
         luma::contracts::SignalingMessage m;m.type=luma::contracts::SignalingMessageType::IceCandidate;m.room_id=room_id_;m.peer_id=peer_id_;m.target_peer_id=remote_peer_id_;
         m.value=std::to_string(line);m.candidate=candidate;m.candidate_mid=mid;signaling_->Send(m);
@@ -33,10 +39,10 @@ bool LivePublishSession::Start(const LivePublishConfig& cfg){
     pipeline_->SetFrameSink(rtc_);
     if(!pipeline_->Start().success){last_error_="pipeline start failed";Cleanup();return false;}
     if(!capture_->Start().IsOk()){last_error_="capture start failed";Cleanup();return false;}
-    if(!capture_->StartCamera(cfg.camera,[this](auto f){pipeline_->PushVideoFrame(std::move(f));}).IsOk()){last_error_="camera start failed";Cleanup();return false;}
-    if(!capture_->StartMicrophone(cfg.audio,[this](auto f){pipeline_->PushAudioFrame(std::move(f));}).IsOk()){last_error_="microphone start failed";Cleanup();return false;}
+    if(!capture_->StartCamera(cfg.camera,[this,gate](auto f){if(!gate->Enter())return; struct Guard { std::shared_ptr<CallbackGate> g; ~Guard(){g->Leave();} } guard{gate}; if(pipeline_) pipeline_->PushVideoFrame(std::move(f));}).IsOk()){last_error_="camera start failed";Cleanup();return false;}
+    if(!capture_->StartMicrophone(cfg.audio,[this,gate](auto f){if(!gate->Enter())return; struct Guard { std::shared_ptr<CallbackGate> g; ~Guard(){g->Leave();} } guard{gate}; if(pipeline_) pipeline_->PushAudioFrame(std::move(f));}).IsOk()){last_error_="microphone start failed";Cleanup();return false;}
 
-    if(!signaling_->Connect(cfg.signaling_host,cfg.signaling_port,[this](const auto&m){HandleSignal(m);})){last_error_="signaling connection failed";Cleanup();return false;}
+    if(!signaling_->Connect(cfg.signaling_host,cfg.signaling_port,[this,gate](const auto&m){if(!gate->Enter())return; struct Guard { std::shared_ptr<CallbackGate> g; ~Guard(){g->Leave();} } guard{gate}; HandleSignal(m);})){last_error_="signaling connection failed";Cleanup();return false;}
     luma::contracts::SignalingMessage join;join.type=luma::contracts::SignalingMessageType::JoinRoom;join.room_id=room_id_;join.peer_id=peer_id_;
     if(!signaling_->Send(join)){last_error_="join room failed";Cleanup();return false;}
 
@@ -56,6 +62,7 @@ void LivePublishSession::HandleSignal(const luma::contracts::SignalingMessage&m)
     default: break; }
 }
 void LivePublishSession::Cleanup(){
+    if(callback_gate_) callback_gate_->CloseAndWait();
     if(signaling_&&running_){
         luma::contracts::SignalingMessage m;m.type=luma::contracts::SignalingMessageType::LeaveRoom;m.room_id=room_id_;m.peer_id=peer_id_;signaling_->Send(m);
     }
@@ -65,6 +72,7 @@ void LivePublishSession::Cleanup(){
     if(signaling_)signaling_->Close();
     running_=false;
     signaling_.reset();rtc_.reset();pipeline_.reset();capture_.reset();
+    callback_gate_.reset();
 }
 void LivePublishSession::Stop(){std::lock_guard lock(mutex_); Cleanup();}
 }
