@@ -40,6 +40,7 @@ private:
     void RemoveClient(luma_socket_t socket);
     luma_socket_t listen_socket_{kLumaInvalidSocket};
     std::atomic<bool> running_{false};
+    mutable std::mutex lifecycle_mutex_;
     std::thread accept_thread_;
     mutable std::mutex mutex_;
     mutable std::mutex send_mutex_;
