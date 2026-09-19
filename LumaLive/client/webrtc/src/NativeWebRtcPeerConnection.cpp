@@ -15,6 +15,7 @@
 #include "rtc_base/ref_counted_object.h"
 #include <mutex>
 #include <set>
+#include <vector>
 
 namespace luma::client::webrtc {
 namespace {
@@ -52,7 +53,11 @@ public:
     void UnregisterObserver(::webrtc::ObserverInterface*) override {}
     void AddSink(::webrtc::AudioTrackSinkInterface* sink) override { std::lock_guard lock(m_); sinks_.insert(sink); }
     void RemoveSink(::webrtc::AudioTrackSinkInterface* sink) override { std::lock_guard lock(m_); sinks_.erase(sink); }
-    void Push(const void* data,int bits,int rate,size_t channels,size_t frames){std::lock_guard lock(m_);for(auto*s:sinks_)s->OnData(data,bits,rate,channels,frames);}
+    void Push(const void* data,int bits,int rate,size_t channels,size_t frames){
+        std::vector<::webrtc::AudioTrackSinkInterface*> sinks;
+        { std::lock_guard lock(m_); sinks.assign(sinks_.begin(), sinks_.end()); }
+        for(auto* s:sinks) if(s) s->OnData(data,bits,rate,channels,frames);
+    }
 private:
     std::mutex m_;
     std::set<::webrtc::AudioTrackSinkInterface*> sinks_;
@@ -114,8 +119,24 @@ bool NativeWebRtcPeerConnection::Initialize(const luma::contracts::PeerConnectio
     if(impl_->pc) return false; impl_->cb=std::move(callbacks); impl_->observer=std::make_unique<PcObserver>(impl_->cb);
     ::webrtc::PeerConnectionFactoryDependencies deps; deps.env=::webrtc::CreateEnvironment(); ::webrtc::EnableMediaWithDefaults(deps); impl_->factory=::webrtc::CreateModularPeerConnectionFactory(std::move(deps)); if(!impl_->factory)return false;
     ::webrtc::PeerConnectionInterface::RTCConfiguration rtc_config; rtc_config.sdp_semantics=::webrtc::SdpSemantics::kUnifiedPlan; for(const auto& url:config.stun_servers){::webrtc::PeerConnectionInterface::IceServer s;s.urls.push_back(url);rtc_config.servers.push_back(s);} if(!config.turn_url.empty()){::webrtc::PeerConnectionInterface::IceServer s;s.urls.push_back(config.turn_url);s.username=config.turn_username;s.password=config.turn_password;rtc_config.servers.push_back(s);}
-    ::webrtc::PeerConnectionDependencies pdeps(impl_->observer.get()); auto result=impl_->factory->CreatePeerConnectionOrError(rtc_config,std::move(pdeps)); if(!result.ok())return false; impl_->pc=result.MoveValue();
-    impl_->video_source=LocalVideoSource::Create(); impl_->audio_source=::webrtc::scoped_refptr<LocalAudioSource>(new ::webrtc::RefCountedObject<LocalAudioSource>()); auto vt=impl_->factory->CreateVideoTrack(impl_->video_source,"luma-video"); auto at=impl_->factory->CreateAudioTrack("luma-audio",impl_->audio_source.get()); if(!vt||!at)return false; if(!impl_->pc->AddTrack(vt,{"luma-stream"}).ok()||!impl_->pc->AddTrack(at,{"luma-stream"}).ok())return false; return true;
+    ::webrtc::PeerConnectionDependencies pdeps(impl_->observer.get());
+    auto result=impl_->factory->CreatePeerConnectionOrError(rtc_config,std::move(pdeps));
+    if(!result.ok()) return false;
+
+    auto pc=result.MoveValue();
+    auto video_source=LocalVideoSource::Create();
+    auto audio_source=::webrtc::scoped_refptr<LocalAudioSource>(
+        new ::webrtc::RefCountedObject<LocalAudioSource>());
+    auto vt=impl_->factory->CreateVideoTrack(video_source,"luma-video");
+    auto at=impl_->factory->CreateAudioTrack("luma-audio",audio_source.get());
+    if(!vt||!at) return false;
+    if(!pc->AddTrack(vt,{"luma-stream"}).ok() ||
+       !pc->AddTrack(at,{"luma-stream"}).ok()) return false;
+
+    impl_->pc=std::move(pc);
+    impl_->video_source=std::move(video_source);
+    impl_->audio_source=std::move(audio_source);
+    return true;
 }
 bool NativeWebRtcPeerConnection::AddVideoFrame(const luma::client::media::pipeline::VideoFrame& f){
     if(!impl_->video_source||f.width==0||f.height==0||((f.width&1u)!=0)||((f.height&1u)!=0)) return false;
@@ -189,8 +210,16 @@ bool NativeWebRtcPeerConnection::SetRemoteDescription(
     ::webrtc::SdpParseError e;
     auto d=::webrtc::CreateSessionDescription(t,sdp,&e);
     if(!d) return false;
+    auto weak=weak_from_this();
     impl_->pc->SetRemoteDescription(
-        new ::webrtc::RefCountedObject<SetObserver>([](){},[](const std::string&){}),
+        new ::webrtc::RefCountedObject<SetObserver>(
+            [](){},
+            [weak](const std::string& message){
+                auto self=weak.lock();
+                if(!self) return;
+                if(self->impl_->cb.on_connection_state)
+                    self->impl_->cb.on_connection_state("remote_description_error:" + message);
+            }),
         d.release());
     return true;
 }
