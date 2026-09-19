@@ -1,11 +1,20 @@
 #pragma once
 #include "SignalingMessage.hpp"
 #include <atomic>
+#include <cstdint>
 #include <functional>
-#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+
+#ifdef _WIN32
+#include <winsock2.h>
+using luma_client_socket_t = SOCKET;
+constexpr luma_client_socket_t kLumaClientInvalidSocket = INVALID_SOCKET;
+#else
+using luma_client_socket_t = int;
+constexpr luma_client_socket_t kLumaClientInvalidSocket = -1;
+#endif
 
 namespace luma::client::signaling {
 
@@ -20,7 +29,7 @@ public:
     bool IsConnected() const noexcept { return connected_.load(); }
 private:
     void ReceiveLoop();
-    int socket_{-1};
+    luma_client_socket_t socket_{kLumaClientInvalidSocket};
     std::atomic<bool> connected_{false};
     std::thread receive_thread_;
     MessageHandler handler_;
