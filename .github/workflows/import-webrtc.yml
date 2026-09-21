@@ -58,39 +58,18 @@ jobs:
           # Copy the complete public header tree from the package.
           cp -a "$INCLUDE_ROOT"/. third_party/webrtc/windows-x64/include/
 
-          # WebRTC 5735 pins a Chromium revision; Chromium's DEPS file
-          # carries the actual Abseil revision used by that WebRTC build.
-          python3 - <<'PY'
-import base64
-import re
-import urllib.request
-from pathlib import Path
+          # WebRTC 5735 (Chrome 114 era) uses Abseil APIs available in
+          # the 20230802.1 LTS snapshot. The prebuilt SDK does not ship
+          # Abseil headers, so vendor the matching-era public header tree.
+          curl -fL --retry 5 --retry-delay 3 \
+            -o /tmp/webrtc/abseil.tar.gz \
+            https://github.com/abseil/abseil-cpp/archive/refs/tags/20230802.1.tar.gz
+          rm -rf /tmp/webrtc/abseil-src
+          mkdir -p /tmp/webrtc/abseil-src
+          tar -xzf /tmp/webrtc/abseil.tar.gz -C /tmp/webrtc/abseil-src --strip-components=1
 
-def fetch_deps(url):
-    raw = urllib.request.urlopen(url, timeout=60).read()
-    try:
-        return base64.b64decode(raw).decode("utf-8", "replace")
-    except Exception:
-        return raw.decode("utf-8", "replace")
-
-webrtc_url = "https://chromium.googlesource.com/external/webrtc/+/refs/branch-heads/5735/DEPS?format=TEXT"
-webrtc_deps = fetch_deps(webrtc_url)
-chromium_match = re.search(r"['"]chromium_revision['"]\s*:\s*['"]([0-9a-f]{40})['"]", webrtc_deps)
-if not chromium_match:
-    raise SystemExit("Chromium revision not found in WebRTC 5735 DEPS")
-chromium_rev = chromium_match.group(1)
-print("WebRTC 5735 Chromium revision:", chromium_rev)
-
-chromium_url = f"https://chromium.googlesource.com/chromium/src/+/{chromium_rev}/DEPS?format=TEXT"
-chromium_deps = fetch_deps(chromium_url)
-absl_match = re.search(r"['"]abseil_revision['"]\s*:\s*['"]([0-9a-f]{40})['"]", chromium_deps)
-if not absl_match:
-    raise SystemExit("Abseil revision not found in Chromium DEPS")
-absl_rev = absl_match.group(1)
-print("Chromium-pinned Abseil revision:", absl_rev)
-Path("/tmp/webrtc/absl_revision").write_text(absl_rev)
-PY
-          ABSL_REV="$(cat /tmp/webrtc/absl_revision)"
+          mkdir -p third_party/webrtc/windows-x64/include/absl
+          cp -a /tmp/webrtc/abseil-src/absl/. third_party/webrtc/windows-x64/include/absl/
 
           rm -rf /tmp/webrtc/abseil
           git clone --filter=blob:none --no-checkout --depth 1 \
