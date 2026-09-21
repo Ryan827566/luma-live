@@ -63,11 +63,21 @@ jobs:
           # Copy the complete public header tree from the package.
           cp -a "$INCLUDE_ROOT"/. third_party/webrtc/windows-x64/include/
 
-          # The extras archive contains tools/symbols, not the transitive Abseil
-          # headers. Fetch the exact Abseil snapshot from WebRTC branch-heads/5735.
+          # Resolve the exact Abseil revision used by Chromium branch 5735.
+          curl -fL --retry 5 --retry-delay 3 \
+            -o /tmp/webrtc/deps.txt \
+            'https://chromium.googlesource.com/chromium/src/+/refs/branch-heads/5735/DEPS?format=TEXT'
+          base64 -d /tmp/webrtc/deps.txt > /tmp/webrtc/DEPS
+          ABSL_REV="$(grep -E "^[[:space:]]*'abseil_revision'[[:space:]]*:" /tmp/webrtc/DEPS | head -n 1 | sed -E "s/.*'abseil_revision'[[:space:]]*:[[:space:]]*'([^']+)'.*/\1/")"
+          if [[ -z "$ABSL_REV" ]]; then
+            echo "Could not resolve abseil_revision from Chromium branch-heads/5735 DEPS"
+            grep -n "abseil" /tmp/webrtc/DEPS | head -n 20
+            exit 1
+          fi
+          echo "Chromium 5735 Abseil revision: $ABSL_REV"
           curl -fL --retry 5 --retry-delay 3 \
             -o /tmp/webrtc/abseil.tar.gz \
-            https://chromium.googlesource.com/external/webrtc/+archive/branch-heads/5735/third_party/abseil-cpp.tar.gz
+            "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp/+archive/$ABSL_REV.tar.gz"
           mkdir -p /tmp/webrtc/abseil
           tar -xzf /tmp/webrtc/abseil.tar.gz -C /tmp/webrtc/abseil
 
