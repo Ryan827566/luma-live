@@ -24,9 +24,15 @@ target_compile_features(luma_client_webrtc PUBLIC cxx_std_20)
 # No external WebRTC checkout or LumaLive_Environment_Installer is required.
 # ---------------------------------------------------------------------------
 
-set(LUMALIVE_WEBRTC_ROOT
-    "${CMAKE_SOURCE_DIR}/../third_party/webrtc"
-    CACHE PATH "LumaLive bundled WebRTC root")
+set(LUMALIVE_WEBRTC_SDK_ROOT "" CACHE PATH
+    "Complete LumaLive WebRTC SDK root")
+if(LUMALIVE_WEBRTC_SDK_ROOT)
+  set(LUMALIVE_WEBRTC_ROOT "${LUMALIVE_WEBRTC_SDK_ROOT}")
+else()
+  set(LUMALIVE_WEBRTC_ROOT
+      "${CMAKE_SOURCE_DIR}/../third_party/webrtc"
+      CACHE PATH "LumaLive bundled WebRTC root")
+endif()
 
 # WebRTC public headers depend on Abseil (for example
 # absl/strings/string_view.h). The checked-in WebRTC binary alone is not
