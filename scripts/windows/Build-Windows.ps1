@@ -42,7 +42,7 @@ try {
         $Configuration = 'Release'
         $BuildLabel = 'Visual Studio 2026 x64'
         Write-Host "Selected: $BuildLabel" -ForegroundColor Cyan
-        cmake --preset windows-vs2026-x64 -DLUMALIVE_WEBRTC_SDK_ROOT="$WebRtcSdkRoot\windows-x64"
+        cmake --preset windows-vs2026-x64 -DLUMALIVE_WEBRTC_SDK_ROOT="$WebRtcSdkRoot"
         if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed for Visual Studio 2026.' }
         cmake --build --preset windows-vs2026-release --parallel
         if ($LASTEXITCODE -ne 0) { throw 'Release build failed for Visual Studio 2026.' }
