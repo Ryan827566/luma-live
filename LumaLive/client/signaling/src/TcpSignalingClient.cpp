@@ -42,9 +42,15 @@ bool valid_socket(luma_client_socket_t s) {
 #endif
 }
 
+#ifdef _WIN32
+constexpr int kLumaLiveSendFlags = 0;
+#else
+constexpr int kLumaLiveSendFlags = MSG_NOSIGNAL;
+#endif
+
 bool send_all(luma_client_socket_t s, const std::uint8_t* p, std::size_t n) {
     while (n) {
-        const int r = ::send(s, reinterpret_cast<const char*>(p), static_cast<int>(n), MSG_NOSIGNAL);
+        const int r = ::send(s, reinterpret_cast<const char*>(p), static_cast<int>(n), kLumaLiveSendFlags);
         if (r <= 0) return false;
         p += r;
         n -= static_cast<std::size_t>(r);
