@@ -28,6 +28,37 @@ set(LUMALIVE_WEBRTC_ROOT
     "${CMAKE_SOURCE_DIR}/../third_party/webrtc"
     CACHE PATH "LumaLive bundled WebRTC root")
 
+# WebRTC public headers depend on Abseil (for example
+# absl/strings/string_view.h). The checked-in WebRTC binary alone is not
+# sufficient to compile clients, so provide a deterministic Abseil dependency.
+# A local source tree can be supplied with LUMALIVE_ABSEIL_SOURCE_DIR; otherwise
+# CMake fetches the pinned LTS release during configure.
+set(LUMALIVE_ABSEIL_SOURCE_DIR "" CACHE PATH
+    "Optional local Abseil source tree")
+
+if(LUMALIVE_ABSEIL_SOURCE_DIR)
+  if(NOT EXISTS
+      "${LUMALIVE_ABSEIL_SOURCE_DIR}/absl/strings/string_view.h")
+    message(FATAL_ERROR
+      "LUMALIVE_ABSEIL_SOURCE_DIR does not contain Abseil headers:\n"
+      "  ${LUMALIVE_ABSEIL_SOURCE_DIR}")
+  endif()
+  if(NOT TARGET absl::strings)
+    add_subdirectory("${LUMALIVE_ABSEIL_SOURCE_DIR}"
+                     "${CMAKE_BINARY_DIR}/_deps/lumalive_abseil-build"
+                     EXCLUDE_FROM_ALL)
+  endif()
+else()
+  include(FetchContent)
+  FetchContent_Declare(
+    lumalive_abseil
+    GIT_REPOSITORY https://github.com/abseil/abseil-cpp.git
+    GIT_TAG 20260107.1
+    GIT_SHALLOW TRUE
+  )
+  FetchContent_MakeAvailable(lumalive_abseil)
+endif()
+
 set(LUMALIVE_WEBRTC_INCLUDE_DIR
     "${LUMALIVE_WEBRTC_ROOT}/include")
 
@@ -79,6 +110,10 @@ target_compile_definitions(luma_client_webrtc PUBLIC
 
 target_include_directories(luma_client_webrtc PUBLIC
   "${LUMALIVE_WEBRTC_INCLUDE_DIR}"
+)
+
+target_link_libraries(luma_client_webrtc PUBLIC
+  absl::strings
 )
 
 # ---------------------------------------------------------------------------
