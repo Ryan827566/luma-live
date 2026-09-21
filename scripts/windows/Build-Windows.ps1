@@ -52,7 +52,7 @@ try {
         $Configuration = 'Release'
         $BuildLabel = 'Visual Studio 2022 x64'
         Write-Host "Selected: $BuildLabel" -ForegroundColor Cyan
-        cmake -S . -B $BuildDir -G 'Visual Studio 17 2022' -A x64 -T v143 -DCMAKE_CXX_STANDARD=20 -DCMAKE_CXX_STANDARD_REQUIRED=ON -DCMAKE_CXX_EXTENSIONS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DLUMALIVE_WEBRTC_SDK_ROOT="$WebRtcSdkRoot\windows-x64"
+        cmake -S . -B $BuildDir -G 'Visual Studio 17 2022' -A x64 -T v143 -DCMAKE_CXX_STANDARD=20 -DCMAKE_CXX_STANDARD_REQUIRED=ON -DCMAKE_CXX_EXTENSIONS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DLUMALIVE_WEBRTC_SDK_ROOT="$WebRtcSdkRoot"
         if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed for Visual Studio 2022.' }
         cmake --build $BuildDir --config $Configuration --parallel
         if ($LASTEXITCODE -ne 0) { throw 'Release build failed for Visual Studio 2022.' }
