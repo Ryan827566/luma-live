@@ -60,7 +60,7 @@ jobs:
 
           # Resolve the exact Abseil revision used by Chromium branch 5735.
           # The pin is maintained in Chromium's third_party/DEPS.
-          curl -fL --retry 5 --retry-delay 3             -o /tmp/webrtc/third_party_deps.txt             'https://chromium.googlesource.com/chromium/src/+/refs/branch-heads/5735/third_party/DEPS?format=TEXT'
+          curl -fL --retry 5 --retry-delay 3             -o /tmp/webrtc/third_party_deps.txt             'https://chromium.googlesource.com/chromium/src/+/13db2c2a8ba8b479db16cbe56ec182de74bafda1/third_party/DEPS?format=TEXT'
           base64 -d /tmp/webrtc/third_party_deps.txt > /tmp/webrtc/third_party_DEPS
 
           # third_party/DEPS normally defines the exact Abseil pin.
