@@ -58,22 +58,24 @@ jobs:
           # Copy the complete public header tree from the package.
           cp -a "$INCLUDE_ROOT"/. third_party/webrtc/windows-x64/include/
 
-          # Resolve the exact Abseil revision used by Chromium branch 5735.
-          # The pin is maintained in Chromium's third_party/DEPS.
-          curl -fL --retry 5 --retry-delay 3             -o /tmp/webrtc/third_party_deps.txt             'https://chromium.googlesource.com/chromium/src/+/13db2c2a8ba8b479db16cbe56ec182de74bafda1/third_party/DEPS?format=TEXT'
-          base64 -d /tmp/webrtc/third_party_deps.txt > /tmp/webrtc/third_party_DEPS
+          # The WebRTC 5735 source DEPS pins the exact Abseil revision.
+          # Fetch the WebRTC branch DEPS directly instead of Chromium's third_party/DEPS.
+          curl -fL --retry 5 --retry-delay 3 \
+            -o /tmp/webrtc/webrtc_deps.txt \
+            'https://chromium.googlesource.com/external/webrtc/+/refs/branch-heads/5735/DEPS?format=TEXT'
+          base64 -d /tmp/webrtc/webrtc_deps.txt > /tmp/webrtc/webrtc_DEPS
 
-          # third_party/DEPS normally defines the exact Abseil pin.
-          ABSL_REV="$(grep -E "abseil_revision" /tmp/webrtc/third_party_DEPS | head -n 1 | sed -E "s/.*['\"]abseil_revision['\"][[:space:]]*:[[:space:]]*['\"]([0-9a-f]{40})['\"].*/\\1/")"
+          ABSL_REV="$(grep -E "abseil_revision" /tmp/webrtc/webrtc_DEPS | head -n 1 | sed -E "s/.*['\"]abseil_revision['\"][[:space:]]*:[[:space:]]*['\"]([0-9a-f]{40})['\"].*/\\1/")"
           if [[ ! "$ABSL_REV" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "Could not resolve a 40-character Abseil revision from Chromium 5735 third_party/DEPS"
-            grep -n -i "abseil" /tmp/webrtc/third_party_DEPS | head -n 40 || true
+            echo "Could not resolve a 40-character Abseil revision from WebRTC 5735 DEPS"
+            grep -n -i "abseil" /tmp/webrtc/webrtc_DEPS | head -n 40 || true
             exit 1
           fi
-          echo "Chromium 5735 Abseil revision: $ABSL_REV"
+          echo "WebRTC 5735 Abseil revision: $ABSL_REV"
 
           rm -rf /tmp/webrtc/abseil
-          git clone --filter=blob:none --no-checkout --depth 1             https://chromium.googlesource.com/external/github.com/abseil/abseil-cpp.git /tmp/webrtc/abseil
+          git clone --filter=blob:none --no-checkout --depth 1 \
+            https://chromium.googlesource.com/external/github.com/abseil/abseil-cpp.git /tmp/webrtc/abseil
           git -C /tmp/webrtc/abseil fetch --depth 1 origin "$ABSL_REV"
           git -C /tmp/webrtc/abseil checkout --detach "$ABSL_REV"
 
