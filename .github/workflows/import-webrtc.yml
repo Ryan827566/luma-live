@@ -24,17 +24,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/webrtc
-          curl -fL --retry 5 --retry-delay 3 \
-            -o /tmp/webrtc/webrtc.zip \
-            https://github.com/bengreenier/webrtc/releases/download/5735/5735-win-x64.zip
+          curl -fL --retry 5 --retry-delay 3             -o /tmp/webrtc/webrtc.zip             https://github.com/bengreenier/webrtc/releases/download/5735/5735-win-x64.zip
           unzip -q /tmp/webrtc/webrtc.zip -d /tmp/webrtc/pkg
 
           # The Windows package contains the public WebRTC headers and webrtc.lib.
-          # Abseil headers are shipped in the matching extras package.
-          curl -fL --retry 5 --retry-delay 3 \
-            -o /tmp/webrtc/extras.zip \
-            https://github.com/bengreenier/webrtc/releases/download/5735/5735-win-x64-extras.zip
-          unzip -q /tmp/webrtc/extras.zip -d /tmp/webrtc/extras
+          # Do not download the large extras archive: it does not contain the
+          # matching Abseil headers needed by this WebRTC build.
 
       - name: Install SDK into repository
         shell: bash
@@ -64,26 +59,32 @@ jobs:
           cp -a "$INCLUDE_ROOT"/. third_party/webrtc/windows-x64/include/
 
           # Resolve the exact Abseil revision used by Chromium branch 5735.
-          # Use Git instead of the Gitiles tar endpoint; the latter can return a
-          # truncated archive on hosted runners.
-          curl -fL --retry 5 --retry-delay 3 \
-            -o /tmp/webrtc/deps.txt \
-            'https://chromium.googlesource.com/chromium/src/+/refs/branch-heads/5735/DEPS?format=TEXT'
-          base64 -d /tmp/webrtc/deps.txt > /tmp/webrtc/DEPS
+          # The pin is maintained in Chromium's third_party/DEPS.
+          curl -fL --retry 5 --retry-delay 3             -o /tmp/webrtc/third_party_deps.txt             'https://chromium.googlesource.com/chromium/src/+/refs/branch-heads/5735/third_party/DEPS?format=TEXT'
+          base64 -d /tmp/webrtc/third_party_deps.txt > /tmp/webrtc/third_party_DEPS
+
           ABSL_REV="$(python3 - <<'PY'
 import re
 from pathlib import Path
-text = Path('/tmp/webrtc/DEPS').read_text(errors='replace')
-m = re.search(r"['\"]abseil_revision['\"][[:space:]]*:[[:space:]]*['\"]([^'\"]+)['\"]", text)
-if not m:
-    raise SystemExit("abseil_revision not found")
-print(m.group(1))
+
+text = Path('/tmp/webrtc/third_party_DEPS').read_text(errors='replace')
+patterns = [
+    r"['\"]abseil_revision['\"][[:space:]]*:[[:space:]]*['\"]([^'\"]+)['\"]",
+    r"abseil-cpp[^\n]*?@['\"]([0-9a-f]{40})['\"]",
+]
+for pattern in patterns:
+    m = re.search(pattern, text)
+    if m:
+        print(m.group(1))
+        break
+else:
+    raise SystemExit("Could not resolve the Chromium 5735 Abseil revision from third_party/DEPS")
 PY
 )"
           echo "Chromium 5735 Abseil revision: $ABSL_REV"
 
           rm -rf /tmp/webrtc/abseil
-          git clone --depth 1 https://chromium.googlesource.com/external/github.com/abseil/abseil-cpp.git /tmp/webrtc/abseil
+          git clone --filter=blob:none --no-checkout --depth 1             https://chromium.googlesource.com/external/github.com/abseil/abseil-cpp.git /tmp/webrtc/abseil
           git -C /tmp/webrtc/abseil fetch --depth 1 origin "$ABSL_REV"
           git -C /tmp/webrtc/abseil checkout --detach "$ABSL_REV"
 
