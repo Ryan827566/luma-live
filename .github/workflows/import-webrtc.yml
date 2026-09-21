@@ -58,20 +58,38 @@ jobs:
           # Copy the complete public header tree from the package.
           cp -a "$INCLUDE_ROOT"/. third_party/webrtc/windows-x64/include/
 
-          # The WebRTC 5735 source DEPS pins the exact Abseil revision.
-          # Fetch the WebRTC branch DEPS directly instead of Chromium's third_party/DEPS.
-          curl -fL --retry 5 --retry-delay 3 \
-            -o /tmp/webrtc/webrtc_deps.txt \
-            'https://chromium.googlesource.com/external/webrtc/+/refs/branch-heads/5735/DEPS?format=TEXT'
-          base64 -d /tmp/webrtc/webrtc_deps.txt > /tmp/webrtc/webrtc_DEPS
+          # Resolve the exact Abseil pin from WebRTC 5735 DEPS.
+          # Gitiles returns the DEPS file as base64; decode it with Python so
+          # padding/newline differences cannot make the shell base64 command fail.
+          python3 - <<'PY'
+import base64
+import re
+import urllib.request
+from pathlib import Path
 
-          ABSL_REV="$(grep -E "abseil_revision" /tmp/webrtc/webrtc_DEPS | head -n 1 | sed -E "s/.*['\"]abseil_revision['\"][[:space:]]*:[[:space:]]*['\"]([0-9a-f]{40})['\"].*/\\1/")"
-          if [[ ! "$ABSL_REV" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "Could not resolve a 40-character Abseil revision from WebRTC 5735 DEPS"
-            grep -n -i "abseil" /tmp/webrtc/webrtc_DEPS | head -n 40 || true
-            exit 1
-          fi
-          echo "WebRTC 5735 Abseil revision: $ABSL_REV"
+url = "https://chromium.googlesource.com/external/webrtc/+/refs/branch-heads/5735/DEPS?format=TEXT"
+raw = urllib.request.urlopen(url, timeout=30).read()
+text = base64.b64decode(raw).decode("utf-8", errors="replace")
+Path("/tmp/webrtc/webrtc_DEPS").write_text(text)
+
+patterns = [
+    r"abseil_revision\s*=\s*['\"]([0-9a-f]{40})['\"]",
+    r"['\"]abseil_revision['\"]\s*:\s*['\"]([0-9a-f]{40})['\"]",
+]
+for p in patterns:
+    m = re.search(p, text)
+    if m:
+        Path("/tmp/webrtc/absl_revision").write_text(m.group(1))
+        print("WebRTC 5735 Abseil revision:", m.group(1))
+        break
+else:
+    print("Abseil revision was not found. Matching lines:")
+    for line in text.splitlines():
+        if "abseil" in line.lower():
+            print(line)
+    raise SystemExit(1)
+PY
+          ABSL_REV="$(cat /tmp/webrtc/absl_revision)"
 
           rm -rf /tmp/webrtc/abseil
           git clone --filter=blob:none --no-checkout --depth 1 \
