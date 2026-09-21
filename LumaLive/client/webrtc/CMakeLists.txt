@@ -11,17 +11,12 @@ target_include_directories(luma_client_webrtc PUBLIC
 target_compile_features(luma_client_webrtc PUBLIC cxx_std_20)
 
 # ---------------------------------------------------------------------------
-# LumaLive bundled WebRTC
+# Bundled WebRTC SDK
 #
-# WebRTC is now part of the LumaLive repository:
-#
-#   third_party/
-#     webrtc/
-#       include/
-#       windows-x64/
-#         lib/
-#
-# No external WebRTC checkout or LumaLive_Environment_Installer is required.
+# The SDK is built with WebRTC/Chromium clang-cl but with
+# use_custom_libcxx=false. This deliberately uses the MSVC C++ standard
+# library ABI so it can be consumed by the MSVC-built LumaLive application.
+# Do not mix this with a WebRTC binary built against Chromium's custom libc++.
 # ---------------------------------------------------------------------------
 
 set(LUMALIVE_WEBRTC_SDK_ROOT "" CACHE PATH
@@ -34,49 +29,9 @@ else()
       CACHE PATH "LumaLive bundled WebRTC root")
 endif()
 
-# WebRTC public headers depend on Abseil (for example
-# absl/strings/string_view.h). The checked-in WebRTC binary alone is not
-# sufficient to compile clients, so provide a deterministic Abseil dependency.
-# A local source tree can be supplied with LUMALIVE_ABSEIL_SOURCE_DIR; otherwise
-# CMake fetches the pinned LTS release during configure.
-set(LUMALIVE_ABSEIL_SOURCE_DIR "" CACHE PATH
-    "Optional local Abseil source tree")
-
-if(LUMALIVE_ABSEIL_SOURCE_DIR)
-  if(NOT EXISTS
-      "${LUMALIVE_ABSEIL_SOURCE_DIR}/absl/strings/string_view.h")
-    message(FATAL_ERROR
-      "LUMALIVE_ABSEIL_SOURCE_DIR does not contain Abseil headers:\n"
-      "  ${LUMALIVE_ABSEIL_SOURCE_DIR}")
-  endif()
-  if(NOT TARGET absl::strings)
-    add_subdirectory("${LUMALIVE_ABSEIL_SOURCE_DIR}"
-                     "${CMAKE_BINARY_DIR}/_deps/lumalive_abseil-build"
-                     EXCLUDE_FROM_ALL)
-  endif()
-else()
-  include(FetchContent)
-  FetchContent_Declare(
-    lumalive_abseil
-    GIT_REPOSITORY https://github.com/abseil/abseil-cpp.git
-    GIT_TAG 20260107.1
-    GIT_SHALLOW TRUE
-  )
-  FetchContent_MakeAvailable(lumalive_abseil)
-endif()
-
-set(LUMALIVE_WEBRTC_INCLUDE_DIR
-    "${LUMALIVE_WEBRTC_ROOT}/include")
-
-set(LUMALIVE_WEBRTC_LIB_DIR
-    "${LUMALIVE_WEBRTC_ROOT}/windows-x64/lib")
-
-set(LUMALIVE_WEBRTC_LIBRARY
-    "${LUMALIVE_WEBRTC_LIB_DIR}/webrtc.lib")
-
-# ---------------------------------------------------------------------------
-# Validate bundled WebRTC
-# ---------------------------------------------------------------------------
+set(LUMALIVE_WEBRTC_INCLUDE_DIR "${LUMALIVE_WEBRTC_ROOT}/include")
+set(LUMALIVE_WEBRTC_LIB_DIR "${LUMALIVE_WEBRTC_ROOT}/windows-x64/lib")
+set(LUMALIVE_WEBRTC_LIBRARY "${LUMALIVE_WEBRTC_LIB_DIR}/webrtc.lib")
 
 if(NOT WIN32)
   message(FATAL_ERROR
@@ -87,27 +42,30 @@ if(NOT EXISTS
     "${LUMALIVE_WEBRTC_INCLUDE_DIR}/api/peer_connection_interface.h")
   message(FATAL_ERROR
     "Bundled WebRTC headers were not found:\n"
-    "  ${LUMALIVE_WEBRTC_INCLUDE_DIR}\n"
-    "Expected:\n"
-    "  ${LUMALIVE_WEBRTC_INCLUDE_DIR}/api/peer_connection_interface.h")
+    "  ${LUMALIVE_WEBRTC_INCLUDE_DIR}/api/peer_connection_interface.h\n"
+    "Run scripts/windows/Build-WebRTC-MSVC.ps1 followed by "
+    "scripts/windows/Import-WebRTC-SDK.ps1.")
+endif()
+
+if(NOT EXISTS "${LUMALIVE_WEBRTC_INCLUDE_DIR}/absl/strings/string_view.h")
+  message(FATAL_ERROR
+    "Bundled WebRTC Abseil headers were not found:\n"
+    "  ${LUMALIVE_WEBRTC_INCLUDE_DIR}/absl/strings/string_view.h\n"
+    "The SDK must contain the exact Abseil headers used by its WebRTC source tree.")
 endif()
 
 if(NOT EXISTS "${LUMALIVE_WEBRTC_LIBRARY}")
   message(FATAL_ERROR
     "Bundled WebRTC library was not found:\n"
     "  ${LUMALIVE_WEBRTC_LIBRARY}\n"
-    "Expected the locally built WebRTC library to be migrated into:\n"
-    "  ${LUMALIVE_WEBRTC_LIB_DIR}")
+    "Run scripts/windows/Build-WebRTC-MSVC.ps1 followed by "
+    "scripts/windows/Import-WebRTC-SDK.ps1.")
 endif()
 
-message(STATUS "LumaLive: using bundled WebRTC")
+message(STATUS "LumaLive: using bundled WebRTC SDK")
 message(STATUS "  WebRTC root   : ${LUMALIVE_WEBRTC_ROOT}")
 message(STATUS "  WebRTC include: ${LUMALIVE_WEBRTC_INCLUDE_DIR}")
 message(STATUS "  WebRTC library: ${LUMALIVE_WEBRTC_LIBRARY}")
-
-# ---------------------------------------------------------------------------
-# WebRTC compile definitions
-# ---------------------------------------------------------------------------
 
 target_compile_definitions(luma_client_webrtc PUBLIC
   LUMALIVE_HAS_WEBRTC=1
@@ -118,41 +76,18 @@ target_include_directories(luma_client_webrtc PUBLIC
   "${LUMALIVE_WEBRTC_INCLUDE_DIR}"
 )
 
+# Do not use WHOLE_ARCHIVE here. The standalone WebRTC target is already a
+# complete static library; forcing every object into the final link can expose
+# unrelated implementation objects and makes ABI/runtime diagnostics harder.
+
 target_link_libraries(luma_client_webrtc PUBLIC
-  absl::strings
+  "${LUMALIVE_WEBRTC_LIBRARY}"
+  ws2_32
+  winmm
+  dmoguids
+  msdmo
+  wmcodecdspuuid
 )
-
-# ---------------------------------------------------------------------------
-# WebRTC libraries
-#
-# The main umbrella library is currently webrtc.lib.
-# Additional WebRTC static libraries will be added to this directory during
-# the migration of the locally compiled WebRTC dependency set.
-# ---------------------------------------------------------------------------
-
-if(MSVC)
-  target_link_libraries(luma_client_webrtc PUBLIC
-    "$<LINK_LIBRARY:WHOLE_ARCHIVE,${LUMALIVE_WEBRTC_LIBRARY}>"
-    ws2_32
-    winmm
-    dmoguids
-    msdmo
-    wmcodecdspuuid
-  )
-else()
-  target_link_libraries(luma_client_webrtc PUBLIC
-    "${LUMALIVE_WEBRTC_LIBRARY}"
-    ws2_32
-    winmm
-    dmoguids
-    msdmo
-    wmcodecdspuuid
-  )
-endif()
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 add_executable(luma_client_webrtc_tests
   tests/WebRtcClientServiceTests.cpp
