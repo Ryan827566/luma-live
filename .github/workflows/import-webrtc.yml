@@ -61,34 +61,7 @@ jobs:
           # Resolve the exact Abseil pin from WebRTC 5735 DEPS.
           # Gitiles returns the DEPS file as base64; decode it with Python so
           # padding/newline differences cannot make the shell base64 command fail.
-          python3 - <<'PY'
-import base64
-import re
-import urllib.request
-from pathlib import Path
-
-url = "https://chromium.googlesource.com/external/webrtc/+/refs/branch-heads/5735/DEPS?format=TEXT"
-raw = urllib.request.urlopen(url, timeout=30).read()
-text = base64.b64decode(raw).decode("utf-8", errors="replace")
-Path("/tmp/webrtc/webrtc_DEPS").write_text(text)
-
-patterns = [
-    r"abseil_revision\s*=\s*['\"]([0-9a-f]{40})['\"]",
-    r"['\"]abseil_revision['\"]\s*:\s*['\"]([0-9a-f]{40})['\"]",
-]
-for p in patterns:
-    m = re.search(p, text)
-    if m:
-        Path("/tmp/webrtc/absl_revision").write_text(m.group(1))
-        print("WebRTC 5735 Abseil revision:", m.group(1))
-        break
-else:
-    print("Abseil revision was not found. Matching lines:")
-    for line in text.splitlines():
-        if "abseil" in line.lower():
-            print(line)
-    raise SystemExit(1)
-PY
+          python3 -c 'import base64,re,urllib.request; from pathlib import Path; raw=urllib.request.urlopen("https://chromium.googlesource.com/external/webrtc/+/refs/branch-heads/5735/DEPS?format=TEXT",timeout=30).read(); text=base64.b64decode(raw).decode("utf-8","replace"); Path("/tmp/webrtc/webrtc_DEPS").write_text(text); m=re.search(r"abseil_revision\\s*=\\s*[\\\'\\"]([0-9a-f]{40})[\\\'\\"]",text) or re.search(r"[\\\'\\"]abseil_revision[\\\'\\"]\\s*:\\s*[\\\'\\"]([0-9a-f]{40})[\\\'\\"]",text); print(m.group(1) if m else (_ for _ in ()).throw(SystemExit("Abseil revision not found"))); Path("/tmp/webrtc/absl_revision").write_text(m.group(1))' 
           ABSL_REV="$(cat /tmp/webrtc/absl_revision)"
 
           rm -rf /tmp/webrtc/abseil
