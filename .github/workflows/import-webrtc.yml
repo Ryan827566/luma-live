@@ -63,24 +63,13 @@ jobs:
           curl -fL --retry 5 --retry-delay 3             -o /tmp/webrtc/third_party_deps.txt             'https://chromium.googlesource.com/chromium/src/+/refs/branch-heads/5735/third_party/DEPS?format=TEXT'
           base64 -d /tmp/webrtc/third_party_deps.txt > /tmp/webrtc/third_party_DEPS
 
-          ABSL_REV="$(python3 - <<'PY'
-import re
-from pathlib import Path
-
-text = Path('/tmp/webrtc/third_party_DEPS').read_text(errors='replace')
-patterns = [
-    r"['\"]abseil_revision['\"][[:space:]]*:[[:space:]]*['\"]([^'\"]+)['\"]",
-    r"abseil-cpp[^\n]*?@['\"]([0-9a-f]{40})['\"]",
-]
-for pattern in patterns:
-    m = re.search(pattern, text)
-    if m:
-        print(m.group(1))
-        break
-else:
-    raise SystemExit("Could not resolve the Chromium 5735 Abseil revision from third_party/DEPS")
-PY
-)"
+          # third_party/DEPS normally defines the exact Abseil pin.
+          ABSL_REV="$(grep -E "abseil_revision" /tmp/webrtc/third_party_DEPS | head -n 1 | sed -E "s/.*['\"]abseil_revision['\"][[:space:]]*:[[:space:]]*['\"]([0-9a-f]{40})['\"].*/\\1/")"
+          if [[ ! "$ABSL_REV" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Could not resolve a 40-character Abseil revision from Chromium 5735 third_party/DEPS"
+            grep -n -i "abseil" /tmp/webrtc/third_party_DEPS | head -n 40 || true
+            exit 1
+          fi
           echo "Chromium 5735 Abseil revision: $ABSL_REV"
 
           rm -rf /tmp/webrtc/abseil
