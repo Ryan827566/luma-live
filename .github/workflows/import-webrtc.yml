@@ -1,0 +1,93 @@
+name: Import known-good Windows WebRTC SDK
+
+on:
+  push:
+    paths:
+      - ".github/workflows/import-webrtc.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  import-webrtc:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository with Git LFS
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 1
+
+      - name: Download MSVC-compatible WebRTC 5735
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/webrtc
+          curl -fL --retry 5 --retry-delay 3 \
+            -o /tmp/webrtc/webrtc.zip \
+            https://github.com/bengreenier/webrtc/releases/download/5735/5735-win-x64.zip
+          unzip -q /tmp/webrtc/webrtc.zip -d /tmp/webrtc/pkg
+
+      - name: Install SDK into repository
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          LIB="$(find /tmp/webrtc/pkg -type f -iname 'webrtc.lib' | head -n 1)"
+          if [[ -z "$LIB" ]]; then
+            echo "webrtc.lib was not found in the downloaded package"
+            find /tmp/webrtc/pkg -maxdepth 4 -type f | head -n 200
+            exit 1
+          fi
+
+          HEADER="$(find /tmp/webrtc/pkg -type f -path '*/api/peer_connection_interface.h' | head -n 1)"
+          if [[ -z "$HEADER" ]]; then
+            echo "peer_connection_interface.h was not found"
+            exit 1
+          fi
+
+          INCLUDE_ROOT="$(dirname "$(dirname "$(dirname "$HEADER")")")"
+
+          rm -rf third_party/webrtc/windows-x64
+          mkdir -p third_party/webrtc/windows-x64/lib
+          cp "$LIB" third_party/webrtc/windows-x64/lib/webrtc.lib
+
+          # Copy the complete public header tree from the package.
+          cp -a "$INCLUDE_ROOT"/. third_party/webrtc/windows-x64/include/
+
+          # Ensure the exact WebRTC Abseil headers are present.
+          if [[ ! -f third_party/webrtc/windows-x64/include/absl/strings/string_view.h ]]; then
+            echo "Downloaded SDK does not contain Abseil headers"
+            exit 1
+          fi
+
+          echo "Imported:"
+          ls -lh third_party/webrtc/windows-x64/lib/webrtc.lib
+          test -f third_party/webrtc/windows-x64/include/api/peer_connection_interface.h
+
+      - name: Verify library is MSVC-compatible
+        shell: bash
+        run: |
+          set -euo pipefail
+          # llvm-nm is available on the GitHub Ubuntu runner.
+          if llvm-nm third_party/webrtc/windows-x64/lib/webrtc.lib 2>/dev/null | grep -q 'std::__Cr::'; then
+            echo "ERROR: downloaded library contains Chromium libc++ std::__Cr symbols"
+            exit 1
+          fi
+          echo "No std::__Cr symbols detected."
+
+      - name: Commit WebRTC SDK through Git LFS
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git lfs install
+          git add third_party/webrtc/windows-x64
+          if git diff --cached --quiet; then
+            echo "No WebRTC SDK changes to commit."
+            exit 0
+          fi
+          git commit -m "chore: vendor MSVC-compatible WebRTC SDK 5735"
+          git lfs push origin HEAD
+          git push origin HEAD
