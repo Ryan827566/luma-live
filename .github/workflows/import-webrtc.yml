@@ -29,6 +29,13 @@ jobs:
             https://github.com/bengreenier/webrtc/releases/download/5735/5735-win-x64.zip
           unzip -q /tmp/webrtc/webrtc.zip -d /tmp/webrtc/pkg
 
+          # The Windows package contains the public WebRTC headers and webrtc.lib.
+          # Abseil headers are shipped in the matching extras package.
+          curl -fL --retry 5 --retry-delay 3 \
+            -o /tmp/webrtc/extras.zip \
+            https://github.com/bengreenier/webrtc/releases/download/5735/5735-win-x64-extras.zip
+          unzip -q /tmp/webrtc/extras.zip -d /tmp/webrtc/extras
+
       - name: Install SDK into repository
         shell: bash
         run: |
@@ -56,11 +63,17 @@ jobs:
           # Copy the complete public header tree from the package.
           cp -a "$INCLUDE_ROOT"/. third_party/webrtc/windows-x64/include/
 
-          # Ensure the exact WebRTC Abseil headers are present.
-          if [[ ! -f third_party/webrtc/windows-x64/include/absl/strings/string_view.h ]]; then
-            echo "Downloaded SDK does not contain Abseil headers"
+          # Add the matching Abseil headers from the 5735 extras package.
+          ABSL_HEADER="$(find /tmp/webrtc/extras -type f -path '*/absl/strings/string_view.h' | head -n 1)"
+          if [[ -z "$ABSL_HEADER" ]]; then
+            echo "Matching Abseil headers were not found in the 5735 extras package"
             exit 1
           fi
+          ABSL_ROOT="$(dirname "$(dirname "$(dirname "$(dirname "$ABSL_HEADER")")")")"
+          mkdir -p third_party/webrtc/windows-x64/include/absl
+          cp -a "$ABSL_ROOT"/absl/. third_party/webrtc/windows-x64/include/absl/
+
+          test -f third_party/webrtc/windows-x64/include/absl/strings/string_view.h
 
           echo "Imported:"
           ls -lh third_party/webrtc/windows-x64/lib/webrtc.lib
