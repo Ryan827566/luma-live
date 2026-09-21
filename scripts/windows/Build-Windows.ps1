@@ -14,6 +14,22 @@ if (-not (Test-Path $Root)) { throw "LumaLive source directory was not found: $R
 if (-not (Test-Path $WebRtcHeader)) { throw "WebRTC headers are missing. Expected: $WebRtcHeader" }
 if (-not (Test-Path $WebRtcLib)) { throw "WebRTC library is missing. Expected: $WebRtcLib" }
 
+# The existing SDK was proven to contain Chromium libc++ std::__Cr symbols.
+# Rebuild/import automatically when dumpbin detects that incompatible ABI.
+$Dumpbin = Get-Command dumpbin -ErrorAction SilentlyContinue
+if ($Dumpbin) {
+    Write-Host "Checking WebRTC C++ ABI..." -ForegroundColor Cyan
+    $badAbi = & $Dumpbin.Source /symbols $WebRtcLib 2>$null |
+        Select-String 'std::__Cr::' | Select-Object -First 1
+    if ($badAbi) {
+        Write-Host "Detected incompatible Chromium libc++ ABI in webrtc.lib." -ForegroundColor Yellow
+        & (Join-Path $RepoRoot 'scripts\windows\Build-WebRTC-MSVC.ps1')
+        if ($LASTEXITCODE -ne 0) { throw "WebRTC MSVC-STL rebuild failed." }
+        & (Join-Path $RepoRoot 'scripts\windows\Import-WebRTC-SDK.ps1')
+        if ($LASTEXITCODE -ne 0) { throw "WebRTC SDK import failed." }
+    }
+}
+
 Write-Host "Repository root: $RepoRoot" -ForegroundColor DarkGray
 Write-Host "LumaLive source:  $Root" -ForegroundColor DarkGray
 Write-Host "WebRTC headers:  $WebRtcSdkRoot\include" -ForegroundColor DarkGray
