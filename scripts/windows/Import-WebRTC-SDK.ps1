@@ -1,43 +1,46 @@
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 
-# This script lives in scripts\windows, so the repository root is three levels up.
 $RepoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
 $SdkRoot = Join-Path $RepoRoot 'third_party\webrtc\windows-x64'
-$WebRtcRoot = Join-Path $RepoRoot 'LumaLive_Environment_Installer\third_party\src'
-$WebRtcOut = Join-Path $WebRtcRoot 'out\Release'
-$WebRtcLib = Join-Path $WebRtcOut 'obj\webrtc.lib'
-$AbseilRoot = Join-Path $WebRtcRoot 'third_party\abseil-cpp'
-$AbseilHeaders = Join-Path $AbseilRoot 'absl\strings\string_view.h'
 
-if (-not (Test-Path (Join-Path $WebRtcRoot 'api\peer_connection_interface.h'))) {
-    throw "WebRTC source was not found at $WebRtcRoot"
+$roots=@(
+ (Join-Path $RepoRoot 'LumaLive_Environment_Installer\third_party\src'),
+ (Join-Path $RepoRoot 'third_party\src'),
+ (Join-Path $RepoRoot 'third_party\webrtc\src')
+)
+$WebRtcRoot=$null
+foreach($r in $roots){
+ if(Test-Path (Join-Path $r 'BUILD.gn')){$WebRtcRoot=(Resolve-Path $r).Path;break}
+ if(Test-Path $r){
+  $hit=Get-ChildItem $r -Filter BUILD.gn -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object {$_.FullName -notmatch '\\out\\'} | Select-Object -First 1
+  if($hit){$WebRtcRoot=$hit.Directory.FullName;break}
+ }
 }
-if (-not (Test-Path $WebRtcLib)) {
-    throw "WebRTC library was not found at $WebRtcLib. Run Build-WebRTC-MSVC.ps1 first."
+if(-not $WebRtcRoot -and $env:LUMALIVE_WEBRTC_SOURCE -and (Test-Path (Join-Path $env:LUMALIVE_WEBRTC_SOURCE 'BUILD.gn'))){
+ $WebRtcRoot=(Resolve-Path $env:LUMALIVE_WEBRTC_SOURCE).Path
 }
-if (-not (Test-Path $AbseilHeaders)) {
-    throw "The WebRTC source checkout does not contain its matching Abseil headers: $AbseilRoot"
-}
+if(-not $WebRtcRoot){throw 'WebRTC source checkout was not found.'}
 
-$IncludeRoot = Join-Path $SdkRoot 'include'
-$LibRoot = Join-Path $SdkRoot 'lib'
-New-Item -ItemType Directory -Force -Path $IncludeRoot, $LibRoot | Out-Null
+$WebRtcOut=Join-Path $WebRtcRoot 'out\LumaLiveRelease'
+$WebRtcLib=Join-Path $WebRtcOut 'obj\webrtc.lib'
+$AbseilRoot=Join-Path $WebRtcRoot 'third_party\abseil-cpp'
+if(-not (Test-Path (Join-Path $WebRtcRoot 'api\peer_connection_interface.h'))){throw "Invalid WebRTC source: $WebRtcRoot"}
+if(-not (Test-Path $WebRtcLib)){throw "WebRTC library not found: $WebRtcLib. Run Build-WebRTC-MSVC.ps1 first."}
+if(-not (Test-Path (Join-Path $AbseilRoot 'absl\strings\string_view.h'))){throw "Matching Abseil headers not found: $AbseilRoot"}
 
-Write-Host "Copying WebRTC headers..." -ForegroundColor Cyan
+$IncludeRoot=Join-Path $SdkRoot 'include'
+$LibRoot=Join-Path $SdkRoot 'lib'
+New-Item -ItemType Directory -Force -Path $IncludeRoot,$LibRoot | Out-Null
+
 robocopy $WebRtcRoot $IncludeRoot /E /COPY:DAT /R:2 /W:1 /XD out .git | Out-Null
-if ($LASTEXITCODE -gt 7) { throw "WebRTC header copy failed with robocopy exit code $LASTEXITCODE" }
-
-Write-Host "Copying the exact Abseil headers used by this WebRTC checkout..." -ForegroundColor Cyan
-$AbslDestination = Join-Path $IncludeRoot 'absl'
-robocopy (Join-Path $AbseilRoot 'absl') $AbslDestination /E /COPY:DAT /R:2 /W:1 | Out-Null
-if ($LASTEXITCODE -gt 7) { throw "Abseil header copy failed with robocopy exit code $LASTEXITCODE" }
-
-Write-Host "Copying WebRTC static library..." -ForegroundColor Cyan
+if($LASTEXITCODE -gt 7){throw "WebRTC header copy failed: $LASTEXITCODE"}
+robocopy (Join-Path $AbseilRoot 'absl') (Join-Path $IncludeRoot 'absl') /E /COPY:DAT /R:2 /W:1 | Out-Null
+if($LASTEXITCODE -gt 7){throw "Abseil header copy failed: $LASTEXITCODE"}
 Copy-Item $WebRtcLib (Join-Path $LibRoot 'webrtc.lib') -Force
 
-Write-Host ""
-Write-Host "Vendored WebRTC SDK is ready:" -ForegroundColor Green
-Write-Host "  $SdkRoot"
-Write-Host "  Headers: $IncludeRoot"
-Write-Host "  Library: $(Join-Path $LibRoot 'webrtc.lib')"
+Write-Host "WebRTC SDK imported successfully." -ForegroundColor Green
+Write-Host "Source: $WebRtcRoot"
+Write-Host "SDK:    $SdkRoot"
+Write-Host "Lib:    $(Join-Path $LibRoot 'webrtc.lib')"
