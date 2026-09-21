@@ -1,6 +1,7 @@
 name: Import known-good Windows WebRTC SDK
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - ".github/workflows/import-webrtc.yml"
