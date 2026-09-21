@@ -13,4 +13,7 @@
 
 # Local WebRTC checkout/build
 **/third_party/src/
-**/third_party/webrtc/
+**/third_party/webrtc/build/
+
+# Local environment installer - never commit
+LumaLive_Environment_Installer/
