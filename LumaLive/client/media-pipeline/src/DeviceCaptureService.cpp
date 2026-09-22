@@ -178,6 +178,7 @@ public:
         if (!running_) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidState, "capture service is not running");
         if (!callback) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidArgument, "video callback is empty");
         if (camera_running_) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidState, "camera capture is already running");
+        if (camera_thread_.joinable()) camera_thread_.join();
 #ifdef _WIN32
         return StartStream(CaptureDeviceType::Camera, config, {}, std::move(callback), {});
 #else
@@ -189,6 +190,7 @@ public:
         if (!running_) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidState, "capture service is not running");
         if (!callback) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidArgument, "audio callback is empty");
         if (microphone_running_) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidState, "microphone capture is already running");
+        if (microphone_thread_.joinable()) microphone_thread_.join();
 #ifdef _WIN32
         return StartStream(CaptureDeviceType::Microphone, {}, config, {}, std::move(callback));
 #else
@@ -204,6 +206,8 @@ public:
 private:
 #ifdef _WIN32
     shared::contracts::Result StartStream(CaptureDeviceType type, const CameraCaptureConfig& camera, const AudioCaptureConfig& audio, VideoFrameCallback video_cb, AudioFrameCallback audio_cb) {
+        ScopedCom com;
+        if (!com.Ok()) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::Internal, "COM initialization failed");
         IMFActivate* activate = nullptr;
         HRESULT hr = FindDevice(type == CaptureDeviceType::Camera ? camera.device_id : audio.device_id, type, &activate);
         if (FAILED(hr)) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidArgument, "capture device not found");
@@ -212,11 +216,17 @@ private:
         activate->Release();
         if (FAILED(hr)) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::Internal, "failed to activate capture device");
         IMFSourceReader* reader = nullptr;
-        hr = MFCreateSourceReaderFromMediaSource(source, nullptr, &reader);
-        source->Release();
-        if (FAILED(hr)) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::Internal, "failed to create source reader");
+        IMFAttributes* reader_attributes = nullptr;
+        MFCreateAttributes(&reader_attributes, 2);
+        if (reader_attributes) {
+            reader_attributes->SetUINT32(MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, TRUE);
+            reader_attributes->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
+        }
+        hr = MFCreateSourceReaderFromMediaSource(source, reader_attributes, &reader);
+        if (reader_attributes) reader_attributes->Release();
+        if (FAILED(hr)) { source->Shutdown(); source->Release(); return shared::contracts::Result::Failure(shared::contracts::ErrorCode::Internal, "failed to create source reader"); }
         hr = ConfigureReader(reader, type, camera, audio);
-        if (FAILED(hr)) { reader->Release(); return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidArgument, "requested capture format is not supported"); }
+        if (FAILED(hr)) { source->Shutdown(); source->Release(); reader->Release(); return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidArgument, "requested capture format is not supported"); }
 
         auto& active = type == CaptureDeviceType::Camera ? camera_running_ : microphone_running_;
         active = true;
@@ -224,38 +234,50 @@ private:
         {
             std::lock_guard reader_lock(reader_mutex_);
             reader_slot = reader;
+            (type == CaptureDeviceType::Camera ? camera_source_ : microphone_source_) = source;
         }
         std::thread worker;
         try {
-            worker = std::thread([this, reader, type, video_cb = std::move(video_cb), audio_cb = std::move(audio_cb)]() mutable {
+            worker = std::thread([this, reader, source, type, video_cb = std::move(video_cb), audio_cb = std::move(audio_cb)]() mutable {
             const HRESULT com_hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
             auto& active = type == CaptureDeviceType::Camera ? camera_running_ : microphone_running_;
             while (active && running_) {
                 DWORD stream = 0, flags = 0; LONGLONG timestamp = 0; IMFSample* sample = nullptr;
                 const HRESULT read_hr = reader->ReadSample(type == CaptureDeviceType::Camera ? MF_SOURCE_READER_FIRST_VIDEO_STREAM : MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &stream, &flags, &timestamp, &sample);
-                if (FAILED(read_hr) || (flags & MF_SOURCE_READERF_ERROR)) break;
+                if (FAILED(read_hr) || (flags & MF_SOURCE_READERF_ERROR)) { if(sample) sample->Release(); break; }
                 if (!sample) { if (flags & MF_SOURCE_READERF_ENDOFSTREAM) break; continue; }
                 IMFMediaBuffer* buffer = nullptr;
                 if (SUCCEEDED(sample->ConvertToContiguousBuffer(&buffer))) {
                     BYTE* bytes = nullptr; DWORD max_len = 0, current_len = 0;
                     if (SUCCEEDED(buffer->Lock(&bytes, &max_len, &current_len))) {
+                        std::vector<std::uint8_t> packed(bytes, bytes + current_len);
+                        buffer->Unlock();
                         if (type == CaptureDeviceType::Camera) {
                             pipeline::VideoFrame frame;
                             frame.timestamp_us = static_cast<std::uint64_t>(timestamp / 10); // MF timestamps are 100ns; pipeline uses microseconds.
                             frame.format = pipeline::PixelFormat::NV12;
-                            frame.data.assign(bytes, bytes + current_len);
+                            frame.data = std::move(packed);
                             IMFMediaType* mt = nullptr;
                             if (SUCCEEDED(reader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &mt))) {
                                 UINT32 w=0,h=0;
                                 if (SUCCEEDED(MFGetAttributeSize(mt, MF_MT_FRAME_SIZE, &w, &h))) { frame.width=w; frame.height=h; }
                                 mt->Release();
                             }
-                            if (frame.IsValid()) video_cb(std::move(frame));
+                            // 2D buffers may have padded rows. The public frame
+                            // contract is tight NV12, so normalize before delivery.
+                            IMF2DBuffer* two_d = nullptr;
+                            if (SUCCEEDED(buffer->QueryInterface(IID_PPV_ARGS(&two_d)))) {
+                                const size_t expected = size_t(frame.width)*frame.height*3/2;
+                                frame.data.resize(expected);
+                                if (FAILED(two_d->ContiguousCopyTo(frame.data.data(), static_cast<DWORD>(expected)))) frame.data.clear();
+                                two_d->Release();
+                            }
+                            if (frame.IsValid() && active) video_cb(std::move(frame));
                         } else {
                             pipeline::AudioFrame frame;
                             frame.timestamp_us = static_cast<std::uint64_t>(timestamp / 10);
                             frame.format = pipeline::AudioSampleFormat::S16;
-                            frame.data.assign(bytes, bytes + current_len);
+                            frame.data = std::move(packed);
                             IMFMediaType* mt = nullptr;
                             if (SUCCEEDED(reader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, &mt))) {
                                 UINT32 rate=0, channels=0, bits=16;
@@ -264,9 +286,8 @@ private:
                                 if (SUCCEEDED(mt->GetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, &bits)) && bits != 16) frame.format = pipeline::AudioSampleFormat::S16;
                                 mt->Release();
                             }
-                            if (frame.IsValid()) audio_cb(std::move(frame));
+                            if (frame.IsValid() && active) audio_cb(std::move(frame));
                         }
-                        buffer->Unlock();
                     }
                     buffer->Release();
                 }
@@ -276,7 +297,10 @@ private:
             {
                 std::lock_guard reader_lock(reader_mutex_);
                 if (reader_slot == reader) reader_slot = nullptr;
+                (type == CaptureDeviceType::Camera ? camera_source_ : microphone_source_) = nullptr;
             }
+            source->Shutdown();
+            source->Release();
             reader->Release();
             active = false;
             if (SUCCEEDED(com_hr)) CoUninitialize();
@@ -286,7 +310,10 @@ private:
             {
                 std::lock_guard reader_lock(reader_mutex_);
                 if (reader_slot == reader) reader_slot = nullptr;
+                (type == CaptureDeviceType::Camera ? camera_source_ : microphone_source_) = nullptr;
             }
+            source->Shutdown();
+            source->Release();
             reader->Release();
             return shared::contracts::Result::Failure(shared::contracts::ErrorCode::Internal, "failed to create capture worker thread");
         }
@@ -299,14 +326,15 @@ private:
         if (!active && !worker.joinable()) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidState, "capture stream is not running");
         active = false;
 #ifdef _WIN32
+        IMFMediaSource* source = nullptr;
         {
             std::lock_guard reader_lock(reader_mutex_);
-            IMFSourceReader* reader = (&worker == &camera_thread_) ? camera_reader_ : microphone_reader_;
-            if (reader) {
-                const DWORD stream = (&worker == &camera_thread_) ? MF_SOURCE_READER_FIRST_VIDEO_STREAM : MF_SOURCE_READER_FIRST_AUDIO_STREAM;
-                reader->Flush(stream);
-            }
+            source = (&worker == &camera_thread_) ? camera_source_ : microphone_source_;
+            if (source) source->AddRef();
         }
+        // Shutdown cancels a blocking ReadSample. Never call it while holding
+        // reader_mutex_: the worker needs that mutex before it can exit.
+        if (source) { source->Shutdown(); source->Release(); }
 #endif
         if (worker.joinable()) worker.join();
         return shared::contracts::Result::Ok();
@@ -322,6 +350,8 @@ private:
     std::mutex reader_mutex_;
     IMFSourceReader* camera_reader_{nullptr};
     IMFSourceReader* microphone_reader_{nullptr};
+    IMFMediaSource* camera_source_{nullptr};
+    IMFMediaSource* microphone_source_{nullptr};
 #endif
 };
 
