@@ -10,12 +10,14 @@
 #include "api/video/video_frame.h"
 #include "api/video/video_sink_interface.h"
 #include "api/jsep.h"
+#include "absl/types/optional.h"
 #include "media/base/video_broadcaster.h"
+#include "rtc_base/thread.h"
 #include "rtc_base/ref_counted_object.h"
 #include <atomic>
 #include <cstring>
 #include <mutex>
-#include <optional>
+#include <utility>
 #include <set>
 #include <vector>
 
@@ -32,7 +34,7 @@ public:
     void AddOrUpdateSink(::rtc::VideoSinkInterface<::webrtc::VideoFrame>* sink, const ::rtc::VideoSinkWants& wants) override { broadcaster_.AddOrUpdateSink(sink, wants); }
     void RemoveSink(::rtc::VideoSinkInterface<::webrtc::VideoFrame>* sink) override { broadcaster_.RemoveSink(sink); }
     bool is_screencast() const override { return false; }
-    std::optional<bool> needs_denoising() const override { return std::nullopt; }
+    absl::optional<bool> needs_denoising() const override { return absl::nullopt; }
     bool GetStats(::webrtc::VideoTrackSourceInterface::Stats* stats) override { if (!stats) return false; const int width=width_.load(std::memory_order_relaxed); const int height=height_.load(std::memory_order_relaxed); if (width==0 || height==0) return false; stats->input_width=width; stats->input_height=height; return true; }
     bool SupportsEncodedOutput() const override { return false; }
     void GenerateKeyFrame() override {}
