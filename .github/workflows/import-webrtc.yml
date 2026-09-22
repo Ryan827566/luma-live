@@ -39,7 +39,7 @@ jobs:
             exit 1
           fi
 
-          INCLUDE_ROOT="$(dirname "$(dirname "$(dirname "$HEADER")")")"
+          INCLUDE_ROOT="$(dirname "$(dirname "$HEADER")")"
 
           rm -rf third_party/webrtc/include
           mkdir -p third_party/webrtc/include third_party/webrtc/release
