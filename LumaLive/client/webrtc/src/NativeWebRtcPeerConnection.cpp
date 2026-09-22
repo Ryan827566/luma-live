@@ -13,7 +13,9 @@
 #include "media/base/video_broadcaster.h"
 #include "rtc_base/ref_counted_object.h"
 #include <atomic>
+#include <cstring>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <vector>
 
