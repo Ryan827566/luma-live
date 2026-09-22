@@ -17,13 +17,35 @@ endforeach()
 enable_testing()
 
 if(MSVC)
-  # Bundled WebRTC is built with the static MSVC runtime (/MT). Keep the
-  # entire LumaLive static-library graph on the same runtime to avoid
-  # LNK2038 and mixed MSVCRT/libcpmt link conflicts.
-  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  # ---------------------------------------------------------------------------
+  # 预编译的 webrtc.lib（bengreenier/webrtc 等）内部是按 Release 风格编译的：
+  #   RuntimeLibrary           = MT_StaticRelease   (即 /MT，不是 /MTd)
+  #   _ITERATOR_DEBUG_LEVEL    = 0
+  #   NDEBUG 生效（RTC_DCHECK 被编译掉，ExpectationToString 符号不存在）
+  #
+  # 因此整个 LumaLive 静态库图必须与之对齐，否则 Debug 配置会报：
+  #   LNK2038  RuntimeLibrary / _ITERATOR_DEBUG_LEVEL 不匹配
+  #   LNK2001  _CrtDbgReport
+  #   LNK2019  webrtc::...SequenceCheckerImpl::ExpectationToString
+  #
+  # 路线B：让 Debug 也走 /MT + _ITERATOR_DEBUG_LEVEL=0 + NDEBUG。
+  # 代价：Debug 下 assert() 与 STL 迭代器检查失效，但断点/看变量调试不受影响。
+  # ---------------------------------------------------------------------------
+
+  # 1) Debug 与 Release 统一使用多线程静态运行库 /MT（不加 d）
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:>")
+
+  # 2) Debug 也使用 _ITERATOR_DEBUG_LEVEL=0，匹配预编译 webrtc.lib
+  add_compile_definitions($<$<CONFIG:Debug>:_ITERATOR_DEBUG_LEVEL=0>)
+
+  # 3) Debug 也定义 NDEBUG，关闭 assert / RTC_DCHECK，
+  #    避免引用预编译 webrtc.lib 中不存在的 ExpectationToString 符号
+  add_compile_definitions($<$<CONFIG:Debug>:NDEBUG>)
+
   add_compile_options(/W4 /permissive- /EHsc)
   add_compile_definitions(UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
