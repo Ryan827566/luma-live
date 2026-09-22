@@ -15,6 +15,8 @@ void text(HDC dc,const wchar_t* s,RECT r,int size,COLORREF c,bool bold=false,UIN
  auto f=CreateFontW(-size,0,0,0,bold?FW_SEMIBOLD:FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
  auto o=SelectObject(dc,f);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,c);DrawTextW(dc,s,-1,&r,flags);SelectObject(dc,o);DeleteObject(f);
 }
+void text(HDC dc,const std::wstring& s,RECT r,int size,COLORREF c,bool bold=false,UINT flags=DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS){text(dc,s.c_str(),r,size,c,bold,flags);}
+
 void box(HDC dc,RECT r,COLORREF bg,COLORREF border=BORDER){fill(dc,r,bg);auto p=CreatePen(PS_SOLID,1,border);auto o=SelectObject(dc,p);auto b=static_cast<HBRUSH>(GetStockObject(NULL_BRUSH));auto ob=SelectObject(dc,b);Rectangle(dc,r.left,r.top,r.right,r.bottom);SelectObject(dc,ob);SelectObject(dc,o);DeleteObject(p);}
 void pill(HDC dc,RECT r,const wchar_t* s,COLORREF bg,COLORREF fg=TEXT){fill(dc,r,bg);text(dc,s,r,9,fg,true,DT_CENTER|DT_VCENTER|DT_SINGLELINE);}
 void section(HDC dc,RECT r,const wchar_t* title,const wchar_t* sub){
@@ -29,8 +31,8 @@ void button(HDC dc,RECT r,const wchar_t* s,bool primary=false,bool danger=false)
  text(dc,s,r,10,primary?RGB(8,9,12):(danger?RGB(245,180,186):TEXT),true,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
 }
 void row(HDC dc,RECT r,const wchar_t* left,const wchar_t* right,COLORREF rightColor=TEXT){
- text(dc,left,{r.left+10,r.top,r.left+(r.right-r.left)*.62,r.bottom},10,TEXT);
- text(dc,right,{r.left+(r.right-r.left)*.62,r.top,r.right-10,r.bottom},10,rightColor,true,DT_RIGHT|DT_VCENTER|DT_SINGLELINE);
+ text(dc,left,{r.left+10,r.top,r.left+(r.right-r.left)*62/100,r.bottom},10,TEXT);
+ text(dc,right,{r.left+(r.right-r.left)*62/100,r.top,r.right-10,r.bottom},10,rightColor,true,DT_RIGHT|DT_VCENTER|DT_SINGLELINE);
  line(dc,r.left,r.bottom-1,r.right,r.bottom-1,BORDER);
 }
 
@@ -109,7 +111,7 @@ private:
         fill(d,{a.left+18,a.top+60,a.left+w-18,a.top+242},RGB(27,34,41));fill(d,{a.left+w+gap+18,a.top+60,a.right-18,a.top+242},RGB(29,37,44));
         pill(d,{a.left+w-115,a.top+205,a.left+w-28,a.top+234},L"CAM 1",RGB(22,91,64),GREEN);
         section(d,{a.left,a.top+274,a.left+w,a.bottom},L"MULTI-CHANNEL AUDIO MIXER",L"MAIN BUS · MIC/AUX · SYSTEM B · GAME OUT");
-        for(int i=0;i<4;i++){int y=a.top+325+i*48;text(d,(i==0?L"MIC / AUX":i==1?L"SYSTEM B":i==2?L"GAME OUT":L"MONITOR"),{a.left+14,y,a.left+110,y+22},10,TEXT,true);fill(d,{a.left+115,y+7,a.left+w-20,y+15},BORDER);fill(d,{a.left+115,y+7,a.left+115+(w-135)*(c.audio_gain[i]/100.0),y+15},GREEN);}
+        for(int i=0;i<4;i++){int y=a.top+325+i*48;text(d,(i==0?L"MIC / AUX":i==1?L"SYSTEM B":i==2?L"GAME OUT":L"MONITOR"),{a.left+14,y,a.left+110,y+22},10,TEXT,true);fill(d,{a.left+115,y+7,a.left+w-20,y+15},BORDER);fill(d,{a.left+115,y+7,a.left+115+(w-135)*c.audio_gain[i]/100,y+15},GREEN);}
         section(d,{a.left+w+gap,a.top+274,a.right,a.bottom},L"STREAM & ENCODER",L"Hardware encoding · NVENC · low latency");
         metric(d,a.left+w+gap+14,a.top+330,150,L"STREAM",c.live?L"ONLINE":L"OFFLINE",c.live?GREEN:RED);
         metric(d,a.left+w+gap+174,a.top+330,150,L"BITRATE",L"6200 kb/s");
@@ -122,13 +124,13 @@ private:
         button(d,{a.left+14,a.top+64,a.left+110,a.top+100},L"CUT",true);
         button(d,{a.left+120,a.top+64,a.left+216,a.top+100},L"LIVE");
         button(d,{a.left+226,a.top+64,a.left+350,a.top+100},L"QUICK TRANS");
-        section(d,{a.left,a.top+128,a.left+(a.right-a.left)*.62,a.bottom},L"PROGRAM OUT",L"Brio 4K Feed · Microphone AUX");
-        fill(d,{a.left+18,a.top+195,a.left+(a.right-a.left)*.62-18,a.top+445},RGB(27,34,41));
-        section(d,{a.left+(a.right-a.left)*.64,a.top+128,a.right,a.bottom},L"SCENES",L"One-click live switching");
-        text(d,L"Intro Camera",{a.left+(a.right-a.left)*.64+14,a.top+190,a.right-14,a.top+225},10,GREEN,true);
-        text(d,L"Screen Capture",{a.left+(a.right-a.left)*.64+14,a.top+230,a.right-14,a.top+265},10,TEXT);
-        text(d,L"Bitrate 6200 kb/s",{a.left+(a.right-a.left)*.64+14,a.top+305,a.right-14,a.top+340},10,TEXT);
-        text(d,L"RTT "+std::to_wstring(c.rtt_ms)+L" ms",{a.left+(a.right-a.left)*.64+14,a.top+340,a.right-14,a.top+375},10,MUTED);
+        section(d,{a.left,a.top+128,a.left+(a.right-a.left)*62/100,a.bottom},L"PROGRAM OUT",L"Brio 4K Feed · Microphone AUX");
+        fill(d,{a.left+18,a.top+195,a.left+(a.right-a.left)*62/100-18,a.top+445},RGB(27,34,41));
+        section(d,{a.left+(a.right-a.left)*64/100,a.top+128,a.right,a.bottom},L"SCENES",L"One-click live switching");
+        text(d,L"Intro Camera",{a.left+(a.right-a.left)*64/100+14,a.top+190,a.right-14,a.top+225},10,GREEN,true);
+        text(d,L"Screen Capture",{a.left+(a.right-a.left)*64/100+14,a.top+230,a.right-14,a.top+265},10,TEXT);
+        text(d,L"Bitrate 6200 kb/s",{a.left+(a.right-a.left)*64/100+14,a.top+305,a.right-14,a.top+340},10,TEXT);
+        text(d,L"RTT "+std::to_wstring(c.rtt_ms)+L" ms",{a.left+(a.right-a.left)*64/100+14,a.top+340,a.right-14,a.top+375},10,MUTED);
     }
     static void paintScenes(HDC d,const RECT& a,StudioPageContext& c){
         section(d,{a.left,a.top,a.left+225,a.bottom},L"LAYERS",L"Scene hierarchy");
@@ -147,17 +149,17 @@ private:
     }
     static void paintInspector(HDC d,const RECT& a,StudioPageContext& c){
         section(d,{a.left,a.top,a.right,a.top+95},L"ADVANCED SETTINGS · MAIN LIVE DECK FEED",L"Transform, audio routing and effects");
-        section(d,{a.left,a.top+108,a.left+(a.right-a.left)*.58,a.bottom},L"GEOMETRIC TRANSFORMATIONS",L"1920×1080 canvas");
-        row(d,{a.left+14,a.top+165,a.left+(a.right-a.left)*.58-14,a.top+198},L"Position",L"X 120 px · Y 80 px");
-        row(d,{a.left+14,a.top+198,a.left+(a.right-a.left)*.58-14,a.top+231},L"Dimensions",L"1920 × 1080");
-        row(d,{a.left+14,a.top+231,a.left+(a.right-a.left)*.58-14,a.top+264},L"Scale",L"1.00x");
-        row(d,{a.left+14,a.top+264,a.left+(a.right-a.left)*.58-14,a.top+297},L"Rotation",L"0.0°");
-        section(d,{a.left+(a.right-a.left)*.60,a.top+108,a.right,a.bottom},L"AUDIO ROUTING / EFFECTS",L"Hardware limiter active");
-        row(d,{a.left+(a.right-a.left)*.60+14,a.top+165,a.right-14,a.top+198},L"Audio boost",L"+3.5 dB",GREEN);
-        row(d,{a.left+(a.right-a.left)*.60+14,a.top+198,a.right-14,a.top+231},L"Sync offset",L"15 ms");
-        row(d,{a.left+(a.right-a.left)*.60+14,a.top+231,a.right-14,a.top+264},L"Limiter",L"ACTIVE",GREEN);
-        button(d,{a.left+(a.right-a.left)*.60+14,a.top+292,a.right-14,a.top+332},L"APPLY PROPERTIES",true);
-        button(d,{a.left+(a.right-a.left)*.60+14,a.top+342,a.right-14,a.top+382},L"RESET TRANSFORMS");
+        section(d,{a.left,a.top+108,a.left+(a.right-a.left)*58/100,a.bottom},L"GEOMETRIC TRANSFORMATIONS",L"1920×1080 canvas");
+        row(d,{a.left+14,a.top+165,a.left+(a.right-a.left)*58/100-14,a.top+198},L"Position",L"X 120 px · Y 80 px");
+        row(d,{a.left+14,a.top+198,a.left+(a.right-a.left)*58/100-14,a.top+231},L"Dimensions",L"1920 × 1080");
+        row(d,{a.left+14,a.top+231,a.left+(a.right-a.left)*58/100-14,a.top+264},L"Scale",L"1.00x");
+        row(d,{a.left+14,a.top+264,a.left+(a.right-a.left)*58/100-14,a.top+297},L"Rotation",L"0.0°");
+        section(d,{a.left+(a.right-a.left)*60/100,a.top+108,a.right,a.bottom},L"AUDIO ROUTING / EFFECTS",L"Hardware limiter active");
+        row(d,{a.left+(a.right-a.left)*60/100+14,a.top+165,a.right-14,a.top+198},L"Audio boost",L"+3.5 dB",GREEN);
+        row(d,{a.left+(a.right-a.left)*60/100+14,a.top+198,a.right-14,a.top+231},L"Sync offset",L"15 ms");
+        row(d,{a.left+(a.right-a.left)*60/100+14,a.top+231,a.right-14,a.top+264},L"Limiter",L"ACTIVE",GREEN);
+        button(d,{a.left+(a.right-a.left)*60/100+14,a.top+292,a.right-14,a.top+332},L"APPLY PROPERTIES",true);
+        button(d,{a.left+(a.right-a.left)*60/100+14,a.top+342,a.right-14,a.top+382},L"RESET TRANSFORMS");
         text(d,c.notice.c_str(),{a.left+18,a.bottom-35,a.right-18,a.bottom-10},9,MUTED);
     }
     static void paintMedia(HDC d,const RECT& a,StudioPageContext& c){
@@ -203,19 +205,19 @@ private:
         row(d,{a.right-208,a.top+202,a.right-16,a.top+235},L"Jitter buffer",L"4.5 ms");
     }
     static void paintLive(HDC d,const RECT& a,StudioPageContext& c){
-        section(d,{a.left,a.top,a.left+(a.right-a.left)*.66,a.top+285},L"PREVIEW / PROGRAM",L"Broadcast Station · 6200 kb/s");
-        fill(d,{a.left+16,a.top+62,a.left+(a.right-a.left)*.33-8,a.top+260},RGB(27,34,41));fill(d,{a.left+(a.right-a.left)*.33+8,a.top+62,a.left+(a.right-a.left)*.66-16,a.top+260},RGB(30,38,44));
-        section(d,{a.left+(a.right-a.left)*.69,a.top,a.right,a.bottom},L"BROADCAST STATION",L"RTMP endpoint · OAuth stream key");
-        button(d,{a.left+(a.right-a.left)*.69+14,a.top+70,a.right-14,a.top+112},L"STOP BROADCAST",false,true);
-        button(d,{a.left+(a.right-a.left)*.69+14,a.top+122,a.right-14,a.top+164},c.broadcast_paused?L"RESUME HARDWARE RECORDING":L"PAUSE HARDWARE RECORDING");
-        text(d,c.oauth_locked?L"Endpoint changes restricted until idle":L"Endpoint editing unlocked",{a.left+(a.right-a.left)*.69+14,a.top+185,a.right-14,a.top+225},9,c.oauth_locked?AMBER:GREEN,true);
-        metric(d,a.left+(a.right-a.left)*.69+14,a.top+245,120,L"DROPPED",L"0",GREEN);
-        metric(d,a.left+(a.right-a.left)*.69+140,a.top+245,120,L"JITTER",L"1.2 ms",GREEN);
-        metric(d,a.left+(a.right-a.left)*.69+14,a.top+305,120,L"VIDEO",L"5820 kbps");
-        metric(d,a.left+(a.right-a.left)*.69+140,a.top+305,120,L"PING",L"8 ms");
-        section(d,{a.left,a.top+300,a.left+(a.right-a.left)*.66,a.bottom},L"ENCODER INTEGRITY",L"NVIDIA NVENC · Low Latency Enabled");
-        row(d,{a.left+14,a.top+360,a.left+(a.right-a.left)*.66-14,a.top+393},L"Keyframe interval",L"2 seconds");
-        row(d,{a.left+14,a.top+393,a.left+(a.right-a.left)*.66-14,a.top+426},L"Multipass",L"Quarter Resolution");
+        section(d,{a.left,a.top,a.left+(a.right-a.left)*66/100,a.top+285},L"PREVIEW / PROGRAM",L"Broadcast Station · 6200 kb/s");
+        fill(d,{a.left+16,a.top+62,a.left+(a.right-a.left)*33/100-8,a.top+260},RGB(27,34,41));fill(d,{a.left+(a.right-a.left)*33/100+8,a.top+62,a.left+(a.right-a.left)*66/100-16,a.top+260},RGB(30,38,44));
+        section(d,{a.left+(a.right-a.left)*69/100,a.top,a.right,a.bottom},L"BROADCAST STATION",L"RTMP endpoint · OAuth stream key");
+        button(d,{a.left+(a.right-a.left)*69/100+14,a.top+70,a.right-14,a.top+112},L"STOP BROADCAST",false,true);
+        button(d,{a.left+(a.right-a.left)*69/100+14,a.top+122,a.right-14,a.top+164},c.broadcast_paused?L"RESUME HARDWARE RECORDING":L"PAUSE HARDWARE RECORDING");
+        text(d,c.oauth_locked?L"Endpoint changes restricted until idle":L"Endpoint editing unlocked",{a.left+(a.right-a.left)*69/100+14,a.top+185,a.right-14,a.top+225},9,c.oauth_locked?AMBER:GREEN,true);
+        metric(d,a.left+(a.right-a.left)*69/100+14,a.top+245,120,L"DROPPED",L"0",GREEN);
+        metric(d,a.left+(a.right-a.left)*69/100+140,a.top+245,120,L"JITTER",L"1.2 ms",GREEN);
+        metric(d,a.left+(a.right-a.left)*69/100+14,a.top+305,120,L"VIDEO",L"5820 kbps");
+        metric(d,a.left+(a.right-a.left)*69/100+140,a.top+305,120,L"PING",L"8 ms");
+        section(d,{a.left,a.top+300,a.left+(a.right-a.left)*66/100,a.bottom},L"ENCODER INTEGRITY",L"NVIDIA NVENC · Low Latency Enabled");
+        row(d,{a.left+14,a.top+360,a.left+(a.right-a.left)*66/100-14,a.top+393},L"Keyframe interval",L"2 seconds");
+        row(d,{a.left+14,a.top+393,a.left+(a.right-a.left)*66/100-14,a.top+426},L"Multipass",L"Quarter Resolution");
     }
     static void paintRecordings(HDC d,const RECT& a,StudioPageContext& c){
         section(d,{a.left,a.top,a.right,a.top+65},L"RECORDED SESSIONS",L"Search output files · All formats · MP4 only · Rebuild database");
@@ -284,15 +286,15 @@ private:
         section(d,{a.left,a.top,a.right,a.top+70},L"INITIALIZATION WIZARD",L"Project Template · Canvas Specs · Hardware Detect · Output Router · Final Dry-run");
         const wchar_t* steps[]={L"Project Template",L"Canvas Specs",L"Hardware Detect",L"Output Router",L"Final Dry-run"};
         for(int i=0;i<5;i++){int x=a.left+14+i*190;box(d,{x,a.top+92,x+172,a.top+138},i==c.setup_step?RGB(21,77,55):CARD2,i==c.setup_step?GREEN:BORDER);text(d,steps[i],{x+6,a.top+92,x+166,a.top+138},9,i==c.setup_step?GREEN:TEXT,i==c.setup_step,true);}
-        section(d,{a.left,a.top+165,a.left+(a.right-a.left)*.65,a.bottom},L"SETUP PROFILE",L"Broadcast project initialization");
-        row(d,{a.left+16,a.top+225,a.left+(a.right-a.left)*.65-16,a.top+258},L"Project",c.project.c_str());
-        row(d,{a.left+16,a.top+258,a.left+(a.right-a.left)*.65-16,a.top+291},L"Output",L"RTMP · OAuth");
-        row(d,{a.left+16,a.top+291,a.left+(a.right-a.left)*.65-16,a.top+324},L"Encoder",L"NVENC");
-        row(d,{a.left+16,a.top+324,a.left+(a.right-a.left)*.65-16,a.top+357},L"Dry-run",L"READY",GREEN);
-        section(d,{a.left+(a.right-a.left)*.68,a.top+165,a.right,a.bottom},L"STEP ACTIONS",L"Use Next to advance");
-        button(d,{a.left+(a.right-a.left)*.68+16,a.top+225,a.right-16,a.top+265},L"PREVIOUS");
-        button(d,{a.left+(a.right-a.left)*.68+16,a.top+275,a.right-16,a.top+315},L"NEXT",true);
-        button(d,{a.left+(a.right-a.left)*.68+16,a.top+325,a.right-16,a.top+365},L"RUN DRY-RUN");
+        section(d,{a.left,a.top+165,a.left+(a.right-a.left)*65/100,a.bottom},L"SETUP PROFILE",L"Broadcast project initialization");
+        row(d,{a.left+16,a.top+225,a.left+(a.right-a.left)*65/100-16,a.top+258},L"Project",c.project.c_str());
+        row(d,{a.left+16,a.top+258,a.left+(a.right-a.left)*65/100-16,a.top+291},L"Output",L"RTMP · OAuth");
+        row(d,{a.left+16,a.top+291,a.left+(a.right-a.left)*65/100-16,a.top+324},L"Encoder",L"NVENC");
+        row(d,{a.left+16,a.top+324,a.left+(a.right-a.left)*65/100-16,a.top+357},L"Dry-run",L"READY",GREEN);
+        section(d,{a.left+(a.right-a.left)*68/100,a.top+165,a.right,a.bottom},L"STEP ACTIONS",L"Use Next to advance");
+        button(d,{a.left+(a.right-a.left)*68/100+16,a.top+225,a.right-16,a.top+265},L"PREVIOUS");
+        button(d,{a.left+(a.right-a.left)*68/100+16,a.top+275,a.right-16,a.top+315},L"NEXT",true);
+        button(d,{a.left+(a.right-a.left)*68/100+16,a.top+325,a.right-16,a.top+365},L"RUN DRY-RUN");
     }
     static void paintAlerts(HDC d,const RECT& a,StudioPageContext& c){
         const std::wstring alertSub=L"Operational recovery actions · "+std::to_wstring(c.alert_count)+L" active alerts"; section(d,{a.left,a.top,a.right,a.top+70},L"ALERTS & RECOVERY",alertSub.c_str());
