@@ -8,6 +8,7 @@
 #include "api/video/i420_buffer.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_sink_interface.h"
+#include "api/jsep.h"
 #include "media/base/video_broadcaster.h"
 #include "rtc_base/ref_counted_object.h"
 #include <atomic>
@@ -90,7 +91,7 @@ public:
     void OnDataChannel(::rtc::scoped_refptr<::webrtc::DataChannelInterface>) override {}
     void OnIceGatheringChange(::webrtc::PeerConnectionInterface::IceGatheringState) override {}
     void OnConnectionChange(::webrtc::PeerConnectionInterface::PeerConnectionState state) override { if(cb_.on_connection_state) cb_.on_connection_state(std::string(::webrtc::PeerConnectionInterface::AsString(state))); }
-    void OnIceCandidate(const ::webrtc::IceCandidate* c) override { if(cb_.on_local_ice_candidate && c){ const std::string s = c->candidate().ToCandidateAttribute(true); cb_.on_local_ice_candidate(c->sdp_mid(), c->sdp_mline_index(), s); } }
+    void OnIceCandidate(const ::webrtc::IceCandidateInterface* c) override { if(cb_.on_local_ice_candidate && c){ const std::string s = c->candidate().ToCandidateAttribute(true); cb_.on_local_ice_candidate(c->sdp_mid(), c->sdp_mline_index(), s); } }
     void OnTrack(::rtc::scoped_refptr<::webrtc::RtpTransceiverInterface> transceiver) override {
         if(!transceiver || !transceiver->receiver()) return; auto track=transceiver->receiver()->track(); if(!track) return;
         if(track->kind()==::webrtc::MediaStreamTrackInterface::kVideoKind){ auto video=static_cast<::webrtc::VideoTrackInterface*>(track.get()); video->AddOrUpdateSink(&video_sink_,::rtc::VideoSinkWants()); }
@@ -244,7 +245,7 @@ bool NativeWebRtcPeerConnection::SetRemoteDescription(
     return true;
 }
 
-bool NativeWebRtcPeerConnection::AddRemoteIceCandidate(const std::string&mid,int mline,const std::string&candidate){if(!impl_->pc)return false;::webrtc::SdpParseError e;std::unique_ptr<::webrtc::IceCandidate> c(::webrtc::CreateIceCandidate(mid,mline,candidate,&e));return c&&impl_->pc->AddIceCandidate(c.get());}
+bool NativeWebRtcPeerConnection::AddRemoteIceCandidate(const std::string&mid,int mline,const std::string&candidate){if(!impl_->pc)return false;::webrtc::SdpParseError e;std::unique_ptr<::webrtc::IceCandidateInterface> c(::webrtc::CreateIceCandidate(mid,mline,candidate,&e));return c&&impl_->pc->AddIceCandidate(c.get());}
 void NativeWebRtcPeerConnection::Close(){if(impl_&&impl_->pc){impl_->pc->Close();impl_->pc=nullptr;}if(impl_){impl_->factory=nullptr;impl_->video_source=nullptr;impl_->audio_source=nullptr;impl_->observer.reset();if(impl_->signaling_thread){impl_->signaling_thread->Stop();impl_->signaling_thread.reset();}if(impl_->worker_thread){impl_->worker_thread->Stop();impl_->worker_thread.reset();}if(impl_->network_thread){impl_->network_thread->Stop();impl_->network_thread.reset();}}}
 bool NativeWebRtcPeerConnection::IsInitialized()const noexcept{return impl_&&impl_->pc!=nullptr;}
 }
