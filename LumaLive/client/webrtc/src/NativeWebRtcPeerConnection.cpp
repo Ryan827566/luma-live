@@ -1,9 +1,16 @@
 #include "NativeWebRtcPeerConnection.hpp"
 
 #if defined(LUMALIVE_HAS_WEBRTC)
-#include "api/create_modular_peer_connection_factory.h"
-#include "api/enable_media_with_defaults.h"
-#include "api/environment/environment_factory.h"
+#include "api/audio_codecs/builtin_audio_decoder_factory.h"
+#include "api/audio_codecs/builtin_audio_encoder_factory.h"
+#include "api/video_codecs/video_decoder_factory_template.h"
+#include "api/video_codecs/video_decoder_factory_template_libvpx_vp8_adapter.h"
+#include "api/video_codecs/video_decoder_factory_template_libvpx_vp9_adapter.h"
+#include "api/video_codecs/video_encoder_factory_template.h"
+#include "api/video_codecs/video_encoder_factory_template_libvpx_vp8_adapter.h"
+#include "api/video_codecs/video_encoder_factory_template_libvpx_vp9_adapter.h"
+#include "api/create_peerconnection_factory.h"
+#include "rtc_base/thread.h"
 #include "api/media_stream_interface.h"
 #include "api/notifier.h"
 #include "api/scoped_refptr.h"
@@ -108,6 +115,9 @@ private:
 
 struct NativeWebRtcPeerConnection::Impl {
     WebRtcCallbacks cb;
+    std::unique_ptr<::rtc::Thread> network_thread;
+    std::unique_ptr<::rtc::Thread> worker_thread;
+    std::unique_ptr<::rtc::Thread> signaling_thread;
     ::webrtc::scoped_refptr<::webrtc::PeerConnectionFactoryInterface> factory;
     ::webrtc::scoped_refptr<::webrtc::PeerConnectionInterface> pc;
     ::webrtc::scoped_refptr<LocalVideoSource> video_source;
@@ -120,7 +130,33 @@ NativeWebRtcPeerConnection::NativeWebRtcPeerConnection():impl_(std::make_unique<
 NativeWebRtcPeerConnection::~NativeWebRtcPeerConnection(){Close();}
 bool NativeWebRtcPeerConnection::Initialize(const luma::contracts::PeerConnectionConfig& config, WebRtcCallbacks callbacks){
     if(impl_->pc) return false; impl_->cb=std::move(callbacks); impl_->observer=std::make_unique<PcObserver>(impl_->cb);
-    ::webrtc::PeerConnectionFactoryDependencies deps; deps.env=::webrtc::CreateEnvironment(); ::webrtc::EnableMediaWithDefaults(deps); impl_->factory=::webrtc::CreateModularPeerConnectionFactory(std::move(deps)); if(!impl_->factory)return false;
+    impl_->network_thread=::rtc::Thread::CreateWithSocketServer();
+    impl_->worker_thread=::rtc::Thread::Create();
+    impl_->signaling_thread=::rtc::Thread::CreateWithSocketServer();
+    if(!impl_->network_thread || !impl_->worker_thread || !impl_->signaling_thread) return false;
+    if(!impl_->network_thread->Start() || !impl_->worker_thread->Start() || !impl_->signaling_thread->Start()) return false;
+
+    auto audio_encoder_factory=::webrtc::CreateBuiltinAudioEncoderFactory();
+    auto audio_decoder_factory=::webrtc::CreateBuiltinAudioDecoderFactory();
+    auto video_encoder_factory=std::make_unique<::webrtc::VideoEncoderFactoryTemplate<
+        ::webrtc::LibvpxVp8EncoderTemplateAdapter,
+        ::webrtc::LibvpxVp9EncoderTemplateAdapter>>();
+    auto video_decoder_factory=std::make_unique<::webrtc::VideoDecoderFactoryTemplate<
+        ::webrtc::LibvpxVp8DecoderTemplateAdapter,
+        ::webrtc::LibvpxVp9DecoderTemplateAdapter>>();
+
+    impl_->factory=::webrtc::CreatePeerConnectionFactory(
+        impl_->network_thread.get(),
+        impl_->worker_thread.get(),
+        impl_->signaling_thread.get(),
+        nullptr,
+        std::move(audio_encoder_factory),
+        std::move(audio_decoder_factory),
+        std::move(video_encoder_factory),
+        std::move(video_decoder_factory),
+        nullptr,
+        nullptr);
+    if(!impl_->factory) return false;
     ::webrtc::PeerConnectionInterface::RTCConfiguration rtc_config; rtc_config.sdp_semantics=::webrtc::SdpSemantics::kUnifiedPlan; for(const auto& url:config.stun_servers){::webrtc::PeerConnectionInterface::IceServer s;s.urls.push_back(url);rtc_config.servers.push_back(s);} if(!config.turn_url.empty()){::webrtc::PeerConnectionInterface::IceServer s;s.urls.push_back(config.turn_url);s.username=config.turn_username;s.password=config.turn_password;rtc_config.servers.push_back(s);}
     ::webrtc::PeerConnectionDependencies pdeps(impl_->observer.get());
     auto result=impl_->factory->CreatePeerConnectionOrError(rtc_config,std::move(pdeps));
@@ -228,7 +264,7 @@ bool NativeWebRtcPeerConnection::SetRemoteDescription(
 }
 
 bool NativeWebRtcPeerConnection::AddRemoteIceCandidate(const std::string&mid,int mline,const std::string&candidate){if(!impl_->pc)return false;::webrtc::SdpParseError e;std::unique_ptr<::webrtc::IceCandidate> c(::webrtc::CreateIceCandidate(mid,mline,candidate,&e));return c&&impl_->pc->AddIceCandidate(c.get());}
-void NativeWebRtcPeerConnection::Close(){if(impl_&&impl_->pc){impl_->pc->Close();impl_->pc=nullptr;}if(impl_){impl_->factory=nullptr;impl_->video_source=nullptr;impl_->audio_source=nullptr;impl_->observer.reset();}}
+void NativeWebRtcPeerConnection::Close(){if(impl_&&impl_->pc){impl_->pc->Close();impl_->pc=nullptr;}if(impl_){impl_->factory=nullptr;impl_->video_source=nullptr;impl_->audio_source=nullptr;impl_->observer.reset();if(impl_->signaling_thread){impl_->signaling_thread->Stop();impl_->signaling_thread.reset();}if(impl_->worker_thread){impl_->worker_thread->Stop();impl_->worker_thread.reset();}if(impl_->network_thread){impl_->network_thread->Stop();impl_->network_thread.reset();}}}
 bool NativeWebRtcPeerConnection::IsInitialized()const noexcept{return impl_&&impl_->pc!=nullptr;}
 }
 #else
