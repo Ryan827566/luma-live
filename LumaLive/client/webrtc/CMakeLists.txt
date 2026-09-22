@@ -9,12 +9,12 @@ target_include_directories(luma_client_webrtc PUBLIC
 )
 target_compile_features(luma_client_webrtc PUBLIC cxx_std_20)
 
-if(MSVC)
-  set_property(TARGET luma_client_webrtc PROPERTY
-    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-  target_compile_options(luma_client_webrtc INTERFACE
-    "$<$<CONFIG:Debug>:/MTd>$<$<NOT:$<CONFIG:Debug>>:/MT>")
-endif()
+# ---------------------------------------------------------------------------
+# 运行库统一交给顶层 CMAKE_MSVC_RUNTIME_LIBRARY（/MT）决定。
+# 预编译 webrtc.lib 是 /MT + _ITERATOR_DEBUG_LEVEL=0 + NDEBUG 编译的，
+# 所以本库和依赖它的目标都必须对齐 /MT，否则会报 LNK2038 / LNK2019。
+# 不要在此处硬编码 /MTd，也不要通过 INTERFACE 传染给依赖者。
+# ---------------------------------------------------------------------------
 
 # WebRTC is a repository-owned SDK. No absolute developer-machine paths and no
 # configure-time network downloads are allowed.
@@ -28,24 +28,12 @@ endif()
 
 set(LUMALIVE_WEBRTC_INCLUDE_DIR "${LUMALIVE_WEBRTC_SDK_ROOT}/include")
 
-if(CMAKE_CONFIGURATION_TYPES)
-  set(LUMALIVE_WEBRTC_LIB_DIR
-      "${LUMALIVE_WEBRTC_SDK_ROOT}/release"
-      CACHE PATH "WebRTC Release library directory")
-else()
-  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(LUMALIVE_WEBRTC_LIB_DIR
-        "${LUMALIVE_WEBRTC_SDK_ROOT}/debug"
-        CACHE PATH "WebRTC Debug library directory")
-  else()
-    set(LUMALIVE_WEBRTC_LIB_DIR
-        "${LUMALIVE_WEBRTC_SDK_ROOT}/release"
-        CACHE PATH "WebRTC Release library directory")
-  endif()
-endif()
+# 预编译包只有一个 webrtc.lib（内部就是 /MT），Debug/Release 都用它。
+set(LUMALIVE_WEBRTC_LIB_DIR
+    "${LUMALIVE_WEBRTC_SDK_ROOT}/release"
+    CACHE PATH "WebRTC library directory")
 
-set(LUMALIVE_WEBRTC_LIBRARY
-    "${LUMALIVE_WEBRTC_LIB_DIR}/webrtc.lib")
+set(LUMALIVE_WEBRTC_LIBRARY "${LUMALIVE_WEBRTC_LIB_DIR}/webrtc.lib")
 
 if(NOT EXISTS "${LUMALIVE_WEBRTC_INCLUDE_DIR}/api/peer_connection_interface.h")
   message(FATAL_ERROR
