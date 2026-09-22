@@ -295,7 +295,7 @@ private:
         button(d,{a.left+(a.right-a.left)*.68+16,a.top+325,a.right-16,a.top+365},L"RUN DRY-RUN");
     }
     static void paintAlerts(HDC d,const RECT& a,StudioPageContext& c){
-        section(d,{a.left,a.top,a.right,a.top+70},L"ALERTS & RECOVERY",L"Operational recovery actions · "+std::to_wstring(c.alert_count)+L" active alerts");
+        const std::wstring alertSub=L"Operational recovery actions · "+std::to_wstring(c.alert_count)+L" active alerts"; section(d,{a.left,a.top,a.right,a.top+70},L"ALERTS & RECOVERY",alertSub.c_str());
         const wchar_t* titles[]={L"RTMP disconnect · automatic reconnect active",L"Camera USB bus reset required",L"GOP buffer nearing capacity",L"Disk space below 200 GB threshold"};
         const wchar_t* actions[]={L"BACKUP NODE",L"USB BUS RESET",L"FLUSH GOP BUFFER",L"OPEN STORAGE"};
         for(int i=0;i<4;i++){int y=a.top+88+i*78;box(d,{a.left+12,y,a.right-12,y+62},i==0?RGB(69,44,23):CARD2,i==0?AMBER:BORDER);text(d,titles[i],{a.left+26,y+8,a.right-210,y+34},10,TEXT,true);button(d,{a.right-190,y+13,a.right-28,y+47},actions[i],i==0);}
