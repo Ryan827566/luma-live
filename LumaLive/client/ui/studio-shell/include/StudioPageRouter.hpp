@@ -10,13 +10,12 @@ public:
     StudioPageRouter();
     StudioPageRouter(const StudioPageRouter&) = delete;
     StudioPageRouter& operator=(const StudioPageRouter&) = delete;
-
     void navigate(StudioPage page) noexcept;
     StudioPage current() const noexcept { return current_; }
     const IStudioPage& page() const noexcept;
+    IStudioPage& page() noexcept;
     const std::vector<StudioPage>& navigation() const noexcept { return navigation_; }
     static const wchar_t* label(StudioPage page) noexcept;
-
 private:
     StudioPage current_{StudioPage::Main};
     std::vector<StudioPage> navigation_;
