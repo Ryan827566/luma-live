@@ -1,0 +1,6 @@
+add_library(luma_adapters_pgvector STATIC src/PgVectorAdapterService.cpp)
+target_include_directories(luma_adapters_pgvector PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_adapters_pgvector PUBLIC cxx_std_20)
+add_executable(luma_adapters_pgvector_tests tests/PgVectorAdapterServiceTests.cpp)
+target_link_libraries(luma_adapters_pgvector_tests PRIVATE luma_adapters_pgvector)
+add_test(NAME luma_adapters_pgvector_tests COMMAND luma_adapters_pgvector_tests)

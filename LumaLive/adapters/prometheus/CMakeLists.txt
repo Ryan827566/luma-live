@@ -1,0 +1,6 @@
+add_library(luma_adapters_prometheus STATIC src/PrometheusAdapterService.cpp)
+target_include_directories(luma_adapters_prometheus PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_adapters_prometheus PUBLIC cxx_std_20)
+add_executable(luma_adapters_prometheus_tests tests/PrometheusAdapterServiceTests.cpp)
+target_link_libraries(luma_adapters_prometheus_tests PRIVATE luma_adapters_prometheus)
+add_test(NAME luma_adapters_prometheus_tests COMMAND luma_adapters_prometheus_tests)

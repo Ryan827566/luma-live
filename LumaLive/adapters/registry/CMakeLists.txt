@@ -1,0 +1,6 @@
+add_library(luma_adapters_registry STATIC src/AdapterRegistry.cpp)
+target_include_directories(luma_adapters_registry PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_adapters_registry PUBLIC cxx_std_20)
+add_executable(luma_adapters_registry_tests tests/AdapterRegistryTests.cpp)
+target_link_libraries(luma_adapters_registry_tests PRIVATE luma_adapters_registry)
+add_test(NAME luma_adapters_registry_tests COMMAND luma_adapters_registry_tests)

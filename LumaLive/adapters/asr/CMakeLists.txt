@@ -1,0 +1,6 @@
+add_library(luma_adapters_asr STATIC src/AsrProviderAdapterService.cpp)
+target_include_directories(luma_adapters_asr PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_adapters_asr PUBLIC cxx_std_20)
+add_executable(luma_adapters_asr_tests tests/AsrProviderAdapterServiceTests.cpp)
+target_link_libraries(luma_adapters_asr_tests PRIVATE luma_adapters_asr)
+add_test(NAME luma_adapters_asr_tests COMMAND luma_adapters_asr_tests)

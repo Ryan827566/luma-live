@@ -1,0 +1,6 @@
+add_library(luma_admin_config STATIC src/AdminConfigService.cpp)
+target_include_directories(luma_admin_config PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_admin_config PUBLIC cxx_std_20)
+add_executable(luma_admin_config_tests tests/AdminConfigServiceTests.cpp)
+target_link_libraries(luma_admin_config_tests PRIVATE luma_admin_config)
+add_test(NAME luma_admin_config_tests COMMAND luma_admin_config_tests)

@@ -1,0 +1,4 @@
+add_library(luma_safety STATIC src/SafetyServiceImpl.cpp)
+target_include_directories(luma_safety PUBLIC include)
+target_link_libraries(luma_safety PUBLIC luma_shared)
+target_compile_features(luma_safety PUBLIC cxx_std_20)

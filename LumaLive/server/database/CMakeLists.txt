@@ -1,0 +1,6 @@
+add_library(luma_server_database STATIC src/ServerDatabaseService.cpp)
+target_include_directories(luma_server_database PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_server_database PUBLIC cxx_std_20)
+add_executable(luma_server_database_tests tests/ServerDatabaseServiceTests.cpp)
+target_link_libraries(luma_server_database_tests PRIVATE luma_server_database)
+add_test(NAME luma_server_database_tests COMMAND luma_server_database_tests)

@@ -1,0 +1,6 @@
+add_library(luma_ai_guardrails STATIC src/AiGuardrailService.cpp)
+target_include_directories(luma_ai_guardrails PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_ai_guardrails PUBLIC cxx_std_20)
+add_executable(luma_ai_guardrails_tests tests/AiGuardrailServiceTests.cpp)
+target_link_libraries(luma_ai_guardrails_tests PRIVATE luma_ai_guardrails)
+add_test(NAME luma_ai_guardrails_tests COMMAND luma_ai_guardrails_tests)

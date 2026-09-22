@@ -1,0 +1,6 @@
+add_library(luma_client_alert STATIC src/AlertClientService.cpp)
+target_include_directories(luma_client_alert PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_client_alert PUBLIC cxx_std_20)
+add_executable(luma_client_alert_tests tests/AlertClientServiceTests.cpp)
+target_link_libraries(luma_client_alert_tests PRIVATE luma_client_alert)
+add_test(NAME luma_client_alert_tests COMMAND luma_client_alert_tests)

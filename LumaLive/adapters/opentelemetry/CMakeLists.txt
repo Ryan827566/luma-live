@@ -1,0 +1,6 @@
+add_library(luma_adapters_opentelemetry STATIC src/OpenTelemetryAdapterService.cpp)
+target_include_directories(luma_adapters_opentelemetry PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_adapters_opentelemetry PUBLIC cxx_std_20)
+add_executable(luma_adapters_opentelemetry_tests tests/OpenTelemetryAdapterServiceTests.cpp)
+target_link_libraries(luma_adapters_opentelemetry_tests PRIVATE luma_adapters_opentelemetry)
+add_test(NAME luma_adapters_opentelemetry_tests COMMAND luma_adapters_opentelemetry_tests)

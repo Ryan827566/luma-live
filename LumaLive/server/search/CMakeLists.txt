@@ -1,0 +1,6 @@
+add_library(luma_server_search STATIC src/ServerSearchService.cpp)
+target_include_directories(luma_server_search PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_server_search PUBLIC cxx_std_20)
+add_executable(luma_server_search_tests tests/ServerSearchServiceTests.cpp)
+target_link_libraries(luma_server_search_tests PRIVATE luma_server_search)
+add_test(NAME luma_server_search_tests COMMAND luma_server_search_tests)

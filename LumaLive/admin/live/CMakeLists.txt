@@ -1,0 +1,6 @@
+add_library(luma_admin_live STATIC src/AdminLiveService.cpp)
+target_include_directories(luma_admin_live PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_admin_live PUBLIC cxx_std_20)
+add_executable(luma_admin_live_tests tests/AdminLiveServiceTests.cpp)
+target_link_libraries(luma_admin_live_tests PRIVATE luma_admin_live)
+add_test(NAME luma_admin_live_tests COMMAND luma_admin_live_tests)

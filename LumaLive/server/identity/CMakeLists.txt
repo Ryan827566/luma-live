@@ -1,0 +1,6 @@
+add_library(luma_server_identity STATIC src/IdentityService.cpp)
+target_include_directories(luma_server_identity PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_server_identity PUBLIC cxx_std_20)
+add_executable(luma_server_identity_tests tests/IdentityServiceTests.cpp)
+target_link_libraries(luma_server_identity_tests PRIVATE luma_server_identity)
+add_test(NAME luma_server_identity_tests COMMAND luma_server_identity_tests)

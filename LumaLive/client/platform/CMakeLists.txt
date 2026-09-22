@@ -1,0 +1,4 @@
+add_library(luma_platform STATIC src/PlatformServiceImpl.cpp)
+target_include_directories(luma_platform PUBLIC include)
+target_link_libraries(luma_platform PUBLIC luma_shared)
+target_compile_features(luma_platform PUBLIC cxx_std_20)

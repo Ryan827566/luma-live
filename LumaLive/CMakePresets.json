@@ -1,0 +1,57 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 4,
+    "minor": 2,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-vs2026-x64",
+      "displayName": "Windows Visual Studio 2026 x64",
+      "description": "Visual Studio 18 2026 generator with MSVC v145 targeting x64 and an external WebRTC checkout/build supplied through environment variables.",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "toolset": "v145",
+      "binaryDir": "${sourceDir}/build/vs2026-x64",
+      "cacheVariables": {
+        "CMAKE_CXX_STANDARD": "20",
+        "CMAKE_CXX_STANDARD_REQUIRED": "ON",
+        "CMAKE_CXX_EXTENSIONS": "OFF",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-vs2026-debug",
+      "displayName": "Visual Studio 2026 x64 Debug",
+      "configurePreset": "windows-vs2026-x64",
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-vs2026-release",
+      "displayName": "Visual Studio 2026 x64 Release",
+      "configurePreset": "windows-vs2026-x64",
+      "configuration": "Release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-vs2026-debug-tests",
+      "configurePreset": "windows-vs2026-x64",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-vs2026-release-tests",
+      "configurePreset": "windows-vs2026-x64",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+add_library(luma_api_gateway STATIC src/ApiGatewayImpl.cpp)
+target_include_directories(luma_api_gateway PUBLIC include)
+target_link_libraries(luma_api_gateway PUBLIC luma_shared)
+target_compile_features(luma_api_gateway PUBLIC cxx_std_20)

@@ -1,0 +1,6 @@
+add_library(luma_adapters_http STATIC src/HttpAdapterService.cpp)
+target_include_directories(luma_adapters_http PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_adapters_http PUBLIC cxx_std_20)
+add_executable(luma_adapters_http_tests tests/HttpAdapterServiceTests.cpp)
+target_link_libraries(luma_adapters_http_tests PRIVATE luma_adapters_http)
+add_test(NAME luma_adapters_http_tests COMMAND luma_adapters_http_tests)

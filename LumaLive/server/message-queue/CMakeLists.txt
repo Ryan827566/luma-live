@@ -1,0 +1,6 @@
+add_library(luma_server_message_queue STATIC src/ServerMessageQueueService.cpp)
+target_include_directories(luma_server_message_queue PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_server_message_queue PUBLIC cxx_std_20)
+add_executable(luma_server_message_queue_tests tests/ServerMessageQueueServiceTests.cpp)
+target_link_libraries(luma_server_message_queue_tests PRIVATE luma_server_message_queue)
+add_test(NAME luma_server_message_queue_tests COMMAND luma_server_message_queue_tests)

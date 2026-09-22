@@ -1,0 +1,6 @@
+add_library(luma_client_interaction STATIC src/InteractionClientService.cpp)
+target_include_directories(luma_client_interaction PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_client_interaction PUBLIC cxx_std_20)
+add_executable(luma_client_interaction_tests tests/InteractionClientServiceTests.cpp)
+target_link_libraries(luma_client_interaction_tests PRIVATE luma_client_interaction)
+add_test(NAME luma_client_interaction_tests COMMAND luma_client_interaction_tests)

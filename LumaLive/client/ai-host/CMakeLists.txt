@@ -1,0 +1,6 @@
+add_library(luma_client_ai_host STATIC src/AiHostClientService.cpp)
+target_include_directories(luma_client_ai_host PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_client_ai_host PUBLIC cxx_std_20)
+add_executable(luma_client_ai_host_tests tests/AiHostClientServiceTests.cpp)
+target_link_libraries(luma_client_ai_host_tests PRIVATE luma_client_ai_host)
+add_test(NAME luma_client_ai_host_tests COMMAND luma_client_ai_host_tests)

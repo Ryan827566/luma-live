@@ -1,0 +1,6 @@
+add_library(luma_adapters_translation STATIC src/TranslationProviderAdapterService.cpp)
+target_include_directories(luma_adapters_translation PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_adapters_translation PUBLIC cxx_std_20)
+add_executable(luma_adapters_translation_tests tests/TranslationProviderAdapterServiceTests.cpp)
+target_link_libraries(luma_adapters_translation_tests PRIVATE luma_adapters_translation)
+add_test(NAME luma_adapters_translation_tests COMMAND luma_adapters_translation_tests)

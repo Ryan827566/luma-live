@@ -1,0 +1,4 @@
+add_library(luma_content STATIC src/ContentServiceImpl.cpp)
+target_include_directories(luma_content PUBLIC include)
+target_link_libraries(luma_content PUBLIC luma_shared)
+target_compile_features(luma_content PUBLIC cxx_std_20)

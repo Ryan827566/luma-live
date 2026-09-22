@@ -1,0 +1,6 @@
+add_library(luma_client_social STATIC src/SocialClientService.cpp)
+target_include_directories(luma_client_social PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_client_social PUBLIC cxx_std_20)
+add_executable(luma_client_social_tests tests/SocialClientServiceTests.cpp)
+target_link_libraries(luma_client_social_tests PRIVATE luma_client_social)
+add_test(NAME luma_client_social_tests COMMAND luma_client_social_tests)

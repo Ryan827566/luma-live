@@ -1,0 +1,6 @@
+add_library(luma_admin_ai STATIC src/AdminAiService.cpp)
+target_include_directories(luma_admin_ai PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_admin_ai PUBLIC cxx_std_20)
+add_executable(luma_admin_ai_tests tests/AdminAiServiceTests.cpp)
+target_link_libraries(luma_admin_ai_tests PRIVATE luma_admin_ai)
+add_test(NAME luma_admin_ai_tests COMMAND luma_admin_ai_tests)

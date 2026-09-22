@@ -1,0 +1,4 @@
+add_library(luma_model_router STATIC src/ModelRouterImpl.cpp)
+target_include_directories(luma_model_router PUBLIC include)
+target_link_libraries(luma_model_router PUBLIC luma_shared)
+target_compile_features(luma_model_router PUBLIC cxx_std_20)

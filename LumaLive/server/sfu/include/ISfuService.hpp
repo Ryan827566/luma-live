@@ -1,0 +1,10 @@
+#pragma once
+#include "contracts/errors/Error.hpp"
+namespace luma::server::sfu {
+class ISfuService {
+public:
+    virtual ~ISfuService() = default;
+    virtual shared::contracts::Result Start() = 0;
+    virtual shared::contracts::Result Stop() = 0;
+};
+}

@@ -1,0 +1,6 @@
+add_library(luma_admin_moderation STATIC src/AdminModerationService.cpp)
+target_include_directories(luma_admin_moderation PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_admin_moderation PUBLIC cxx_std_20)
+add_executable(luma_admin_moderation_tests tests/AdminModerationServiceTests.cpp)
+target_link_libraries(luma_admin_moderation_tests PRIVATE luma_admin_moderation)
+add_test(NAME luma_admin_moderation_tests COMMAND luma_admin_moderation_tests)

@@ -1,0 +1,7 @@
+add_library(luma_client_live STATIC src/LiveClientService.cpp src/LivePublishSession.cpp)
+target_include_directories(luma_client_live PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(luma_client_live PUBLIC cxx_std_20)
+target_link_libraries(luma_client_live PUBLIC luma_client_media_pipeline luma_client_webrtc luma_client_signaling)
+add_executable(luma_client_live_tests tests/LiveClientServiceTests.cpp)
+target_link_libraries(luma_client_live_tests PRIVATE luma_client_live)
+add_test(NAME luma_client_live_tests COMMAND luma_client_live_tests)
