@@ -6,9 +6,9 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
 $Root = Join-Path $RepoRoot 'LumaLive'
 $WebRtcSdkRoot = Join-Path $RepoRoot 'third_party\webrtc'
-$WebRtcLibRoot = Join-Path $WebRtcSdkRoot 'windows-x64'
+$WebRtcLibRoot = Join-Path $WebRtcSdkRoot 'release'
 $WebRtcHeader = Join-Path $WebRtcSdkRoot 'include\api\peer_connection_interface.h'
-$WebRtcLib = Join-Path $WebRtcLibRoot 'lib\webrtc.lib'
+$WebRtcLib = Join-Path $WebRtcLibRoot 'webrtc.lib'
 
 if (-not (Test-Path $Root)) { throw "LumaLive source directory was not found: $Root" }
 if (-not (Test-Path $WebRtcHeader)) { throw "WebRTC headers are missing. Expected: $WebRtcHeader" }
@@ -33,7 +33,7 @@ if ($Dumpbin) {
 Write-Host "Repository root: $RepoRoot" -ForegroundColor DarkGray
 Write-Host "LumaLive source:  $Root" -ForegroundColor DarkGray
 Write-Host "WebRTC headers:  $WebRtcSdkRoot\include" -ForegroundColor DarkGray
-Write-Host "WebRTC libraries: $WebRtcLibRoot\lib" -ForegroundColor DarkGray
+Write-Host "WebRTC libraries: $WebRtcLibRoot" -ForegroundColor DarkGray
 
 $ProgramFilesX86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
 $VsWhereCandidates = @(
