@@ -136,13 +136,13 @@ bool NativeWebRtcPeerConnection::Initialize(const luma::contracts::PeerConnectio
         impl_->network_thread.get(),
         impl_->worker_thread.get(),
         impl_->signaling_thread.get(),
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr);
+        ::rtc::scoped_refptr<::webrtc::AudioDeviceModule>{},
+        ::rtc::scoped_refptr<::webrtc::AudioEncoderFactory>{},
+        ::rtc::scoped_refptr<::webrtc::AudioDecoderFactory>{},
+        std::unique_ptr<::webrtc::VideoEncoderFactory>{},
+        std::unique_ptr<::webrtc::VideoDecoderFactory>{},
+        ::rtc::scoped_refptr<::webrtc::AudioMixer>{},
+        ::rtc::scoped_refptr<::webrtc::AudioProcessing>{});
     if(!impl_->factory) return false;
     ::webrtc::PeerConnectionInterface::RTCConfiguration rtc_config; rtc_config.sdp_semantics=::webrtc::SdpSemantics::kUnifiedPlan; for(const auto& url:config.stun_servers){::webrtc::PeerConnectionInterface::IceServer s;s.urls.push_back(url);rtc_config.servers.push_back(s);} if(!config.turn_url.empty()){::webrtc::PeerConnectionInterface::IceServer s;s.urls.push_back(config.turn_url);s.username=config.turn_username;s.password=config.turn_password;rtc_config.servers.push_back(s);}
     ::webrtc::PeerConnectionDependencies pdeps(impl_->observer.get());
