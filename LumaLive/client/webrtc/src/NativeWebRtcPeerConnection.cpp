@@ -8,7 +8,7 @@
 #include "api/video/i420_buffer.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_sink_interface.h"
-#include "api/video/video_broadcaster.h"
+#include "media/base/video_broadcaster.h"
 #include "rtc_base/ref_counted_object.h"
 #include <atomic>
 #include <mutex>
