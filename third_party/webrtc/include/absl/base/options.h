@@ -121,7 +121,8 @@
 // absl::optional is a typedef of std::optional, use the feature macro
 // ABSL_USES_STD_OPTIONAL.
 
-#define ABSL_OPTION_USE_STD_OPTIONAL 2
+// Match the bundled webrtc.lib: absl::optional, not std::optional.
+#define ABSL_OPTION_USE_STD_OPTIONAL 0
 
 
 // ABSL_OPTION_USE_STD_STRING_VIEW
@@ -199,7 +200,8 @@
 // be changed to a new, unique identifier name.  In particular "head" is not
 // allowed.
 
-#define ABSL_OPTION_USE_INLINE_NAMESPACE 1
+// The bundled WebRTC SDK exports unversioned absl symbols.
+#define ABSL_OPTION_USE_INLINE_NAMESPACE 0
 #define ABSL_OPTION_INLINE_NAMESPACE_NAME lts_20230802
 
 // ABSL_OPTION_HARDENED

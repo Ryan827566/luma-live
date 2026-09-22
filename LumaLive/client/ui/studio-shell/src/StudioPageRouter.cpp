@@ -79,7 +79,7 @@ public:
         if(id_==StudioPage::Inspector && y>100&&y<260){c.notice=L"Transform property updated · Apply Properties is ready";return true;}
         if(id_==StudioPage::Media && y>90&&y<430){c.selected_asset=L"Selected media asset";c.notice=L"Asset selected · ready to insert into active scene";return true;}
         if(id_==StudioPage::Audio && y>80){
-            int ch=(y-80)/92;if(ch>=0&&ch<4){if(x<a.left+120)c.audio_muted[ch]=!c.audio_muted[ch];else if(x<a.left+190)c.audio_solo[ch]=!c.audio_solo[ch];else c.audio_gain[ch]=std::max(0,std::min(100,(x-a.left-200)*100/std::max(1,a.right-a.left-420)));c.notice=L"Audio channel updated";return true;}
+            int ch=(y-80)/92;if(ch>=0&&ch<4){if(x<a.left+120)c.audio_muted[ch]=!c.audio_muted[ch];else if(x<a.left+190)c.audio_solo[ch]=!c.audio_solo[ch];else c.audio_gain[ch]=std::max(0,std::min(100,(x-static_cast<int>(a.left)-200)*100/std::max(1,static_cast<int>(a.right-a.left)-420)));c.notice=L"Audio channel updated";return true;}
         }
         if(id_==StudioPage::WebRtc && y>85&&y<390){c.selected_peer=(y<185?L"John Doe":y<285?L"Jane Smith":L"Guest Speaker 3");c.notice=L"Peer selected · connection details updated";return true;}
         if(id_==StudioPage::Live){
