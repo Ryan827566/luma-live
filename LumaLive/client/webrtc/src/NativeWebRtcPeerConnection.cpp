@@ -1,16 +1,6 @@
 #include "NativeWebRtcPeerConnection.hpp"
 
 #if defined(LUMALIVE_HAS_WEBRTC)
-#include "api/audio_codecs/builtin_audio_decoder_factory.h"
-#include "api/audio_codecs/builtin_audio_encoder_factory.h"
-#include "api/video_codecs/video_decoder_factory_template.h"
-#include "api/video_codecs/video_decoder_factory_template_libvpx_vp8_adapter.h"
-#include "api/video_codecs/video_decoder_factory_template_libvpx_vp9_adapter.h"
-#include "api/video_codecs/video_encoder_factory_template.h"
-#include "api/video_codecs/video_encoder_factory_template_libvpx_vp8_adapter.h"
-#include "api/video_codecs/video_encoder_factory_template_libvpx_vp9_adapter.h"
-#include "api/create_peerconnection_factory.h"
-#include "rtc_base/thread.h"
 #include "api/media_stream_interface.h"
 #include "api/notifier.h"
 #include "api/scoped_refptr.h"
@@ -136,24 +126,15 @@ bool NativeWebRtcPeerConnection::Initialize(const luma::contracts::PeerConnectio
     if(!impl_->network_thread || !impl_->worker_thread || !impl_->signaling_thread) return false;
     if(!impl_->network_thread->Start() || !impl_->worker_thread->Start() || !impl_->signaling_thread->Start()) return false;
 
-    auto audio_encoder_factory=::webrtc::CreateBuiltinAudioEncoderFactory();
-    auto audio_decoder_factory=::webrtc::CreateBuiltinAudioDecoderFactory();
-    auto video_encoder_factory=std::make_unique<::webrtc::VideoEncoderFactoryTemplate<
-        ::webrtc::LibvpxVp8EncoderTemplateAdapter,
-        ::webrtc::LibvpxVp9EncoderTemplateAdapter>>();
-    auto video_decoder_factory=std::make_unique<::webrtc::VideoDecoderFactoryTemplate<
-        ::webrtc::LibvpxVp8DecoderTemplateAdapter,
-        ::webrtc::LibvpxVp9DecoderTemplateAdapter>>();
-
     impl_->factory=::webrtc::CreatePeerConnectionFactory(
         impl_->network_thread.get(),
         impl_->worker_thread.get(),
         impl_->signaling_thread.get(),
         nullptr,
-        std::move(audio_encoder_factory),
-        std::move(audio_decoder_factory),
-        std::move(video_encoder_factory),
-        std::move(video_decoder_factory),
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
         nullptr,
         nullptr);
     if(!impl_->factory) return false;
