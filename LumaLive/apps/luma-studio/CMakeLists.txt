@@ -1,3 +1,5 @@
 add_executable(luma_studio WIN32 src/main.cpp)
+add_subdirectory(../../client/ui/studio-preview studio-preview)
+target_link_libraries(luma_studio PRIVATE luma_studio_preview)
 target_compile_features(luma_studio PRIVATE cxx_std_20)
 target_link_libraries(luma_studio PRIVATE luma_shared luma_studio_domain luma_studio_application luma_scene_editor_ui $<$<PLATFORM_ID:Windows>:user32 gdi32>)
