@@ -43,6 +43,10 @@ endif()
 # Older SDKs in this repository do not contain Abseil headers. Use a pinned
 # header source only until Import-WebRTC-SDK.ps1 replaces it with the exact
 # headers from the WebRTC checkout. No Abseil binary is linked here.
+target_include_directories(luma_client_webrtc PUBLIC "${LUMALIVE_WEBRTC_INCLUDE_DIR}")
+
+# If the bundled SDK does not contain Abseil headers, add the pinned Abseil
+# headers in addition to the WebRTC include directory.
 if(NOT EXISTS "${LUMALIVE_WEBRTC_INCLUDE_DIR}/absl/strings/string_view.h")
   include(FetchContent)
   FetchContent_Declare(
@@ -53,8 +57,6 @@ if(NOT EXISTS "${LUMALIVE_WEBRTC_INCLUDE_DIR}/absl/strings/string_view.h")
   )
   FetchContent_MakeAvailable(lumalive_abseil)
   target_include_directories(luma_client_webrtc PUBLIC "${lumalive_abseil_SOURCE_DIR}")
-else()
-  target_include_directories(luma_client_webrtc PUBLIC "${LUMALIVE_WEBRTC_INCLUDE_DIR}")
 endif()
 
 target_compile_definitions(luma_client_webrtc PUBLIC
