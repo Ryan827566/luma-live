@@ -17,6 +17,10 @@ endforeach()
 enable_testing()
 
 if(MSVC)
+  # Bundled WebRTC is built with the static MSVC runtime (/MT). Keep the
+  # entire LumaLive static-library graph on the same runtime to avoid
+  # LNK2038 and mixed MSVCRT/libcpmt link conflicts.
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
   add_compile_options(/W4 /permissive- /EHsc)
   add_compile_definitions(UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
