@@ -20,23 +20,23 @@ namespace {
 
 class LocalVideoSource : public ::webrtc::Notifier<::webrtc::VideoTrackSourceInterface> {
 public:
-    static ::webrtc::scoped_refptr<LocalVideoSource> Create() { return ::webrtc::scoped_refptr<LocalVideoSource>(new ::webrtc::RefCountedObject<LocalVideoSource>()); }
+    static ::rtc::scoped_refptr<LocalVideoSource> Create() { return ::rtc::scoped_refptr<LocalVideoSource>(new ::rtc::RefCountedObject<LocalVideoSource>()); }
     ::webrtc::MediaSourceInterface::SourceState state() const override { return state_; }
     bool remote() const override { return false; }
     void RegisterObserver(::webrtc::ObserverInterface* o) override { std::lock_guard lock(observer_mutex_); observers_.insert(o); }
     void UnregisterObserver(::webrtc::ObserverInterface* o) override { std::lock_guard lock(observer_mutex_); observers_.erase(o); }
-    void AddOrUpdateSink(::webrtc::VideoSinkInterface<::webrtc::VideoFrame>* sink, const ::webrtc::VideoSinkWants& wants) override { broadcaster_.AddOrUpdateSink(sink, wants); }
-    void RemoveSink(::webrtc::VideoSinkInterface<::webrtc::VideoFrame>* sink) override { broadcaster_.RemoveSink(sink); }
+    void AddOrUpdateSink(::rtc::VideoSinkInterface<::webrtc::VideoFrame>* sink, const ::rtc::VideoSinkWants& wants) override { broadcaster_.AddOrUpdateSink(sink, wants); }
+    void RemoveSink(::rtc::VideoSinkInterface<::webrtc::VideoFrame>* sink) override { broadcaster_.RemoveSink(sink); }
     bool is_screencast() const override { return false; }
     std::optional<bool> needs_denoising() const override { return std::nullopt; }
     bool GetStats(::webrtc::VideoTrackSourceInterface::Stats* stats) override { if (!stats) return false; const int width=width_.load(std::memory_order_relaxed); const int height=height_.load(std::memory_order_relaxed); if (width==0 || height==0) return false; stats->input_width=width; stats->input_height=height; return true; }
     bool SupportsEncodedOutput() const override { return false; }
     void GenerateKeyFrame() override {}
-    void AddEncodedSink(::webrtc::VideoSinkInterface<::webrtc::RecordableEncodedFrame>*) override {}
-    void RemoveEncodedSink(::webrtc::VideoSinkInterface<::webrtc::RecordableEncodedFrame>*) override {}
+    void AddEncodedSink(::rtc::VideoSinkInterface<::webrtc::RecordableEncodedFrame>*) override {}
+    void RemoveEncodedSink(::rtc::VideoSinkInterface<::webrtc::RecordableEncodedFrame>*) override {}
     void Push(const ::webrtc::VideoFrame& frame) { width_.store(frame.width(), std::memory_order_relaxed); height_.store(frame.height(), std::memory_order_relaxed); broadcaster_.OnFrame(frame); }
 private:
-    ::webrtc::VideoBroadcaster broadcaster_;
+    ::rtc::VideoBroadcaster broadcaster_;
     ::webrtc::MediaSourceInterface::SourceState state_{::webrtc::MediaSourceInterface::kLive};
     std::mutex observer_mutex_;
     std::set<::webrtc::ObserverInterface*> observers_;
@@ -87,17 +87,17 @@ class PcObserver : public ::webrtc::PeerConnectionObserver {
 public:
     explicit PcObserver(WebRtcCallbacks& cb):cb_(cb){}
     void OnSignalingChange(::webrtc::PeerConnectionInterface::SignalingState) override {}
-    void OnDataChannel(::webrtc::scoped_refptr<::webrtc::DataChannelInterface>) override {}
+    void OnDataChannel(::rtc::scoped_refptr<::webrtc::DataChannelInterface>) override {}
     void OnIceGatheringChange(::webrtc::PeerConnectionInterface::IceGatheringState) override {}
     void OnConnectionChange(::webrtc::PeerConnectionInterface::PeerConnectionState state) override { if(cb_.on_connection_state) cb_.on_connection_state(std::string(::webrtc::PeerConnectionInterface::AsString(state))); }
     void OnIceCandidate(const ::webrtc::IceCandidate* c) override { if(cb_.on_local_ice_candidate && c){ const std::string s = c->candidate().ToCandidateAttribute(true); cb_.on_local_ice_candidate(c->sdp_mid(), c->sdp_mline_index(), s); } }
-    void OnTrack(::webrtc::scoped_refptr<::webrtc::RtpTransceiverInterface> transceiver) override {
+    void OnTrack(::rtc::scoped_refptr<::webrtc::RtpTransceiverInterface> transceiver) override {
         if(!transceiver || !transceiver->receiver()) return; auto track=transceiver->receiver()->track(); if(!track) return;
-        if(track->kind()==::webrtc::MediaStreamTrackInterface::kVideoKind){ auto video=static_cast<::webrtc::VideoTrackInterface*>(track.get()); video->AddOrUpdateSink(&video_sink_,::webrtc::VideoSinkWants()); }
+        if(track->kind()==::webrtc::MediaStreamTrackInterface::kVideoKind){ auto video=static_cast<::webrtc::VideoTrackInterface*>(track.get()); video->AddOrUpdateSink(&video_sink_,::rtc::VideoSinkWants()); }
         else if(track->kind()==::webrtc::MediaStreamTrackInterface::kAudioKind){ auto audio=static_cast<::webrtc::AudioTrackInterface*>(track.get()); audio->AddSink(&audio_sink_); }
     }
 private:
-    class VideoSink final : public ::webrtc::VideoSinkInterface<::webrtc::VideoFrame> { public: explicit VideoSink(WebRtcCallbacks& cb):cb_(cb){} void OnFrame(const ::webrtc::VideoFrame&) override { if(cb_.on_remote_video_frame) cb_.on_remote_video_frame(); } private: WebRtcCallbacks& cb_; };
+    class VideoSink final : public ::rtc::VideoSinkInterface<::webrtc::VideoFrame> { public: explicit VideoSink(WebRtcCallbacks& cb):cb_(cb){} void OnFrame(const ::webrtc::VideoFrame&) override { if(cb_.on_remote_video_frame) cb_.on_remote_video_frame(); } private: WebRtcCallbacks& cb_; };
     class AudioSink final : public ::webrtc::AudioTrackSinkInterface { public: explicit AudioSink(WebRtcCallbacks& cb):cb_(cb){} void OnData(const void*,int,int,size_t,size_t) override { if(cb_.on_remote_audio_frame) cb_.on_remote_audio_frame(); } private: WebRtcCallbacks& cb_; };
     WebRtcCallbacks& cb_; VideoSink video_sink_{cb_}; AudioSink audio_sink_{cb_};
 };
@@ -108,10 +108,10 @@ struct NativeWebRtcPeerConnection::Impl {
     std::unique_ptr<::rtc::Thread> network_thread;
     std::unique_ptr<::rtc::Thread> worker_thread;
     std::unique_ptr<::rtc::Thread> signaling_thread;
-    ::webrtc::scoped_refptr<::webrtc::PeerConnectionFactoryInterface> factory;
-    ::webrtc::scoped_refptr<::webrtc::PeerConnectionInterface> pc;
-    ::webrtc::scoped_refptr<LocalVideoSource> video_source;
-    ::webrtc::scoped_refptr<LocalAudioSource> audio_source;
+    ::rtc::scoped_refptr<::webrtc::PeerConnectionFactoryInterface> factory;
+    ::rtc::scoped_refptr<::webrtc::PeerConnectionInterface> pc;
+    ::rtc::scoped_refptr<LocalVideoSource> video_source;
+    ::rtc::scoped_refptr<LocalAudioSource> audio_source;
     std::unique_ptr<PcObserver> observer;
 };
 
@@ -145,8 +145,8 @@ bool NativeWebRtcPeerConnection::Initialize(const luma::contracts::PeerConnectio
 
     auto pc=result.MoveValue();
     auto video_source=LocalVideoSource::Create();
-    auto audio_source=::webrtc::scoped_refptr<LocalAudioSource>(
-        new ::webrtc::RefCountedObject<LocalAudioSource>());
+    auto audio_source=::rtc::scoped_refptr<LocalAudioSource>(
+        new ::rtc::RefCountedObject<LocalAudioSource>());
     auto vt=impl_->factory->CreateVideoTrack(video_source,"luma-video");
     auto at=impl_->factory->CreateAudioTrack("luma-audio",audio_source.get());
     if(!vt||!at) return false;
@@ -177,13 +177,13 @@ bool NativeWebRtcPeerConnection::AddAudioFrame(const luma::client::media::pipeli
 bool NativeWebRtcPeerConnection::CreateOffer(){
     if(!impl_->pc) return false;
     auto weak=weak_from_this();
-    auto* obs = new ::webrtc::RefCountedObject<DescriptionObserver>(
+    auto* obs = new ::rtc::RefCountedObject<DescriptionObserver>(
             [weak](auto* d){
                 auto self=weak.lock(); if(!self||!d)return;
                 std::string sdp;
                 if(!d->ToString(&sdp)) return;
                 self->impl_->pc->SetLocalDescription(
-                    new ::webrtc::RefCountedObject<SetObserver>(
+                    new ::rtc::RefCountedObject<SetObserver>(
                             [weak,sdp](){
                                 auto self=weak.lock(); if(!self)return;
                                 if(self->impl_->cb.on_local_description)
@@ -200,13 +200,13 @@ bool NativeWebRtcPeerConnection::CreateOffer(){
 bool NativeWebRtcPeerConnection::CreateAnswer(){
     if(!impl_->pc) return false;
     auto weak=weak_from_this();
-    auto* obs = new ::webrtc::RefCountedObject<DescriptionObserver>(
+    auto* obs = new ::rtc::RefCountedObject<DescriptionObserver>(
             [weak](auto* d){
                 auto self=weak.lock(); if(!self||!d)return;
                 std::string sdp;
                 if(!d->ToString(&sdp)) return;
                 self->impl_->pc->SetLocalDescription(
-                    new ::webrtc::RefCountedObject<SetObserver>(
+                    new ::rtc::RefCountedObject<SetObserver>(
                             [weak,sdp](){
                                 auto self=weak.lock(); if(!self)return;
                                 if(self->impl_->cb.on_local_description)
@@ -232,7 +232,7 @@ bool NativeWebRtcPeerConnection::SetRemoteDescription(
     if(!d) return false;
     auto weak=weak_from_this();
     impl_->pc->SetRemoteDescription(
-        new ::webrtc::RefCountedObject<SetObserver>(
+        new ::rtc::RefCountedObject<SetObserver>(
             [](){},
             [weak](const std::string& message){
                 auto self=weak.lock();
