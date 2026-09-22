@@ -77,6 +77,8 @@ target_compile_definitions(luma_client_webrtc PUBLIC
 target_link_libraries(luma_client_webrtc PUBLIC
   "${LUMALIVE_WEBRTC_LIBRARY}"
   ws2_32
+  iphlpapi
+  secur32
   winmm
   dmoguids
   msdmo
