@@ -1,10 +1,10 @@
-add_library(luma_client_media_pipeline STATIC src/MediaPipelineService.cpp src/DeviceCaptureService.cpp src/MediaCaptureSession.cpp)
+add_library(luma_client_media_pipeline STATIC src/MediaPipelineService.cpp src/DeviceCaptureService.cpp src/MediaCaptureSession.cpp src/ScreenCaptureService.cpp)
 target_include_directories(luma_client_media_pipeline PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}/../../shared
 )
 if(WIN32)
-  target_link_libraries(luma_client_media_pipeline PUBLIC mf mfplat mfuuid mfreadwrite ole32)
+  target_link_libraries(luma_client_media_pipeline PUBLIC mf mfplat mfuuid mfreadwrite ole32 user32 gdi32)
 endif()
 target_compile_features(luma_client_media_pipeline PUBLIC cxx_std_20)
 
