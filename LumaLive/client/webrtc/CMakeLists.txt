@@ -78,3 +78,7 @@ add_executable(luma_client_webrtc_tests
 )
 target_link_libraries(luma_client_webrtc_tests PRIVATE luma_client_webrtc)
 add_test(NAME luma_client_webrtc_tests COMMAND luma_client_webrtc_tests)
+add_executable(luma_webrtc_media_loopback_tests tests/WebRtcMediaLoopbackTests.cpp)
+target_link_libraries(luma_webrtc_media_loopback_tests PRIVATE luma_client_webrtc)
+add_test(NAME luma_webrtc_media_loopback_tests COMMAND luma_webrtc_media_loopback_tests)
+set_tests_properties(luma_webrtc_media_loopback_tests PROPERTIES TIMEOUT 30)

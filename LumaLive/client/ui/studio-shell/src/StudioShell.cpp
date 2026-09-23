@@ -97,7 +97,7 @@ class Window {
 public:
  int run(HINSTANCE i,int show){
    instance_=i;WNDCLASSW wc{};wc.hInstance=i;wc.lpfnWndProc=proc;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.lpszClassName=L"LumaLiveStudioShell";RegisterClassW(&wc);
-   h_=CreateWindowExW(0,wc.lpszClassName,L"LumaLive Studio",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,1440,900,nullptr,nullptr,i,this);
+   h_=CreateWindowExW(0,wc.lpszClassName,L"LumaLive Studio — Design catalogue (sample data)",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,1440,900,nullptr,nullptr,i,this);
    if(!h_)return 1;BOOL dark=TRUE;DwmSetWindowAttribute(h_,20,&dark,sizeof(dark));ShowWindow(h_,show);UpdateWindow(h_);SetTimer(h_,1,1000,nullptr);
    MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}return static_cast<int>(msg.wParam);
  }

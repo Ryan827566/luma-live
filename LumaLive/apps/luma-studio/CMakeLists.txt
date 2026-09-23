@@ -6,5 +6,6 @@ target_link_libraries(luma_studio PRIVATE
   luma_studio_application
   luma_scene_editor_ui
   luma_studio_shell
+  luma_studio_preview
   $<$<PLATFORM_ID:Windows>:user32 gdi32>
 )

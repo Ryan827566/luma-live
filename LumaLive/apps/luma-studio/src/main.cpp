@@ -1,6 +1,7 @@
 #include "luma/client/application/studio/StudioApplication.hpp"
 #include "luma/client/ui/scene_editor/SceneEditorView.hpp"
-#include "luma/client/ui/studio-shell/StudioShell.hpp"
+#include "StudioShell.hpp"
+#include "StudioPreview.hpp"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -9,8 +10,8 @@
 int WINAPI wWinMain(HINSTANCE h, HINSTANCE, PWSTR, int n) {
     const std::wstring commandLine = GetCommandLineW();
 
-    // The new Studio Shell is the default visual client. Existing Scene Editor
-    // remains available for the implementation/migration phase.
+    // The media workspace is the default. Keep the existing editor and design
+    // page catalogue accessible during incremental integration.
     if (commandLine.find(L"--scene-editor") != std::wstring::npos) {
         luma::client::application::studio::StudioApplication app;
         luma::client::ui::scene_editor::SceneEditorView view(app);
@@ -23,7 +24,9 @@ int WINAPI wWinMain(HINSTANCE h, HINSTANCE, PWSTR, int n) {
         return static_cast<int>(m.wParam);
     }
 
-    return luma::client::ui::studio::RunStudioShell(h, n);
+    if (commandLine.find(L"--workspace-pages") != std::wstring::npos)
+        return luma::client::ui::studio::RunStudioShell(h, n);
+    return luma::client::ui::preview::RunStudioPreview(h, n);
 }
 #else
 int main() { return 0; }

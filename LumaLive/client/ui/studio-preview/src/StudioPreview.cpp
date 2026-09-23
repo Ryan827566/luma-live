@@ -12,13 +12,16 @@
 #include <atomic>
 #include <array>
 #include <filesystem>
+#include <fstream>
+#include <cwctype>
+#include <vector>
 #include <string>
 #include <thread>
 
 namespace luma::client::ui::preview {
 namespace {
 using Microsoft::WRL::ComPtr;
-constexpr COLORREF Bg=RGB(14,18,22), Panel=RGB(23,29,34), Border=RGB(43,53,59), Ink=RGB(233,240,241), Muted=RGB(153,168,176), Mint=RGB(116,226,185);
+constexpr COLORREF Bg=RGB(8,10,13), Panel=RGB(16,19,24), Border=RGB(39,45,55), Ink=RGB(232,237,245), Muted=RGB(145,155,171), Mint=RGB(0,145,245);
 enum Id {Open=100,Camera,Microphone,Monitor,Volume,TestSound,Refresh,CameraList,MicList,Pause,Stop,FileMode,CameraMode,FullScreen,Join,Host,Room,RemoteMode};
 std::wstring Wide(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),nullptr,0);std::wstring out(n,L' ');MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),out.data(),n);return out;}
 void Fill(HDC dc,RECT r,COLORREF c){auto b=CreateSolidBrush(c);FillRect(dc,&r,b);DeleteObject(b);}
@@ -43,7 +46,7 @@ public:
 };
 
 class StudioWindow {
-    HWND window_{},surface_{};HINSTANCE instance_{};
+    HWND window_{},surface_{},remoteSurface_{};HINSTANCE instance_{};
     HFONT body_{},small_{},title_{},brand_{};HBRUSH panelBrush_{CreateSolidBrush(Panel)};
     std::array<HWND,32> controls_{};
     std::unique_ptr<media::IDeviceCaptureService> capture_;
@@ -51,15 +54,15 @@ class StudioWindow {
     VideoMailbox video_;AudioOutput audio_;
     VideoMailbox remoteVideo_;AudioOutput remoteAudio_;PreviewCall call_;
     std::atomic<uint64_t> remoteVideos_{0},remoteAudios_{0};
-    bool remoteView_{false};
+    std::atomic<float> remotePeak_{0};
     std::atomic<float> peak_{0};std::atomic<bool> monitor_{false};std::atomic<uint64_t> videoCount_{0},audioCount_{0};
     std::atomic<bool> audioFailed_{false};
     std::shared_ptr<PlaybackState> playback_;
     ComPtr<IMFPMediaPlayer> player_;
     bool cameraView_{true},paused_{false},fullscreen_{false},closing_{false};
-    RECT preview_{},savedWindow_{};DWORD savedStyle_{};
+    RECT preview_{},remotePreview_{},savedWindow_{};DWORD savedStyle_{};
     std::wstring status_{L"选择摄像头，或打开一个视频 / 音频文件"},fileName_{L"尚未打开媒体"};
-    int width_{1440},height_{900},left_{236},right_{328},volume_{65};
+    int width_{1440},height_{900},left_{52},right_{280},lower_{420},volume_{65};
     UINT dpi_{96};
     HWND Control(int id)const{return controls_[id-100];}
     int S(int n)const{return MulDiv(n,dpi_,96);}
@@ -103,9 +106,12 @@ class StudioWindow {
     void OpenFile(){
         wchar_t path[32768]{};OPENFILENAMEW ofn{sizeof(ofn)};ofn.hwndOwner=window_;ofn.lpstrFilter=L"视频与音频\0*.mp4;*.mov;*.wmv;*.avi;*.m4v;*.mp3;*.wav;*.m4a;*.wma\0所有文件\0*.*\0";ofn.lpstrFile=path;ofn.nMaxFile=32768;ofn.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
         if(!GetOpenFileNameW(&ofn))return;
-        CloseFile();cameraView_=false;remoteView_=false;fileName_=std::filesystem::path(path).filename().wstring();playback_=std::make_shared<PlaybackState>();
+        OpenMedia(path);
+    }
+    void OpenMedia(const wchar_t* path){
+        CloseFile();cameraView_=false;fileName_=std::filesystem::path(path).filename().wstring();playback_=std::make_shared<PlaybackState>();
         auto* cb=new PlayerEvents(playback_);auto hr=MFPCreateMediaPlayer(nullptr,FALSE,0,cb,surface_,&player_);cb->Release();
-        if(SUCCEEDED(hr)){player_->SetVolume(volume_/100.f);hr=player_->CreateMediaItemFromURL(path,TRUE,0,nullptr);}
+        if(SUCCEEDED(hr)){player_->SetVolume(volume_/100.f);hr=player_->CreateMediaItemFromURL(path,FALSE,0,nullptr);}
         status_=SUCCEEDED(hr)?L"正在打开："+fileName_:L"媒体无法打开："+Hr(hr);
         if(FAILED(hr))CloseFile();SetWindowTextW(Control(Pause),L"暂停");InvalidateRect(surface_,nullptr,FALSE);InvalidateRect(window_,nullptr,FALSE);
     }
@@ -117,53 +123,84 @@ class StudioWindow {
     }
     void Layout(){
         RECT rc;GetClientRect(window_,&rc);width_=MulDiv(rc.right,96,dpi_);height_=MulDiv(rc.bottom,96,dpi_);
-        if(fullscreen_){MoveWindow(surface_,0,0,rc.right,rc.bottom,TRUE);for(auto c:controls_)if(c)ShowWindow(c,SW_HIDE);return;}
-        for(auto c:controls_)if(c)ShowWindow(c,SW_SHOW);
-        left_=width_<1200?200:236;right_=width_<1200?290:328;int rx=width_-right_+22,cx=left_+24,cw=width_-left_-right_-48;
-        preview_=R(cx,162,cw,std::max(160,height_-362));MoveWindow(surface_,preview_.left,preview_.top,preview_.right-preview_.left,preview_.bottom-preview_.top,TRUE);
-        Place(Open,width_-194,22,166,38);Place(CameraMode,20,134,left_-40,44);Place(FileMode,20,186,left_-40,44);
-        Place(RemoteMode,20,238,left_-40,44);
-        Place(CameraList,22,346,left_-44,160);Place(Camera,22,394,left_-44,38);Place(Refresh,22,450,left_-44,34);
-        Place(MicList,rx,162,right_-44,180);Place(Microphone,rx,214,right_-44,38);Place(Monitor,rx,310,right_-44,38);
-        Place(Volume,rx,426,right_-44,30);Place(TestSound,rx,482,right_-44,38);
-        Place(Host,rx,582,right_-44,30);Place(Room,rx,640,right_-44,30);Place(Join,rx,690,right_-44,38);
-        Place(Pause,cx,height_-180,100,36);Place(Stop,cx+112,height_-180,100,36);Place(FullScreen,cx+cw-104,height_-180,104,36);
-        if(player_)player_->UpdateVideo();InvalidateRect(window_,nullptr,FALSE);
+        if(fullscreen_){MoveWindow(surface_,0,0,rc.right,rc.bottom,TRUE);ShowWindow(remoteSurface_,SW_HIDE);for(auto c:controls_)if(c)ShowWindow(c,SW_HIDE);return;}
+        ShowWindow(remoteSurface_,SW_SHOW);for(auto c:controls_)if(c)ShowWindow(c,SW_SHOW);ShowWindow(Control(RemoteMode),SW_HIDE);
+        const int x=left_+16, end=width_-right_-16, total=end-x, deck=(total-16)/2;
+        const int deckHeight=std::clamp(deck*9/16,180,std::max(180,height_-470));
+        preview_=R(x,130,deck,deckHeight);remotePreview_=R(x+deck+16,130,deck,deckHeight);
+        MoveWindow(surface_,preview_.left,preview_.top,preview_.right-preview_.left,preview_.bottom-preview_.top,TRUE);
+        MoveWindow(remoteSurface_,remotePreview_.left,remotePreview_.top,remotePreview_.right-remotePreview_.left,remotePreview_.bottom-remotePreview_.top,TRUE);
+        lower_=130+deckHeight+66;
+        const int sourceWidth=(total-16)/2,mx=x+sourceWidth+16,rx=width_-right_+16;
+        Place(Open,width_-right_-174,52,158,32);Place(CameraMode,x,130+deckHeight+10,94,32);Place(FileMode,x+102,130+deckHeight+10,94,32);
+        Place(Pause,x+206,130+deckHeight+10,74,32);Place(Stop,x+288,130+deckHeight+10,74,32);Place(FullScreen,end-112,130+deckHeight+10,112,32);
+        Place(CameraList,x+12,lower_+66,sourceWidth-24,160);Place(Camera,x+12,lower_+104,sourceWidth-128,34);Place(Refresh,x+sourceWidth-108,lower_+104,96,34);
+        Place(MicList,x+12,lower_+182,sourceWidth-24,160);Place(Microphone,x+12,lower_+220,sourceWidth-24,34);
+        Place(Monitor,mx+12,lower_+118,sourceWidth-24,34);Place(Volume,mx+12,lower_+204,sourceWidth-24,30);Place(TestSound,mx+12,lower_+250,sourceWidth-24,34);
+        Place(Host,rx,360,right_-32,32);Place(Room,rx,430,right_-32,32);Place(Join,rx,480,right_-32,36);
+        if(player_&&!cameraView_)player_->UpdateVideo();InvalidateRect(window_,nullptr,FALSE);
     }
-    void PaintSurface(HDC dc){
-        RECT r;GetClientRect(surface_,&r);Fill(dc,r,RGB(6,9,11));
-        if(!remoteView_&&!cameraView_ && player_ && playback_ && playback_->ready){player_->UpdateVideo();return;}
-        auto frame=remoteView_?remoteVideo_.Get():(cameraView_?video_.Get():nullptr);
+    void PaintSurface(HWND target,HDC dc){
+        RECT r;GetClientRect(target,&r);Fill(dc,r,RGB(5,7,10));const bool remote=target==remoteSurface_;
+        if(!remote&&!cameraView_&&player_&&playback_&&playback_->ready){player_->UpdateVideo();return;}
+        auto frame=remote?remoteVideo_.Get():(cameraView_?video_.Get():nullptr);
         if(frame){double ratio=std::min(double(r.right)/frame->width,double(r.bottom)/frame->height);int w=int(frame->width*ratio),h=int(frame->height*ratio);BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=frame->width;info.bmiHeader.biHeight=-static_cast<LONG>(frame->height);info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;info.bmiHeader.biCompression=BI_RGB;SetStretchBltMode(dc,COLORONCOLOR);StretchDIBits(dc,(r.right-w)/2,(r.bottom-h)/2,w,h,0,0,frame->width,frame->height,frame->data.data(),&info,DIB_RGB_COLORS,SRCCOPY);}
-        else {RECT t{S(24),r.bottom/2-S(45),r.right-S(24),r.bottom/2};Text(dc,remoteView_?L"等待另一端的画面":(cameraView_?L"让画面，出现在这里。":L"你的下一段故事"),t,title_);t.top+=S(48);t.bottom+=S(48);Text(dc,remoteView_?L"两端填写相同的信令服务器和房间，然后加入":(cameraView_?L"开启左侧摄像头，或打开媒体文件开始预览":L"打开本地视频或音频文件，开始播放"),t,body_,Muted);}
+        else {RECT t{S(20),r.bottom/2-S(28),r.right-S(20),r.bottom/2};Text(dc,remote?L"等待远端画面":(cameraView_?L"摄像头尚未开启":L"本地媒体预览"),t,body_,Ink,DT_CENTER|DT_VCENTER|DT_SINGLELINE);t.top+=S(34);t.bottom+=S(34);Text(dc,remote?L"两端加入同一房间，即可实时连线":(cameraView_?L"选择下方设备，开启视频输入":L"打开视频或音频文件开始播放"),t,small_,Muted,DT_CENTER|DT_VCENTER|DT_SINGLELINE);}
     }
     void Paint(HDC dc){
         RECT all;GetClientRect(window_,&all);Fill(dc,all,Bg);if(fullscreen_)return;
-        Fill(dc,R(0,80,left_,height_-126),Panel);Fill(dc,R(width_-right_,80,right_,height_-126),Panel);
-        Fill(dc,R(0,79,width_,1),Border);Fill(dc,R(0,height_-46,width_,1),Border);
-        Label(dc,L"LUMA / LIVE",24,17,208,40,brand_,Mint);Label(dc,L"工作台",left_+24,20,120,36,body_);Label(dc,L"本地预览",left_+144,20,150,36,small_,Muted);
-        Label(dc,L"素材来源",22,92,left_-44,28,small_,Muted);Label(dc,L"视频设备",22,304,left_-44,32,body_);
-        Label(dc,L"设备仅在你开启后采集",22,506,left_-44,30,small_,Muted);
-        int cx=left_+24,cw=width_-left_-right_-48,rx=width_-right_+22;
-        Label(dc,remoteView_?L"实时连线":(cameraView_?L"摄像头预览":L"媒体播放器"),cx,98,cw,36,title_);Label(dc,remoteView_?L"REMOTE / WEBRTC":(cameraView_?L"LOCAL PREVIEW":fileName_),cx,134,cw,22,small_,Muted);
-        auto frame=video_.Get();std::wstring detail=cameraView_?(frame?std::to_wstring(frame->width)+L" × "+std::to_wstring(frame->height)+L"  ·  已接收 "+std::to_wstring(videoCount_.load())+L" 帧":L"等待视频输入"):L"Windows Media Foundation · 保持原始画面比例";
-        if(remoteView_)detail=L"远端视频 "+std::to_wstring(remoteVideos_.load())+L" 帧  ·  音频 "+std::to_wstring(remoteAudios_.load())+L" 包";
-        Label(dc,detail,cx,height_-232,cw,24,small_,Muted);
-        Label(dc,L"播放与预览",cx,height_-126,cw,24,body_);Label(dc,L"Ctrl+O 打开文件    空格 暂停 / 继续    F11 全屏    Esc 退出全屏",cx,height_-94,cw,24,small_,Muted);
-        Label(dc,L"音频控制",rx,98,right_-44,36,title_);Label(dc,L"麦克风输入",rx,136,right_-44,24,small_,Muted);
-        const float level=peak_.load();Fill(dc,R(rx,272,right_-44,7),Border);Fill(dc,R(rx,272,int((right_-44)*std::clamp(level,0.f,1.f)),7),level>.9?RGB(255,180,100):Mint);
-        Label(dc,capture_&&capture_->IsMicrophoneCapturing()?L"输入电平 · 正在采集":L"输入电平 · 麦克风关闭",rx,284,right_-44,22,small_,Muted);
-        Label(dc,L"使用耳机监听，避免扬声器回声",rx,355,right_-44,28,small_,Muted);
-        Label(dc,L"输出音量   "+std::to_wstring(volume_)+L"%",rx,394,right_-44,28,body_);
-        Label(dc,L"当前 Windows 默认输出设备",rx,458,right_-44,20,small_,Muted);
-        Label(dc,L"信令服务器（主机:端口）",rx,554,right_-44,24,small_,Muted);
-        Label(dc,L"房间",rx,614,right_-44,24,small_,Muted);
-        Label(dc,status_,22,height_-42,width_-44,36,small_,Muted);
+        const int x=left_+16,end=width_-right_-16,total=end-x,deck=(total-16)/2,sourceWidth=(total-16)/2,mx=x+sourceWidth+16,rx=width_-right_+16;
+        auto card=[&](int px,int py,int pw,int ph){Fill(dc,R(px,py,pw,ph),Border);Fill(dc,R(px+1,py+1,pw-2,ph-2),Panel);};
+        Fill(dc,R(0,40,left_,height_-40),Panel);Fill(dc,R(left_,40,width_-left_,56),Panel);Fill(dc,R(width_-right_,40,right_,height_-40),Panel);
+        Fill(dc,R(0,39,width_,1),Border);Fill(dc,R(left_-1,40,1,height_),Border);Fill(dc,R(width_-right_,40,1,height_),Border);Fill(dc,R(left_,95,width_-left_-right_,1),Border);
+        Fill(dc,R(12,13,10,14),Mint);Label(dc,L"LUMALIVE STUDIO",32,6,194,28,body_);Label(dc,L"MAIN WORKSPACE",232,6,220,28,small_,Muted);
+        Label(dc,L"主工作台",width_-right_-210,6,110,28,small_,Ink);Label(dc,L"本地 / WebRTC",width_-right_-104,6,104,28,small_,Muted);
+        Label(dc,L"◈",14,52,26,32,title_,Mint);
+        Label(dc,L"PROJECT:  LumaLive 工作台",x,50,total-194,36,body_);
+        Label(dc,L"PREVIEW DECK / 本地预览",x,100,deck,28,small_,Mint);Label(dc,L"REMOTE DECK / 远端连线",x+deck+16,100,deck,28,small_,call_.Active()?Mint:Muted);
+        RECT border=preview_;InflateRect(&border,1,1);Fill(dc,border,Mint);border=remotePreview_;InflateRect(&border,1,1);Fill(dc,border,call_.Active()?Mint:Border);
+        card(x,lower_,sourceWidth,std::max(292,height_-lower_-48));card(mx,lower_,sourceWidth,std::max(292,height_-lower_-48));
+        Label(dc,L"SOURCES / 输入设备",x+12,lower_+8,sourceWidth-24,28,small_,Muted);
+        Label(dc,L"摄像头",x+12,lower_+40,sourceWidth-24,22,small_);Label(dc,L"麦克风",x+12,lower_+154,sourceWidth-24,24,small_);
+        Label(dc,L"AUDIO MIXER / 音频",mx+12,lower_+8,sourceWidth-24,28,small_,Muted);
+        Label(dc,L"MIC / AUX",mx+12,lower_+42,sourceWidth/2,22,small_);Label(dc,L"REMOTE",mx+sourceWidth/2+6,lower_+42,sourceWidth/2-18,22,small_);
+        const int meterWidth=(sourceWidth-36)/2;const float localPeak=std::clamp(peak_.load(),0.f,1.f),remotePeak=std::clamp(remotePeak_.load(),0.f,1.f);
+        Fill(dc,R(mx+12,lower_+76,meterWidth,8),Border);Fill(dc,R(mx+12,lower_+76,int(meterWidth*localPeak),8),RGB(47,207,127));Fill(dc,R(mx+sourceWidth/2+6,lower_+76,meterWidth,8),Border);Fill(dc,R(mx+sourceWidth/2+6,lower_+76,int(meterWidth*remotePeak),8),RGB(47,207,127));
+        Label(dc,capture_&&capture_->IsMicrophoneCapturing()?L"正在采集":L"输入关闭",mx+12,lower_+90,meterWidth,20,small_,Muted);Label(dc,remoteAudios_>0?L"已收到音频":L"等待音频",mx+sourceWidth/2+6,lower_+90,meterWidth,20,small_,Muted);
+        Label(dc,L"输出音量  "+std::to_wstring(volume_)+L"%",mx+12,lower_+172,sourceWidth-24,24,body_);
+        Label(dc,L"SOURCE INSPECTOR",rx,54,right_-32,30,small_,Ink);
+        Label(dc,L"当前本地输入",rx,108,right_-32,22,small_,Muted);Label(dc,cameraView_?L"Camera / 摄像头":fileName_,rx,136,right_-32,28,body_);
+        auto frame=video_.Get();Label(dc,L"视频尺寸",rx,180,right_-32,22,small_,Muted);Label(dc,cameraView_&&frame?std::to_wstring(frame->width)+L" × "+std::to_wstring(frame->height):L"—",rx,208,right_-32,28,body_);
+        Fill(dc,R(rx,260,right_-32,1),Border);Label(dc,L"WEBRTC / 实时连线",rx,280,right_-32,30,body_);Label(dc,L"服务器（主机:端口）",rx,332,right_-32,24,small_,Muted);Label(dc,L"房间名称",rx,402,right_-32,24,small_,Muted);
+        Label(dc,call_.Active()?L"会话已开启":L"尚未加入房间",rx,534,right_-32,26,small_,call_.Active()?Mint:Muted);
+        Label(dc,L"远端视频  "+std::to_wstring(remoteVideos_.load())+L" 帧",rx,570,right_-32,24,small_,Muted);Label(dc,L"远端音频  "+std::to_wstring(remoteAudios_.load())+L" 包",rx,596,right_-32,24,small_,Muted);
+        Label(dc,L"麦克风监听请使用耳机",rx,650,right_-32,26,small_,Muted);Label(dc,L"Ctrl+O  打开文件",rx,686,right_-32,22,small_,Muted);Label(dc,L"F11  本地画面全屏",rx,712,right_-32,22,small_,Muted);
+        Fill(dc,R(left_,height_-38,width_-left_,38),Bg);Fill(dc,R(left_,height_-39,width_-left_,1),Border);Label(dc,status_,x,height_-36,width_-x-16,32,small_,Muted);
+    }
+    // Render only this application's own drawing and controls, without capturing the desktop.
+    bool RenderCheck(const std::filesystem::path& path){
+        if(!path.is_absolute())return false;
+        RECT bounds{};GetClientRect(window_,&bounds);const int w=bounds.right,h=bounds.bottom;
+        auto reference=GetDC(window_);auto dc=CreateCompatibleDC(reference);auto bitmap=CreateCompatibleBitmap(reference,w,h);ReleaseDC(window_,reference);
+        if(!dc||!bitmap){if(dc)DeleteDC(dc);if(bitmap)DeleteObject(bitmap);return false;}
+        const auto previous=SelectObject(dc,bitmap);Paint(dc);
+        for(auto target:{surface_,remoteSurface_}){RECT r;GetWindowRect(target,&r);MapWindowPoints(nullptr,window_,reinterpret_cast<POINT*>(&r),2);auto saved=SaveDC(dc);IntersectClipRect(dc,r.left,r.top,r.right,r.bottom);SetViewportOrgEx(dc,r.left,r.top,nullptr);PaintSurface(target,dc);RestoreDC(dc,saved);}
+        for(auto control:controls_){if(!control||(GetWindowLongPtrW(control,GWL_STYLE)&WS_VISIBLE)==0)continue;RECT r;GetWindowRect(control,&r);MapWindowPoints(nullptr,window_,reinterpret_cast<POINT*>(&r),2);auto saved=SaveDC(dc);IntersectClipRect(dc,r.left,r.top,r.right,r.bottom);SetViewportOrgEx(dc,r.left,r.top,nullptr);SendMessageW(control,WM_PRINT,reinterpret_cast<WPARAM>(dc),PRF_CLIENT|PRF_NONCLIENT|PRF_ERASEBKGND);RestoreDC(dc,saved);}
+        SelectObject(dc,previous);
+        BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=w;info.bmiHeader.biHeight=-h;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;info.bmiHeader.biCompression=BI_RGB;
+        std::vector<unsigned char> pixels(static_cast<size_t>(w)*h*4);const bool copied=GetDIBits(dc,bitmap,0,h,pixels.data(),&info,DIB_RGB_COLORS)==h;DeleteObject(bitmap);DeleteDC(dc);if(!copied)return false;
+        BITMAPFILEHEADER header{};header.bfType=0x4d42;header.bfOffBits=sizeof(header)+sizeof(BITMAPINFOHEADER);header.bfSize=header.bfOffBits+static_cast<DWORD>(pixels.size());std::ofstream output(path,std::ios::binary);output.write(reinterpret_cast<const char*>(&header),sizeof(header));output.write(reinterpret_cast<const char*>(&info.bmiHeader),sizeof(BITMAPINFOHEADER));output.write(reinterpret_cast<const char*>(pixels.data()),static_cast<std::streamsize>(pixels.size()));return output.good();
+    }
+    static std::wstring Option(const wchar_t* name){
+        // The two diagnostic options accept a Windows path, optionally enclosed in quotes.
+        const std::wstring command=GetCommandLineW();size_t at=0;
+        auto token=[&](){while(at<command.size()&&iswspace(command[at]))++at;std::wstring value;bool quoted=false;while(at<command.size()){const auto c=command[at++];if(c==L'"'){quoted=!quoted;continue;}if(!quoted&&iswspace(c))break;value+=c;}return value;};
+        while(at<command.size()){if(token()==name)return token();}return {};
     }
     void DrawButton(const DRAWITEMSTRUCT& d){
-        bool primary=d.CtlID==Open,selected=(d.CtlID==CameraMode&&cameraView_&&!remoteView_)||(d.CtlID==FileMode&&!cameraView_&&!remoteView_)||(d.CtlID==RemoteMode&&remoteView_);bool disabled=(d.itemState&ODS_DISABLED)!=0;
-        auto color=primary?Mint:(selected?RGB(37,62,55):RGB(34,43,49));if(d.itemState&ODS_SELECTED)color=RGB(62,101,86);
-        Fill(d.hDC,d.rcItem,color);wchar_t label[128];GetWindowTextW(d.hwndItem,label,128);Text(d.hDC,label,d.rcItem,body_,disabled?RGB(98,112,120):(primary?Bg:Ink),DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+        bool primary=d.CtlID==Open||d.CtlID==Join,selected=(d.CtlID==CameraMode&&cameraView_)||(d.CtlID==FileMode&&!cameraView_);bool disabled=(d.itemState&ODS_DISABLED)!=0;
+        auto color=primary?Mint:(selected?RGB(15,57,89):RGB(27,33,43));if(d.itemState&ODS_SELECTED)color=RGB(26,90,144);
+        Fill(d.hDC,d.rcItem,color);wchar_t label[128];GetWindowTextW(d.hwndItem,label,128);Text(d.hDC,label,d.rcItem,body_,disabled?RGB(98,112,120):Ink,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
         if(d.itemState&ODS_FOCUS){RECT r=d.rcItem;InflateRect(&r,-3,-3);DrawFocusRect(d.hDC,&r);}
     }
     void Fullscreen(){
@@ -177,11 +214,11 @@ class StudioWindow {
         case Monitor:monitor_=!monitor_;if(!monitor_)audio_.Close();SetWindowTextW(Control(Monitor),monitor_?L"监听：开启":L"监听：关闭");break;
         case TestSound:TestAudio();break;
         case Refresh:if(capture_->IsCameraCapturing()||capture_->IsMicrophoneCapturing())status_=L"请先关闭采集，再刷新设备列表";else{Enumerate();status_=L"设备列表已刷新";}break;
-        case CameraMode:remoteView_=false;cameraView_=true;if(player_)player_->Pause();paused_=true;break;
-        case FileMode:remoteView_=false;cameraView_=false;if(!player_)OpenFile();break;
-        case RemoteMode:remoteView_=true;if(player_)player_->Pause();break;
+        case CameraMode:cameraView_=true;if(player_)player_->Pause();paused_=true;break;
+        case FileMode:cameraView_=false;if(!player_)OpenFile();else{auto hr=player_->Play();if(FAILED(hr))status_=L"播放失败："+Hr(hr);else{paused_=false;SetWindowTextW(Control(Pause),L"暂停");}}break;
+        case RemoteMode:break;
         case Join:{
-            if(call_.Active()){call_.Stop();remoteVideo_.Clear();remoteAudio_.Close();SetWindowTextW(Control(Join),L"加入房间");status_=L"已离开房间";EnableWindow(Control(Host),TRUE);EnableWindow(Control(Room),TRUE);break;}
+            if(call_.Active()){call_.Stop();remoteVideo_.Clear();remoteAudio_.Close();remotePeak_=0;remoteVideos_=0;remoteAudios_=0;SetWindowTextW(Control(Join),L"加入房间");status_=L"已离开房间";EnableWindow(Control(Host),TRUE);EnableWindow(Control(Room),TRUE);break;}
             wchar_t host[256]{},room[128]{};GetWindowTextW(Control(Host),host,256);GetWindowTextW(Control(Room),room,128);
             auto utf8=[](const std::wstring& s){int n=WideCharToMultiByte(CP_UTF8,0,s.data(),static_cast<int>(s.size()),nullptr,0,nullptr,nullptr);std::string out(n,' ');WideCharToMultiByte(CP_UTF8,0,s.data(),static_cast<int>(s.size()),out.data(),n,nullptr,nullptr);return out;};
             auto endpoint=utf8(host);auto pos=endpoint.rfind(':');int port=9000;
@@ -189,12 +226,12 @@ class StudioWindow {
             if(endpoint.empty()||port<1||port>65535||!*room){status_=L"请填写有效服务器地址、端口和房间";break;}
             webrtc::WebRtcCallbacks cb;remoteVideos_=0;remoteAudios_=0;
             cb.on_remote_video=[this](VideoFrame f){remoteVideo_.Put(f);++remoteVideos_;};
-            cb.on_remote_audio=[this](AudioFrame f){remoteAudio_.Push(f);++remoteAudios_;};
+            cb.on_remote_audio=[this](AudioFrame f){remotePeak_=Peak(f);if(!remoteAudio_.Push(f))audioFailed_=true;++remoteAudios_;};
             const auto peer="studio-"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(GetTickCount64());
-            if(call_.Start(endpoint,static_cast<uint16_t>(port),utf8(room),peer,std::move(cb))){remoteView_=true;if(player_)player_->Pause();SetWindowTextW(Control(Join),L"离开房间");EnableWindow(Control(Host),FALSE);EnableWindow(Control(Room),FALSE);status_=L"已加入房间 · 开启摄像头和麦克风即可发送，等待另一端加入";}else status_=L"无法加入房间 · 请先启动信令服务器，并检查地址及端口";
+            if(call_.Start(endpoint,static_cast<uint16_t>(port),utf8(room),peer,std::move(cb))){SetWindowTextW(Control(Join),L"离开房间");EnableWindow(Control(Host),FALSE);EnableWindow(Control(Room),FALSE);status_=L"已加入房间 · 开启摄像头和麦克风即可发送，等待另一端加入";}else status_=L"无法加入房间 · 请先启动信令服务器，并检查地址及端口";
             break;
         }
-        case Pause:if(player_&&!cameraView_){MFP_MEDIAPLAYER_STATE s;player_->GetState(&s);auto hr=s==MFP_MEDIAPLAYER_STATE_PLAYING?player_->Pause():player_->Play();if(FAILED(hr))status_=L"播放控制失败："+Hr(hr);paused_=s==MFP_MEDIAPLAYER_STATE_PLAYING;SetWindowTextW(Control(Pause),paused_?L"继续播放":L"暂停");}break;
+        case Pause:if(player_&&!cameraView_){MFP_MEDIAPLAYER_STATE s;player_->GetState(&s);auto hr=s==MFP_MEDIAPLAYER_STATE_PLAYING?player_->Pause():player_->Play();if(FAILED(hr))status_=L"播放控制失败："+Hr(hr);paused_=s==MFP_MEDIAPLAYER_STATE_PLAYING;SetWindowTextW(Control(Pause),paused_?L"继续":L"暂停");}break;
         case Stop:CloseFile();fileName_=L"尚未打开媒体";status_=L"媒体播放已停止";break;
         case FullScreen:Fullscreen();break;
         }
@@ -204,7 +241,7 @@ class StudioWindow {
     LRESULT Handle(UINT message,WPARAM wp,LPARAM lp){
         switch(message){
         case WM_SIZE:Layout();return 0;
-        case WM_GETMINMAXINFO:{auto m=reinterpret_cast<MINMAXINFO*>(lp);m->ptMinTrackSize={S(1080),S(840)};return 0;}
+        case WM_GETMINMAXINFO:{auto m=reinterpret_cast<MINMAXINFO*>(lp);m->ptMinTrackSize={S(1280),S(830)};return 0;}
         case WM_DPICHANGED:{dpi_=HIWORD(wp);Fonts();auto r=reinterpret_cast<RECT*>(lp);SetWindowPos(window_,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);Layout();return 0;}
         case WM_ERASEBKGND:return 1;
         case WM_PAINT:{PAINTSTRUCT ps;auto dc=BeginPaint(window_,&ps);RECT r;GetClientRect(window_,&r);auto mem=CreateCompatibleDC(dc);auto bmp=CreateCompatibleBitmap(dc,std::max(1L,r.right),std::max(1L,r.bottom));auto old=SelectObject(mem,bmp);Paint(mem);BitBlt(dc,0,0,r.right,r.bottom,mem,0,0,SRCCOPY);SelectObject(mem,old);DeleteObject(bmp);DeleteDC(mem);EndPaint(window_,&ps);return 0;}
@@ -213,20 +250,21 @@ class StudioWindow {
         case WM_COMMAND:if(HIWORD(wp)==BN_CLICKED)Command(LOWORD(wp));return 0;
         case WM_HSCROLL:if(reinterpret_cast<HWND>(lp)==Control(Volume)){volume_=static_cast<int>(SendMessageW(Control(Volume),TBM_GETPOS,0,0));audio_.SetVolume(volume_/100.f);remoteAudio_.SetVolume(volume_/100.f);if(player_)player_->SetVolume(volume_/100.f);InvalidateRect(window_,nullptr,FALSE);}return 0;
         case WM_TIMER:{
+            remotePeak_.store(remotePeak_.load()*0.9f);
             if(call_.Active()){auto state=call_.Poll();if(!state.empty())status_=L"连线状态："+Wide(state);}
             if(playback_){auto error=playback_->error.exchange(S_OK);if(FAILED(error))status_=L"播放失败："+Hr(error)+L"。请检查文件或 Windows 媒体解码支持。";else if(playback_->ended.exchange(false)){status_=L"播放结束："+fileName_;SetWindowTextW(Control(Pause),L"重新播放");}}
             if(audioFailed_.exchange(false))status_=L"音频输出暂不可用或过载 · 请检查输出设备";
             EnableWindow(Control(Pause),player_&&!cameraView_);EnableWindow(Control(Stop),bool(player_));
-            if(cameraView_||remoteView_)InvalidateRect(surface_,nullptr,FALSE);
-            RECT detail=R(left_+24,height_-232,width_-left_-right_-48,24);InvalidateRect(window_,&detail,FALSE);
-            RECT r=R(width_-right_+22,272,right_-44,38);InvalidateRect(window_,&r,FALSE);r=R(0,height_-46,width_,46);InvalidateRect(window_,&r,FALSE);return 0;}
+            if(cameraView_)InvalidateRect(surface_,nullptr,FALSE);InvalidateRect(remoteSurface_,nullptr,FALSE);
+            RECT detail=R(left_+16,lower_,width_-left_-right_-32,130);InvalidateRect(window_,&detail,FALSE);
+            RECT r=R(width_-right_+16,180,right_-32,56);InvalidateRect(window_,&r,FALSE);r=R(width_-right_+16,534,right_-32,88);InvalidateRect(window_,&r,FALSE);r=R(0,height_-39,width_,39);InvalidateRect(window_,&r,FALSE);return 0;}
         case WM_CLOSE:Shutdown();DestroyWindow(window_);return 0;
         case WM_DESTROY:PostQuitMessage(0);return 0;
         }
         return DefWindowProcW(window_,message,wp,lp);
     }
     static LRESULT CALLBACK Proc(HWND h,UINT m,WPARAM w,LPARAM l){auto self=reinterpret_cast<StudioWindow*>(GetWindowLongPtrW(h,GWLP_USERDATA));if(m==WM_NCCREATE){self=static_cast<StudioWindow*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);self->window_=h;SetWindowLongPtrW(h,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));}return self?self->Handle(m,w,l):DefWindowProcW(h,m,w,l);}
-    static LRESULT CALLBACK SurfaceProc(HWND h,UINT m,WPARAM w,LPARAM l){auto self=reinterpret_cast<StudioWindow*>(GetWindowLongPtrW(h,GWLP_USERDATA));if(m==WM_NCCREATE){self=static_cast<StudioWindow*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);SetWindowLongPtrW(h,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));}if(self){if(m==WM_ERASEBKGND)return 1;if(m==WM_PAINT){PAINTSTRUCT ps;auto dc=BeginPaint(h,&ps);self->PaintSurface(dc);EndPaint(h,&ps);return 0;}if(m==WM_SIZE&&self->player_)self->player_->UpdateVideo();}return DefWindowProcW(h,m,w,l);}
+    static LRESULT CALLBACK SurfaceProc(HWND h,UINT m,WPARAM w,LPARAM l){auto self=reinterpret_cast<StudioWindow*>(GetWindowLongPtrW(h,GWLP_USERDATA));if(m==WM_NCCREATE){self=static_cast<StudioWindow*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);SetWindowLongPtrW(h,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));}if(self){if(m==WM_ERASEBKGND)return 1;if(m==WM_PAINT){PAINTSTRUCT ps;auto dc=BeginPaint(h,&ps);self->PaintSurface(h,dc);EndPaint(h,&ps);return 0;}if(m==WM_SIZE&&h==self->surface_&&self->player_&&!self->cameraView_)self->player_->UpdateVideo();}return DefWindowProcW(h,m,w,l);}
 public:
     ~StudioWindow(){Shutdown();for(auto f:{body_,small_,title_,brand_})if(f)DeleteObject(f);DeleteObject(panelBrush_);}
     int Run(HINSTANCE instance,int show){
@@ -234,10 +272,15 @@ public:
         window_=CreateWindowExW(0,L"LumaStudioPreview",L"LumaLive Studio",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,1440,900,nullptr,nullptr,instance,this);if(!window_)return 1;
         dpi_=GetDpiForWindow(window_);Fonts();BOOL dark=TRUE;DwmSetWindowAttribute(window_,20,&dark,sizeof(dark));
         surface_=CreateWindowExW(0,L"LumaVideoSurface",L"视频预览",WS_CHILD|WS_VISIBLE,0,0,1,1,window_,nullptr,instance,this);
-        Button(Open,L"打开媒体文件");Button(CameraMode,L"摄像头预览");Button(FileMode,L"媒体播放器");Button(Camera,L"开启摄像头");Button(Refresh,L"刷新设备");Button(Microphone,L"开启麦克风");Button(Monitor,L"监听：关闭");Button(TestSound,L"测试扬声器");Button(Pause,L"暂停");Button(Stop,L"停止播放");Button(FullScreen,L"全屏预览");
+        remoteSurface_=CreateWindowExW(0,L"LumaVideoSurface",L"远端视频",WS_CHILD|WS_VISIBLE,0,0,1,1,window_,nullptr,instance,this);
+        Button(Open,L"打开媒体文件");Button(CameraMode,L"摄像头");Button(FileMode,L"媒体文件");Button(Camera,L"开启摄像头");Button(Refresh,L"刷新设备");Button(Microphone,L"开启麦克风");Button(Monitor,L"监听：关闭");Button(TestSound,L"测试扬声器");Button(Pause,L"暂停");Button(Stop,L"停止播放");Button(FullScreen,L"全屏预览");
         Button(RemoteMode,L"实时连线");Button(Join,L"加入房间");Make(Host,L"EDIT",L"127.0.0.1:9000",WS_BORDER|ES_AUTOHSCROLL);Make(Room,L"EDIT",L"luma-demo",WS_BORDER|ES_AUTOHSCROLL);
         Make(CameraList,L"COMBOBOX",L"摄像头",CBS_DROPDOWNLIST|WS_VSCROLL);Make(MicList,L"COMBOBOX",L"麦克风",CBS_DROPDOWNLIST|WS_VSCROLL);Make(Volume,TRACKBAR_CLASSW,L"输出音量",TBS_HORZ|TBS_NOTICKS);SendMessageW(Control(Volume),TBM_SETRANGE,TRUE,MAKELPARAM(0,100));SendMessageW(Control(Volume),TBM_SETPOS,TRUE,volume_);EnableWindow(Control(Monitor),FALSE);
-        capture_=media::CreateDeviceCaptureService();auto result=capture_->Start();if(!result.IsOk())status_=L"设备初始化失败："+Wide(result.Message());Enumerate();Layout();SetTimer(window_,1,33,nullptr);ShowWindow(window_,show);UpdateWindow(window_);
+        audio_.SetVolume(volume_/100.f);remoteAudio_.SetVolume(volume_/100.f);
+        capture_=media::CreateDeviceCaptureService();auto result=capture_->Start();if(!result.IsOk())status_=L"设备初始化失败："+Wide(result.Message());Enumerate();Layout();
+        const auto renderPath=Option(L"--render-check");if(!renderPath.empty()){const bool rendered=RenderCheck(renderPath);Shutdown();DestroyWindow(window_);return rendered?0:2;}
+        const auto mediaPath=Option(L"--media");if(!mediaPath.empty())OpenMedia(mediaPath.c_str());
+        SetTimer(window_,1,33,nullptr);ShowWindow(window_,show);UpdateWindow(window_);
         MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){if(msg.message==WM_KEYDOWN){if(msg.wParam==VK_F11){Fullscreen();continue;}if(msg.wParam==VK_ESCAPE&&fullscreen_){Fullscreen();continue;}if(msg.wParam=='O'&&(GetKeyState(VK_CONTROL)&0x8000)){OpenFile();continue;}if(msg.wParam==VK_SPACE&&msg.hwnd==window_){Command(Pause);continue;}}if(!IsDialogMessageW(window_,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
         return static_cast<int>(msg.wParam);
     }
@@ -250,3 +293,5 @@ int RunStudioPreview(HINSTANCE instance,int show){
     int result;{StudioWindow window;result=window.Run(instance,show);}CoUninitialize();return result;
 }
 }
+
+

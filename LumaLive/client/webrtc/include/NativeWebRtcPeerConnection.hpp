@@ -14,6 +14,10 @@ struct WebRtcCallbacks {
     std::function<void(const std::string& state)> on_connection_state;
     std::function<void()> on_remote_video_frame;
     std::function<void()> on_remote_audio_frame;
+    // Invoked on WebRTC threads; UI callers must marshal owned frames to their UI thread.
+    std::function<void(media::pipeline::VideoFrame)> on_remote_video;
+    std::function<void(media::pipeline::AudioFrame)> on_remote_audio;
+    std::function<void()> on_remote_description_set;
 };
 
 class NativeWebRtcPeerConnection : public luma::client::media::pipeline::IMediaFrameSink, public std::enable_shared_from_this<NativeWebRtcPeerConnection> {
