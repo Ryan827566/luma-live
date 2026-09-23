@@ -3,7 +3,7 @@
 #include "TcpSignalingClient.hpp"
 #include <deque>
 #include <mutex>
-#include <atomic>
+#include <atomic>\n#include <cstdlib>
 
 namespace luma::client::ui::preview {
 // All negotiation runs on the UI/controller thread through Poll(). Worker
@@ -33,8 +33,19 @@ public:
         cb.on_remote_description_set=[this]{Queue({3,{},{},{}});};
         cb.on_connection_state=[this](const auto& state){Queue({4,{},{},state});};
         contracts::PeerConnectionConfig config;
-        // No third-party STUN dependency for same-machine / LAN testing. Public
-        // internet calls need deployment-specific authenticated TURN settings.
+        // Use STUN by default so two clients can establish direct P2P media
+        // across ordinary NATs. Production deployments can override this and
+        // provide TURN through environment variables.
+        const char* stun = std::getenv("LUMALIVE_STUN_SERVER");
+        config.stun_servers.push_back(stun && *stun ? stun : "stun:stun.l.google.com:19302");
+        const char* turn = std::getenv("LUMALIVE_TURN_URL");
+        const char* turnUser = std::getenv("LUMALIVE_TURN_USERNAME");
+        const char* turnPassword = std::getenv("LUMALIVE_TURN_PASSWORD");
+        if (turn && *turn) {
+            config.turn_url = turn;
+            config.turn_username = turnUser ? turnUser : "";
+            config.turn_password = turnPassword ? turnPassword : "";
+        }
         if(!rtc_->Initialize(config,std::move(cb))){Stop();return false;}
         mediaReady_=true;
         if(!signaling_.Connect(host,port,[this](const auto& m){Queue({0,m,{},{}});})){Stop();return false;}
