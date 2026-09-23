@@ -1,24 +1,28 @@
 <#
 .SYNOPSIS
-  Configure and build LumaLive (VS 2026 generator + v143 toolset for VS 2022 compatibility).
-  Prints a per-target status summary at the end.
+  Configure and build LumaLive from any working directory.
 
 .DESCRIPTION
+  The repository keeps the Windows build script under scripts/windows while
+  the actual CMake project is under LumaLive/. This script resolves both
+  locations from $PSScriptRoot, so it can be invoked from the repository root,
+  scripts/windows, or any other working directory.
+
   Default behavior is INCREMENTAL build for fast daily development.
   Use -Clean for a full rebuild after changing CMakeLists.txt / runtime settings.
 
-  Parallelism (big speed-up on full rebuilds):
-    * MSBuild project-level parallelism via -- /m:N
-    * cl.exe file-level parallelism via the CL=/MP env var (no CMake changes needed)
+  Parallelism:
+    * MSBuild project-level parallelism via /m:N
+    * cl.exe file-level parallelism via the CL=/MP env var
   Default job count is the number of logical processors; override with -Jobs N.
 
 .EXAMPLE
-  .\build.ps1                     # Incremental build: Debug + Release, with summary
-  .\build.ps1 -Clean              # Full clean rebuild + summary (parallel)
-  .\build.ps1 -Clean -Jobs 8      # Full rebuild with 8 parallel jobs
-  .\build.ps1 -Config Debug       # Incremental build: Debug only
-  .\build.ps1 -Reconfigure        # Re-run cmake configure, then incremental build
-  .\build.ps1 -NoClMp             # Disable file-level /MP (falls back to MSBuild-only parallelism)
+  .\build.ps1
+  .\build.ps1 -Clean
+  .\build.ps1 -Clean -Jobs 8
+  .\build.ps1 -Config Debug
+  .\build.ps1 -Reconfigure
+  .\build.ps1 -NoClMp
 #>
 [CmdletBinding()]
 param(
@@ -28,7 +32,9 @@ param(
     [string]$Generator = 'Visual Studio 18 2026',
     [string]$Toolset = 'v143',
     [string]$Arch = 'x64',
-    [string]$BuildDir = 'build',
+
+    # Relative to the LumaLive CMake project unless an absolute path is supplied.
+    [string]$BuildDir = 'build\vs2026-x64',
 
     # 0 = auto-detect (logical processor count). N>0 = use exactly N parallel jobs.
     [int]$Jobs = 0,
@@ -36,17 +42,46 @@ param(
     [switch]$Clean,
     [switch]$Reconfigure,
 
-    # Disable cl.exe /MP (parallel compilation of .cpp files inside a single project).
-    # Useful if /MP causes trouble (e.g. conflicts with /Gm or weird PDB issues).
+    # Disable cl.exe /MP.
     [switch]$NoClMp
 )
 
 $ErrorActionPreference = 'Stop'
 
 # --------------------------------------------------------------------------
-# 0. Force UTF-8 for all external process I/O.
-#    Fixes garbled non-ASCII output from CMake / MSBuild on non-UTF-8 consoles
-#    (e.g. Chinese Windows with code page 936).
+# 0. Resolve repository/project paths from the script location.
+#    This is intentional: the script lives in scripts/windows/, while
+#    CMakeLists.txt lives in LumaLive/.
+# --------------------------------------------------------------------------
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$ProjectRoot = Join-Path $RepoRoot 'LumaLive'
+
+if (-not (Test-Path $ProjectRoot -PathType Container)) {
+    Write-Error "LumaLive project directory not found: $ProjectRoot"
+    exit 1
+}
+
+$CMakeLists = Join-Path $ProjectRoot 'CMakeLists.txt'
+if (-not (Test-Path $CMakeLists -PathType Leaf)) {
+    Write-Error "CMakeLists.txt not found: $CMakeLists"
+    exit 1
+}
+
+# Resolve BuildDir relative to the actual LumaLive project root.
+if ([System.IO.Path]::IsPathRooted($BuildDir)) {
+    $BuildDir = [System.IO.Path]::GetFullPath($BuildDir)
+} else {
+    $BuildDir = [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot $BuildDir))
+}
+
+$LogDir = Join-Path $RepoRoot 'build-logs'
+
+Write-Host "==> Repository root : $RepoRoot" -ForegroundColor DarkGray
+Write-Host "==> CMake project    : $ProjectRoot" -ForegroundColor DarkGray
+Write-Host "==> Build directory  : $BuildDir" -ForegroundColor DarkGray
+
+# --------------------------------------------------------------------------
+# 0b. Force UTF-8 for external process I/O.
 # --------------------------------------------------------------------------
 try { chcp 65001 | Out-Null } catch { }
 $utf8 = New-Object System.Text.UTF8Encoding $false
@@ -55,18 +90,15 @@ $utf8 = New-Object System.Text.UTF8Encoding $false
 $OutputEncoding           = $utf8
 
 # --------------------------------------------------------------------------
-# 0b. Resolve parallelism
+# 0c. Resolve parallelism.
 # --------------------------------------------------------------------------
 if ($Jobs -le 0) {
     $Jobs = [Environment]::ProcessorCount
-    if ($Jobs -le 0) { $Jobs = 4 }   # very defensive fallback
+    if ($Jobs -le 0) { $Jobs = 4 }
 }
 
-# cl.exe file-level parallelism (per-project, via CL env var).
-# /MP is forwarded to cl.exe for every compile; you do NOT need to edit CMakeLists.txt.
 if (-not $NoClMp) {
     if ($env:CL) {
-        # Preserve any pre-existing CL flags, append /MP.
         if ($env:CL -notmatch '(?:^|\s)/MP(?:\s|$)') {
             $env:CL = "$($env:CL) /MP$Jobs"
         }
@@ -80,14 +112,9 @@ if (-not $NoClMp) {
 Write-Host "==> MSBuild project-level parallelism: /m:$Jobs" -ForegroundColor Gray
 
 # --------------------------------------------------------------------------
-# 1. Environment checks
+# 1. Environment checks.
 # --------------------------------------------------------------------------
 Write-Host "==> Checking environment ..." -ForegroundColor Cyan
-
-if (-not (Test-Path 'CMakeLists.txt')) {
-    Write-Error "CMakeLists.txt not found. Run this script from the project root directory."
-    exit 1
-}
 
 $cmake = Get-Command cmake -ErrorAction SilentlyContinue
 if (-not $cmake) {
@@ -98,7 +125,7 @@ Write-Host "    CMake: $($cmake.Source)" -ForegroundColor Gray
 cmake --version | Select-Object -First 1
 
 # --------------------------------------------------------------------------
-# 2. Decide whether to (re)configure
+# 2. Decide whether to (re)configure.
 # --------------------------------------------------------------------------
 $cacheFile = Join-Path $BuildDir 'CMakeCache.txt'
 $needConfigure = $false
@@ -123,12 +150,13 @@ else {
 
 if ($needConfigure) {
     Write-Host "==> Configuring CMake ..." -ForegroundColor Cyan
+    Write-Host "    Source    : $ProjectRoot" -ForegroundColor Gray
     Write-Host "    Generator : $Generator" -ForegroundColor Gray
     Write-Host "    Toolset   : $Toolset" -ForegroundColor Gray
     Write-Host "    Arch      : $Arch" -ForegroundColor Gray
     Write-Host "    BuildDir  : $BuildDir" -ForegroundColor Gray
 
-    cmake -S . -B $BuildDir -G $Generator -A $Arch -T $Toolset
+    cmake -S $ProjectRoot -B $BuildDir -G $Generator -A $Arch -T $Toolset
     if ($LASTEXITCODE -ne 0) {
         Write-Error "CMake configuration failed with exit code: $LASTEXITCODE"
         exit $LASTEXITCODE
@@ -136,10 +164,11 @@ if ($needConfigure) {
 }
 
 # --------------------------------------------------------------------------
-# 3. Helper: run one build, capture log, parse per-target result
+# 3. Helper: run one build, capture log, parse per-target result.
 # --------------------------------------------------------------------------
-$logDir = Join-Path (Get-Location) 'build-logs'
-if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
+if (-not (Test-Path $LogDir)) {
+    New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+}
 
 function Invoke-LumaBuild {
     param(
@@ -153,10 +182,7 @@ function Invoke-LumaBuild {
     $logFile = Join-Path $LogDir "build-$Config.log"
     $lines = New-Object System.Collections.Generic.List[string]
 
-    # Pass MSBuild flags after "--".
-    #   /m:N -> MSBuild project-level parallelism
     $msbuildFlags = @("/m:$Jobs")
-
     $cmakeArgs = @('--build', $BuildDir, '--config', $Config) + $ExtraArgs + @('--') + $msbuildFlags
 
     Write-Host ""
@@ -166,13 +192,6 @@ function Invoke-LumaBuild {
 
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
-    # Run cmake and capture ALL output (stdout + stderr).
-    #
-    # Why temporarily disable ErrorActionPreference?
-    #   With $ErrorActionPreference = 'Stop', any line MSBuild writes to
-    #   stderr becomes a terminating error and aborts the script before
-    #   the summary report is printed. We inspect $LASTEXITCODE ourselves,
-    #   so relaxing this inside the function is safe.
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     $exitCode = 0
@@ -191,30 +210,19 @@ function Invoke-LumaBuild {
     $sw.Stop()
     $elapsed = $sw.Elapsed
 
-    # Persist log (UTF-8 with BOM so Notepad / VS Code auto-detect correctly)
     $lines | Set-Content -Path $logFile -Encoding UTF8
 
-    # --- Parse the log ---
     $succeeded = @{}
     $failed    = @{}
     $skipped   = @{}
 
     foreach ($line in $lines) {
-        # Success line, e.g.:
-        #   "  3>  luma_admin_audit.vcxproj -> D:\...\luma_admin_audit.lib"
         $m = [regex]::Match($line, '^\s*(?:\d+>)?\s*(\S+\.vcxproj)\s*->\s*(.+?)\s*$')
         if ($m.Success) {
             $succeeded[$m.Groups[1].Value] = $m.Groups[2].Value
             continue
         }
 
-        # Failure line. MSBuild errors have this exact shape:
-        #   "foo.cpp(10,5): error C2039: ..."           -> compiler
-        #   "LINK : fatal error LNK1104: ..."           -> linker
-        #   "foo.cpp(10,5): fatal error C1001: ..."     -> compiler fatal
-        # And always end with " [D:\...\xxx.vcxproj]".
-        # Strict pattern avoids false positives from warnings that mention
-        # an identifier literally named "error".
         if ($line -match ':\s*(?:fatal\s+)?error\s+[A-Z]+\d+') {
             $m2 = [regex]::Match($line, '\[[A-Za-z]:[^\]]*[\\/](\w[\w\.\-]*\.vcxproj)\]')
             if ($m2.Success) {
@@ -227,7 +235,6 @@ function Invoke-LumaBuild {
             }
         }
 
-        # Skipped line: contains "Skipping" with "project: xxx"
         if ($line -match 'Skipping') {
             $m3 = [regex]::Match($line, 'project\s*:\s*(\S+),')
             if ($m3.Success) {
@@ -248,7 +255,7 @@ function Invoke-LumaBuild {
 }
 
 # --------------------------------------------------------------------------
-# 4. Build each requested configuration
+# 4. Build requested configuration(s).
 # --------------------------------------------------------------------------
 $configs = if ($Config -eq 'All') { @('Debug','Release') } else { @($Config) }
 
@@ -257,12 +264,12 @@ if ($Clean) { $buildExtra += '--clean-first' }
 
 $results = @()
 foreach ($cfg in $configs) {
-    $r = Invoke-LumaBuild -BuildDir $BuildDir -Config $cfg -ExtraArgs $buildExtra -LogDir $logDir -Jobs $Jobs
+    $r = Invoke-LumaBuild -BuildDir $BuildDir -Config $cfg -ExtraArgs $buildExtra -LogDir $LogDir -Jobs $Jobs
     $results += $r
 }
 
 # --------------------------------------------------------------------------
-# 5. Print summary report
+# 5. Print summary report.
 # --------------------------------------------------------------------------
 Write-Host ""
 Write-Host "======================================================================" -ForegroundColor White
@@ -280,12 +287,12 @@ foreach ($r in $results) {
     Write-Host "Configuration : $($r.Config)" -ForegroundColor Cyan
     Write-Host "Total targets : $total"
     if ($bad -gt 0) {
-        Write-Host "Succeeded     : $ok"  -ForegroundColor Green
+        Write-Host "Succeeded     : $ok" -ForegroundColor Green
         Write-Host "Failed        : $bad" -ForegroundColor Red
         $anyFail = $true
     } else {
-        Write-Host "Succeeded     : $ok"  -ForegroundColor Green
-        Write-Host "Failed        : 0"   -ForegroundColor Green
+        Write-Host "Succeeded     : $ok" -ForegroundColor Green
+        Write-Host "Failed        : 0" -ForegroundColor Green
     }
     if ($skip -gt 0) {
         Write-Host "Skipped       : $skip" -ForegroundColor DarkGray
