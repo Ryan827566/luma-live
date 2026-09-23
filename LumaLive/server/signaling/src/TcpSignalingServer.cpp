@@ -51,6 +51,81 @@ luma_socket_t listen_socket=kLumaInvalidSocket;{std::lock_guard lock(listen_mute
 bool TcpSignalingServer::Send(luma_socket_t socket,const luma::contracts::SignalingMessage&m){std::lock_guard lock(send_mutex_);auto b=luma::contracts::wire::encode(m);if(b.size()>256*1024)return false;std::uint32_t n=htonl(static_cast<std::uint32_t>(b.size()));return send_all(socket,reinterpret_cast<std::uint8_t*>(&n),4)&&send_all(socket,b.data(),b.size());}
 void TcpSignalingServer::Broadcast(const luma::contracts::SignalingMessage&m,const std::string&r,const std::string&exclude){std::vector<luma_socket_t>targets;{std::lock_guard lock(mutex_);for(auto&[s,c]:clients_)if(c.room==r&&!c.peer.empty()&&c.peer!=exclude)targets.push_back(s);}for(auto s:targets)Send(s,m);}
 void TcpSignalingServer::RemoveClient(luma_socket_t s){Client c;{std::lock_guard lock(mutex_);auto it=clients_.find(s);if(it==clients_.end())return;c=it->second;clients_.erase(it);if(!c.room.empty()&&!c.peer.empty()){auto rit=rooms_.find(c.room);if(rit!=rooms_.end()){rit->second.erase(c.peer);if(rit->second.empty())rooms_.erase(rit);}}}if(!c.room.empty()&&!c.peer.empty()){luma::contracts::SignalingMessage m;m.type=luma::contracts::SignalingMessageType::PeerLeft;m.room_id=c.room;m.peer_id=c.peer;Broadcast(m,c.room,c.peer);}}
-void TcpSignalingServer::ClientLoop(luma_socket_t s){while(running_){std::uint32_t n=0;if(!recv_all(s,reinterpret_cast<std::uint8_t*>(&n),4))break;n=ntohl(n);if(n==0||n>256*1024)break;std::vector<std::uint8_t>b(n);if(!recv_all(s,b.data(),n))break;luma::contracts::SignalingMessage m;if(!luma::contracts::wire::decode(b,m))break;Client c;{std::lock_guard lock(mutex_);auto it=clients_.find(s);if(it==clients_.end())break;c=it->second;}HandleMessage(c,m);{std::lock_guard lock(mutex_);if(clients_.find(s)==clients_.end())break;}}close_socket(s);RemoveClient(s);}
-void TcpSignalingServer::HandleMessage(Client&c,const luma::contracts::SignalingMessage&m){using T=luma::contracts::SignalingMessageType;if(m.type==T::Ping){luma::contracts::SignalingMessage p;p.type=T::Pong;Send(c.socket,p);return;}if(m.type==T::JoinRoom){if(m.room_id.empty()||m.peer_id.empty())return;bool added=false;std::vector<std::string> existing;{std::lock_guard lock(mutex_);auto it=clients_.find(c.socket);if(it==clients_.end())return;if(!it->second.room.empty())return;auto&peers=rooms_[m.room_id];existing.assign(peers.begin(),peers.end());added=peers.insert(m.peer_id).second;if(!added)return;it->second.room=m.room_id;it->second.peer=m.peer_id;c=it->second;}for(const auto& peer:existing){luma::contracts::SignalingMessage notice;notice.type=T::PeerJoined;notice.room_id=c.room;notice.peer_id=peer;notice.target_peer_id=c.peer;Send(c.socket,notice);}luma::contracts::SignalingMessage joined;joined.type=T::PeerJoined;joined.room_id=c.room;joined.peer_id=c.peer;Broadcast(joined,c.room,c.peer);return;}if(c.room.empty()||c.peer.empty()||(!m.room_id.empty()&&m.room_id!=c.room)||(!m.peer_id.empty()&&m.peer_id!=c.peer))return;if(m.type==T::LeaveRoom){RemoveClient(c.socket);return;}if(m.type==T::Offer||m.type==T::Answer||m.type==T::IceCandidate){if(m.target_peer_id.empty())return;luma::contracts::SignalingMessage f=m;f.peer_id=c.peer;f.room_id=c.room;std::vector<luma_socket_t>targets;{std::lock_guard lock(mutex_);for(auto&[sock,other]:clients_)if(other.room==c.room&&other.peer==m.target_peer_id)targets.push_back(sock);}for(auto sock:targets)Send(sock,f);return;}}
+void TcpSignalingServer::ClientLoop(luma_socket_t s){while(running_){std::uint32_t n=0;if(!recv_all(s,reinterpret_cast<std::uint8_t*>(&n),4))break;n=ntohl(n);if(n==0||n>256*1024)break;std::vector<std::uint8_t>b(n);if(!recv_all(s,b.data(),n))break;luma::contracts::SignalingMessage m;if(!luma::contracts::wire::decode(b,m))break;Client c;{std::lock_guard lock(mutex_);auto it=clients_.find(s);if(it==clients_.end())break;c=it->second;}HandleMessage(c,m);{std::lock_guard lock(mutex_);if(clients_.find(s)==clients_.end())break;}}RemoveClient(s);close_socket(s);}
+void TcpSignalingServer::HandleMessage(Client& c, const luma::contracts::SignalingMessage& m) {
+    using T = luma::contracts::SignalingMessageType;
+    auto error = [&](const std::string& reason) {
+        luma::contracts::SignalingMessage response;
+        response.type = T::Error;
+        response.room_id = c.room.empty() ? m.room_id : c.room;
+        response.target_peer_id = c.peer.empty() ? m.peer_id : c.peer;
+        response.sequence = m.sequence; response.value = reason;
+        Send(c.socket, response);
+    };
+    if (m.type == T::Ping) {
+        luma::contracts::SignalingMessage pong; pong.type = T::Pong;
+        Send(c.socket, pong); return;
+    }
+    if (m.type == T::JoinRoom) {
+        if (m.room_id.empty() || m.peer_id.empty() || m.room_id.size() > 128 || m.peer_id.size() > 128) {
+            error("Room and participant IDs must contain 1 to 128 bytes"); return;
+        }
+        bool added = false;
+        std::vector<std::string> existing;
+        {
+            std::lock_guard lock(mutex_);
+            auto it = clients_.find(c.socket);
+            if (it == clients_.end()) return;
+            if (it->second.room.empty()) {
+                auto& peers = rooms_[m.room_id];
+                existing.assign(peers.begin(), peers.end());
+                added = peers.insert(m.peer_id).second;
+                if (added) {
+                    it->second.room = m.room_id; it->second.peer = m.peer_id;
+                    c = it->second;
+                }
+            }
+        }
+        if (!added) { error("Participant ID is already in use; choose another ID"); return; }
+        // Acknowledgment distinguishes registered identity from an open TCP socket.
+        luma::contracts::SignalingMessage ack;
+        ack.type = T::RoomJoined; ack.room_id = c.room; ack.target_peer_id = c.peer;
+        Send(c.socket, ack);
+        for (const auto& peer : existing) {
+            luma::contracts::SignalingMessage notice;
+            notice.type = T::PeerJoined; notice.room_id = c.room;
+            notice.peer_id = peer; notice.target_peer_id = c.peer;
+            Send(c.socket, notice);
+        }
+        luma::contracts::SignalingMessage joined;
+        joined.type = T::PeerJoined; joined.room_id = c.room; joined.peer_id = c.peer;
+        Broadcast(joined, c.room, c.peer); return;
+    }
+    // Never trust sender identity supplied in a forwarded packet.
+    if (c.room.empty() || c.peer.empty() || m.room_id != c.room || m.peer_id != c.peer) {
+        error("Sender identity does not match the registered connection"); return;
+    }
+    if (m.type == T::LeaveRoom) { RemoveClient(c.socket); return; }
+    const bool routed = m.type == T::Offer || m.type == T::Answer || m.type == T::IceCandidate ||
+        m.type == T::CallInvite || m.type == T::CallAccept || m.type == T::CallReject ||
+        m.type == T::CallCancel || m.type == T::CallHangup || m.type == T::CallBusy;
+    if (!routed) return;
+    if (m.target_peer_id.empty() || m.target_peer_id == c.peer) {
+        error("A different target participant is required"); return;
+    }
+    const bool callControl = m.type != T::Offer && m.type != T::Answer && m.type != T::IceCandidate;
+    if (callControl && m.sequence <= 0) { error("A positive call ID is required"); return; }
+    luma::contracts::SignalingMessage forwarded = m;
+    forwarded.peer_id = c.peer; forwarded.room_id = c.room;
+    std::vector<luma_socket_t> targets;
+    {
+        std::lock_guard lock(mutex_);
+        for (const auto& [socket, other] : clients_)
+            if (other.room == c.room && other.peer == m.target_peer_id) targets.push_back(socket);
+    }
+    if (targets.empty()) { error("Target participant is no longer in the room"); return; }
+    for (auto socket : targets) Send(socket, forwarded);
 }
+
+}
+
