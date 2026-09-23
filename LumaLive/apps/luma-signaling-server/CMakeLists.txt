@@ -1,0 +1,3 @@
+add_executable(luma_signaling_server src/main.cpp)
+target_compile_features(luma_signaling_server PRIVATE cxx_std_20)
+target_link_libraries(luma_signaling_server PRIVATE luma_signaling)
