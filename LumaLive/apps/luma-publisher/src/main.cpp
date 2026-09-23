@@ -6,7 +6,7 @@
 int main(int argc, char** argv) {
     if (argc < 4) {
         std::cerr << "usage: luma_publisher <room> <peer_id> <camera_device_id> "
-                     "[microphone_device_id] [signaling_host] [signaling_port]\\n";
+                     "[microphone_device_id] [signaling_host] [signaling_port]\n";
         return 2;
     }
 
@@ -35,15 +35,15 @@ int main(int argc, char** argv) {
 
     luma::client::live::LivePublishSession session;
     if (!session.Start(c)) {
-        std::cerr << "failed to start: " << session.LastError() << "\\n";
+        std::cerr << "failed to start: " << session.LastError() << "\n";
         return 1;
     }
 
-    std::cout << "LumaLive publisher started.\\n"
-                 "  signaling: " << c.signaling_host << ":" << c.signaling_port << "\\n"
-                 "  room: " << c.room_id << "\\n"
-                 "  peer: " << c.peer_id << "\\n"
-                 "Press Enter to stop.\\n";
+    std::cout << "LumaLive publisher started.\n"
+                 "  signaling: " << c.signaling_host << ":" << c.signaling_port << "\n"
+                 "  room: " << c.room_id << "\n"
+                 "  peer: " << c.peer_id << "\n"
+                 "Press Enter to stop.\n";
 
     std::string line;
     std::getline(std::cin, line);
