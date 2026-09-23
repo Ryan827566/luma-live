@@ -3,7 +3,8 @@
 #include "TcpSignalingClient.hpp"
 #include <deque>
 #include <mutex>
-#include <atomic>\n#include <cstdlib>
+#include <atomic>
+#include <cstdlib>
 
 namespace luma::client::ui::preview {
 // All negotiation runs on the UI/controller thread through Poll(). Worker
