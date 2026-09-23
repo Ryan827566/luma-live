@@ -7,11 +7,18 @@
   Default behavior is INCREMENTAL build for fast daily development.
   Use -Clean for a full rebuild after changing CMakeLists.txt / runtime settings.
 
+  Parallelism (big speed-up on full rebuilds):
+    * MSBuild project-level parallelism via -- /m:N
+    * cl.exe file-level parallelism via the CL=/MP env var (no CMake changes needed)
+  Default job count is the number of logical processors; override with -Jobs N.
+
 .EXAMPLE
   .\build.ps1                     # Incremental build: Debug + Release, with summary
+  .\build.ps1 -Clean              # Full clean rebuild + summary (parallel)
+  .\build.ps1 -Clean -Jobs 8      # Full rebuild with 8 parallel jobs
   .\build.ps1 -Config Debug       # Incremental build: Debug only
-  .\build.ps1 -Clean              # Full clean rebuild + summary
   .\build.ps1 -Reconfigure        # Re-run cmake configure, then incremental build
+  .\build.ps1 -NoClMp             # Disable file-level /MP (falls back to MSBuild-only parallelism)
 #>
 [CmdletBinding()]
 param(
@@ -23,8 +30,15 @@ param(
     [string]$Arch = 'x64',
     [string]$BuildDir = 'build',
 
+    # 0 = auto-detect (logical processor count). N>0 = use exactly N parallel jobs.
+    [int]$Jobs = 0,
+
     [switch]$Clean,
-    [switch]$Reconfigure
+    [switch]$Reconfigure,
+
+    # Disable cl.exe /MP (parallel compilation of .cpp files inside a single project).
+    # Useful if /MP causes trouble (e.g. conflicts with /Gm or weird PDB issues).
+    [switch]$NoClMp
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,15 +48,36 @@ $ErrorActionPreference = 'Stop'
 #    Fixes garbled non-ASCII output from CMake / MSBuild on non-UTF-8 consoles
 #    (e.g. Chinese Windows with code page 936).
 # --------------------------------------------------------------------------
-try {
-    chcp 65001 | Out-Null
-} catch {
-    # chcp may not be available in some restricted hosts; ignore.
-}
+try { chcp 65001 | Out-Null } catch { }
 $utf8 = New-Object System.Text.UTF8Encoding $false
 [Console]::OutputEncoding = $utf8
 [Console]::InputEncoding  = $utf8
 $OutputEncoding           = $utf8
+
+# --------------------------------------------------------------------------
+# 0b. Resolve parallelism
+# --------------------------------------------------------------------------
+if ($Jobs -le 0) {
+    $Jobs = [Environment]::ProcessorCount
+    if ($Jobs -le 0) { $Jobs = 4 }   # very defensive fallback
+}
+
+# cl.exe file-level parallelism (per-project, via CL env var).
+# /MP is forwarded to cl.exe for every compile; you do NOT need to edit CMakeLists.txt.
+if (-not $NoClMp) {
+    if ($env:CL) {
+        # Preserve any pre-existing CL flags, append /MP.
+        if ($env:CL -notmatch '(?:^|\s)/MP(?:\s|$)') {
+            $env:CL = "$($env:CL) /MP$Jobs"
+        }
+    } else {
+        $env:CL = "/MP$Jobs"
+    }
+    Write-Host "==> cl.exe file-level parallelism: /MP$Jobs (via CL env var)" -ForegroundColor Gray
+} else {
+    Write-Host "==> cl.exe file-level parallelism: DISABLED (-NoClMp)" -ForegroundColor DarkGray
+}
+Write-Host "==> MSBuild project-level parallelism: /m:$Jobs" -ForegroundColor Gray
 
 # --------------------------------------------------------------------------
 # 1. Environment checks
@@ -111,25 +146,50 @@ function Invoke-LumaBuild {
         [string]$BuildDir,
         [string]$Config,
         [string[]]$ExtraArgs,
-        [string]$LogDir
+        [string]$LogDir,
+        [int]$Jobs
     )
 
     $logFile = Join-Path $LogDir "build-$Config.log"
     $lines = New-Object System.Collections.Generic.List[string]
 
-    $cmakeArgs = @('--build', $BuildDir, '--config', $Config) + $ExtraArgs
+    # Pass MSBuild flags after "--".
+    #   /m:N -> MSBuild project-level parallelism
+    $msbuildFlags = @("/m:$Jobs")
+
+    $cmakeArgs = @('--build', $BuildDir, '--config', $Config) + $ExtraArgs + @('--') + $msbuildFlags
 
     Write-Host ""
     Write-Host "==> Building configuration: $Config" -ForegroundColor Cyan
     Write-Host "    Command: cmake $($cmakeArgs -join ' ')" -ForegroundColor DarkGray
     Write-Host ""
 
-    & cmake @cmakeArgs 2>&1 | ForEach-Object {
-        $line = $_.ToString()
-        $lines.Add($line)
-        Write-Host $line
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+
+    # Run cmake and capture ALL output (stdout + stderr).
+    #
+    # Why temporarily disable ErrorActionPreference?
+    #   With $ErrorActionPreference = 'Stop', any line MSBuild writes to
+    #   stderr becomes a terminating error and aborts the script before
+    #   the summary report is printed. We inspect $LASTEXITCODE ourselves,
+    #   so relaxing this inside the function is safe.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $exitCode = 0
+    try {
+        & cmake @cmakeArgs 2>&1 | ForEach-Object {
+            $line = $_.ToString()
+            $lines.Add($line)
+            Write-Host $line
+        }
+        $exitCode = $LASTEXITCODE
     }
-    $exitCode = $LASTEXITCODE
+    finally {
+        $ErrorActionPreference = $prevEAP
+    }
+
+    $sw.Stop()
+    $elapsed = $sw.Elapsed
 
     # Persist log (UTF-8 with BOM so Notepad / VS Code auto-detect correctly)
     $lines | Set-Content -Path $logFile -Encoding UTF8
@@ -140,18 +200,29 @@ function Invoke-LumaBuild {
     $skipped   = @{}
 
     foreach ($line in $lines) {
-        # Success line: "  3>  luma_admin_audit.vcxproj -> D:\...\luma_admin_audit.lib"
+        # Success line, e.g.:
+        #   "  3>  luma_admin_audit.vcxproj -> D:\...\luma_admin_audit.lib"
         $m = [regex]::Match($line, '^\s*(?:\d+>)?\s*(\S+\.vcxproj)\s*->\s*(.+?)\s*$')
         if ($m.Success) {
             $succeeded[$m.Groups[1].Value] = $m.Groups[2].Value
             continue
         }
 
-        # Failure line: contains "error" and ends with "[D:\...\xxx.vcxproj]"
-        if ($line -match '\berror\b') {
+        # Failure line. MSBuild errors have this exact shape:
+        #   "foo.cpp(10,5): error C2039: ..."           -> compiler
+        #   "LINK : fatal error LNK1104: ..."           -> linker
+        #   "foo.cpp(10,5): fatal error C1001: ..."     -> compiler fatal
+        # And always end with " [D:\...\xxx.vcxproj]".
+        # Strict pattern avoids false positives from warnings that mention
+        # an identifier literally named "error".
+        if ($line -match ':\s*(?:fatal\s+)?error\s+[A-Z]+\d+') {
             $m2 = [regex]::Match($line, '\[[A-Za-z]:[^\]]*[\\/](\w[\w\.\-]*\.vcxproj)\]')
             if ($m2.Success) {
-                $failed[$m2.Groups[1].Value] = $true
+                $proj = $m2.Groups[1].Value
+                if (-not $failed.ContainsKey($proj)) {
+                    $failed[$proj] = New-Object System.Collections.Generic.List[string]
+                }
+                $failed[$proj].Add($line.Trim())
                 continue
             }
         }
@@ -169,6 +240,7 @@ function Invoke-LumaBuild {
         Config    = $Config
         ExitCode  = $exitCode
         LogFile   = $logFile
+        Elapsed   = $elapsed
         Succeeded = $succeeded
         Failed    = $failed
         Skipped   = $skipped
@@ -185,7 +257,7 @@ if ($Clean) { $buildExtra += '--clean-first' }
 
 $results = @()
 foreach ($cfg in $configs) {
-    $r = Invoke-LumaBuild -BuildDir $BuildDir -Config $cfg -ExtraArgs $buildExtra -LogDir $logDir
+    $r = Invoke-LumaBuild -BuildDir $BuildDir -Config $cfg -ExtraArgs $buildExtra -LogDir $logDir -Jobs $Jobs
     $results += $r
 }
 
@@ -218,14 +290,24 @@ foreach ($r in $results) {
     if ($skip -gt 0) {
         Write-Host "Skipped       : $skip" -ForegroundColor DarkGray
     }
+    Write-Host ("Elapsed       : {0:hh\:mm\:ss\.fff}" -f $r.Elapsed)
     Write-Host "Exit code     : $($r.ExitCode)"
     Write-Host "Full log      : $($r.LogFile)" -ForegroundColor DarkGray
 
     if ($bad -gt 0) {
         Write-Host ""
-        Write-Host "  Failed targets:" -ForegroundColor Red
+        Write-Host "  Failed targets (with reasons):" -ForegroundColor Red
         foreach ($proj in ($r.Failed.Keys | Sort-Object)) {
-            Write-Host ("    {0,-6}{1}" -f "FAIL", $proj) -ForegroundColor Red
+            Write-Host ("    FAIL  {0}" -f $proj) -ForegroundColor Red
+            $reasons = $r.Failed[$proj]
+            if ($reasons -is [System.Collections.Generic.List[string]]) {
+                $reasons | Select-Object -First 5 | ForEach-Object {
+                    Write-Host ("          {0}" -f $_) -ForegroundColor DarkRed
+                }
+                if ($reasons.Count -gt 5) {
+                    Write-Host ("          ... and {0} more" -f ($reasons.Count - 5)) -ForegroundColor DarkRed
+                }
+            }
         }
     }
 
