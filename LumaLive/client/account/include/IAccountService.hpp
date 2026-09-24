@@ -6,7 +6,12 @@
 #include "contracts/auth/Auth.hpp"
 
 namespace luma::client::account {
-struct OperationResult { bool success{false}; std::string message; };
+
+struct OperationResult {
+    bool success{false};
+    std::string message;
+};
+
 class IAccountService {
 public:
     virtual ~IAccountService() = default;
@@ -18,9 +23,14 @@ public:
     virtual OperationResult Login(std::string identifier,std::string password) = 0;
     virtual OperationResult Logout() = 0;
     virtual OperationResult ValidateSession() = 0;
+    virtual OperationResult GetProfile() = 0;
+    virtual OperationResult UpdateProfile(std::string username,std::string email,std::string display_name,std::string avatar_url) = 0;
+    virtual OperationResult DeleteAccount() = 0;
     virtual bool IsAuthenticated() const = 0;
     virtual contracts::auth::AuthSession Session() const = 0;
     virtual OperationResult Execute(std::string_view operation) = 0;
 };
+
 std::unique_ptr<IAccountService> CreateAccountService();
+
 }
