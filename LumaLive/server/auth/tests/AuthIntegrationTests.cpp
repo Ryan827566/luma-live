@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <span>
 
@@ -22,6 +23,22 @@ int main() {
     std::error_code ec;
     std::filesystem::remove(store,ec);
     std::filesystem::remove(store+".tmp",ec);
+    std::filesystem::remove(store+".bak",ec);
+
+    const std::string legacy_salt="legacy-salt";
+    const auto legacy_verifier=luma::contracts::auth::crypto::pbkdf2_hmac_sha256(
+        "legacy pass",
+        std::span<const std::uint8_t>(
+            reinterpret_cast<const std::uint8_t*>(legacy_salt.data()),legacy_salt.size()));
+    {
+        std::ofstream legacy(store,std::ios::trunc);
+        assert(legacy);
+        legacy<<"1\tlegacy-id\tlegacy.test\tlegacy@example.com\tLegacy User\t"
+              <<luma::contracts::auth::crypto::hex(
+                    std::span<const std::uint8_t>(
+                        reinterpret_cast<const std::uint8_t*>(legacy_salt.data()),legacy_salt.size()))
+              <<"\t"<<luma::contracts::auth::crypto::hex(legacy_verifier)<<"\n";
+    }
 
     auto server=luma::server::auth::CreateAuthService();
     assert(server->ConfigureStore(store).IsOk());
@@ -29,6 +46,13 @@ int main() {
 
     auto client=luma::client::account::CreateAccountService();
     assert(client->Connect("127.0.0.1",19120).success);
+
+    assert(client->Login("legacy.test","legacy pass").success);
+    assert(client->GetProfile().success);
+    assert(client->Session().user.user_id=="legacy-id");
+    assert(client->Session().user.display_name=="Legacy User");
+    assert(client->Session().user.avatar_url.empty());
+    assert(client->Logout().success);
 
     auto r=client->Register("alice.test","alice@example.com","Alice Test","correct horse");
     if(!r.success){std::cerr<<"registration failed: "<<r.message<<"\n";return 1;}
@@ -88,12 +112,16 @@ int main() {
     assert(client2->Login("bob.test","correct horse").success);
     assert(client2->GetProfile().success);
     assert(client2->Session().user.display_name=="Bob");
+    assert(client2->Login("legacy.test","legacy pass").success);
+    assert(client2->GetProfile().success);
+    assert(client2->Session().user.display_name=="Legacy User");
 
     client2->Stop();
     server2->Stop();
 
     std::filesystem::remove(store,ec);
     std::filesystem::remove(store+".tmp",ec);
-    std::cout<<"PASS: registration, duplicate protection, password rejection, username/email login, profile read/update, avatar URL, account deletion and persistence\n";
+    std::filesystem::remove(store+".bak",ec);
+    std::cout<<"PASS: registration, duplicate protection, password rejection, username/email login, profile read/update, avatar URL, account deletion and legacy-store persistence\n";
     return 0;
 }
