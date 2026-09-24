@@ -17,6 +17,9 @@ constexpr int ID_AVATAR=106,ID_VERIFY=107,ID_CURRENT_PASSWORD=108,ID_NEW_PASSWOR
 constexpr int ID_CONNECT=200,ID_REGISTER=201,ID_LOGIN=202,ID_LOGOUT=203,ID_REFRESH=204,ID_SAVE=205,ID_DELETE=206;
 constexpr int ID_VERIFY_REQUEST=207,ID_VERIFY_EMAIL=208,ID_CHANGE_PASSWORD=209,ID_ENABLE_MFA=210,ID_DISABLE_MFA=211;
 constexpr int ID_SESSIONS=212,ID_REVOKE_OTHERS=213,ID_EVENTS=214,ID_RESET_REQUEST=215,ID_RESET_PASSWORD=216;
+constexpr int ID_PHONE=112,ID_PHONE_CODE=113,ID_PHONE_CHALLENGE=114;
+constexpr int ID_PHONE_VERIFY_REQUEST=217,ID_PHONE_VERIFY=218;
+constexpr int ID_PHONE_LOGIN_REQUEST=219,ID_PHONE_LOGIN=220;
 constexpr int ID_STATUS=300;
 
 std::wstring utf8_to_wide(const std::string& value) {
@@ -60,13 +63,15 @@ void EnableConnectedButtons(HWND window,bool connected) {
     EnableWindow(GetDlgItem(window,ID_LOGIN),connected);
     EnableWindow(GetDlgItem(window,ID_RESET_REQUEST),connected);
     EnableWindow(GetDlgItem(window,ID_RESET_PASSWORD),connected);
+    EnableWindow(GetDlgItem(window,ID_PHONE_LOGIN_REQUEST),connected);
+    EnableWindow(GetDlgItem(window,ID_PHONE_LOGIN),connected);
 }
 
 void EnableAuthenticatedButtons(HWND window,bool authenticated) {
     for(const int id:{
         ID_LOGOUT,ID_REFRESH,ID_SAVE,ID_DELETE,ID_VERIFY_REQUEST,ID_VERIFY_EMAIL,
         ID_CHANGE_PASSWORD,ID_ENABLE_MFA,ID_DISABLE_MFA,ID_SESSIONS,
-        ID_REVOKE_OTHERS,ID_EVENTS
+        ID_REVOKE_OTHERS,ID_EVENTS,ID_PHONE_VERIFY_REQUEST,ID_PHONE_VERIFY
     }) {
         EnableWindow(GetDlgItem(window,id),authenticated);
     }
@@ -89,7 +94,7 @@ public:
         window_=CreateWindowExW(
             0,wc.lpszClassName,L"LumaLive 账号与安全中心",
             WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,
-            CW_USEDEFAULT,CW_USEDEFAULT,760,840,nullptr,nullptr,instance_,this);
+            CW_USEDEFAULT,CW_USEDEFAULT,760,950,nullptr,nullptr,instance_,this);
         if(!window_)return 1;
 
         ShowWindow(window_,show);
@@ -179,18 +184,34 @@ private:
         AddButton(ID_RESET_REQUEST,L"请求密码重置",24,602,120);
         AddButton(ID_RESET_PASSWORD,L"使用 Token 重置",154,602,120);
 
+        AddLabel(L"手机号",24,652,100);
+        AddEdit(ID_PHONE,L"",130,648,300);
+        AddButton(ID_PHONE_VERIFY_REQUEST,L"发送绑定验证码",440,648,120);
+        AddButton(ID_PHONE_LOGIN_REQUEST,L"发送登录验证码",570,648,140);
+
+        AddLabel(L"手机验证码",24,690,100);
+        AddEdit(ID_PHONE_CODE,L"",130,686,300);
+        AddButton(ID_PHONE_VERIFY,L"确认绑定",440,686,100);
+        AddButton(ID_PHONE_LOGIN,L"验证码登录",550,686,160);
+
+        // Internal challenge id used by the development UI to complete the
+        // two-step SMS flow. Hidden from normal users.
+        AddEdit(ID_PHONE_CHALLENGE,L"",0,0,1);
+        ShowWindow(GetDlgItem(window_,ID_PHONE_CHALLENGE),SW_HIDE);
+
         CreateWindowW(
             L"STATIC",L"未连接",WS_CHILD|WS_VISIBLE,
-            24,652,690,100,window_,
+            24,730,690,120,window_,
             reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_STATUS)),instance_,nullptr);
 
         CreateWindowW(
             L"STATIC",
             L"开发测试入口：luma_studio.exe --account\\n"
-            L"安全能力：邮箱验证、修改/重置密码、MFA 恢复码、登录设备管理、"
-            L"会话撤销、登录失败限流及安全审计。\\n"
-            L"验证/重置 Token 当前通过开发接口返回，正式环境应接入邮件/消息投递服务。",
-            WS_CHILD|WS_VISIBLE,24,760,690,60,window_,nullptr,instance_,nullptr);
+            L"安全能力：邮箱验证、手机验证、短信验证码登录、修改/重置密码、"
+            L"MFA 恢复码、登录设备管理、会话撤销、登录失败限流及安全审计。\\n"
+            L"当前开发环境会把 SMS 验证码返回到客户端状态区；正式环境接入 SMS 提供商后，"
+            L"验证码不再从认证接口返回。",
+            WS_CHILD|WS_VISIBLE,24,865,690,60,window_,nullptr,instance_,nullptr);
 
         EnableConnectedButtons(window_,false);
         EnableAuthenticatedButtons(window_,false);
@@ -236,6 +257,7 @@ private:
         SetText(window_,ID_EMAIL,s.user.email);
         SetText(window_,ID_DISPLAY,s.user.display_name);
         SetText(window_,ID_AVATAR,s.user.avatar_url);
+        SetText(window_,ID_PHONE,s.user.phone);
 
         const auto sr=service_->GetSecuritySummary();
         if(sr.success) {
@@ -368,6 +390,70 @@ private:
         SetStatus(window_,text);
     }
 
+    void RequestPhoneVerification() {
+        const auto r=service_->RequestPhoneVerification(
+            wide_to_utf8(GetText(GetDlgItem(window_,ID_PHONE))));
+        SetStatus(window_,utf8_to_wide(r.message));
+        if(r.success) {
+            const auto codePrefix=std::string("SMS verification code=");
+            const auto challengePrefix=std::string(" challenge=");
+            const auto codePos=r.message.find(codePrefix);
+            const auto challengePos=r.message.find(challengePrefix);
+            const auto expiresPos=r.message.find(" expires=");
+            if(codePos!=std::string::npos&&challengePos!=std::string::npos) {
+                SetText(window_,ID_PHONE_CODE,
+                    r.message.substr(codePos+codePrefix.size(),challengePos-(codePos+codePrefix.size())));
+            }
+            if(challengePos!=std::string::npos) {
+                const auto end=expiresPos==std::string::npos?r.message.size():expiresPos;
+                SetText(window_,ID_PHONE_CHALLENGE,
+                    r.message.substr(challengePos+challengePrefix.size(),
+                        end-(challengePos+challengePrefix.size())));
+            }
+        }
+    }
+
+    void VerifyPhone() {
+        const auto challenge=wide_to_utf8(GetText(GetDlgItem(window_,ID_PHONE_CHALLENGE)));
+        const auto code=wide_to_utf8(GetText(GetDlgItem(window_,ID_PHONE_CODE)));
+        const auto r=service_->VerifyPhone(challenge,code);
+        SetStatus(window_,utf8_to_wide(r.message));
+        if(r.success)RefreshProfile();
+    }
+
+    void RequestPhoneLoginCode() {
+        const auto r=service_->RequestPhoneLoginCode(
+            wide_to_utf8(GetText(GetDlgItem(window_,ID_PHONE))));
+        SetStatus(window_,utf8_to_wide(r.message));
+        if(r.success) {
+            const auto codePrefix=std::string("SMS login code=");
+            const auto challengePrefix=std::string(" challenge=");
+            const auto codePos=r.message.find(codePrefix);
+            const auto challengePos=r.message.find(challengePrefix);
+            const auto expiresPos=r.message.find(" expires=");
+            if(codePos!=std::string::npos&&challengePos!=std::string::npos) {
+                SetText(window_,ID_PHONE_CODE,
+                    r.message.substr(codePos+codePrefix.size(),challengePos-(codePos+codePrefix.size())));
+            }
+            if(challengePos!=std::string::npos) {
+                const auto end=expiresPos==std::string::npos?r.message.size():expiresPos;
+                SetText(window_,ID_PHONE_CHALLENGE,
+                    r.message.substr(challengePos+challengePrefix.size(),
+                        end-(challengePos+challengePrefix.size())));
+            }
+        }
+    }
+
+    void LoginWithPhoneCode() {
+        const auto challenge=wide_to_utf8(GetText(GetDlgItem(window_,ID_PHONE_CHALLENGE)));
+        const auto code=wide_to_utf8(GetText(GetDlgItem(window_,ID_PHONE_CODE)));
+        const auto mfa=wide_to_utf8(GetText(GetDlgItem(window_,ID_MFA)));
+        const auto r=service_->LoginWithPhoneCode(
+            challenge,code,"luma-live-phone","LumaLive Phone",mfa);
+        SetStatus(window_,utf8_to_wide(r.message));
+        if(r.success)RefreshProfile();
+    }
+
     void RequestPasswordReset() {
         const auto r=service_->RequestPasswordReset(
             wide_to_utf8(GetText(GetDlgItem(window_,ID_USERNAME))));
@@ -421,6 +507,10 @@ private:
                 case ID_EVENTS:self->ShowEvents();break;
                 case ID_RESET_REQUEST:self->RequestPasswordReset();break;
                 case ID_RESET_PASSWORD:self->ResetPassword();break;
+                case ID_PHONE_VERIFY_REQUEST:self->RequestPhoneVerification();break;
+                case ID_PHONE_VERIFY:self->VerifyPhone();break;
+                case ID_PHONE_LOGIN_REQUEST:self->RequestPhoneLoginCode();break;
+                case ID_PHONE_LOGIN:self->LoginWithPhoneCode();break;
                 default:break;
                 }
                 return 0;
