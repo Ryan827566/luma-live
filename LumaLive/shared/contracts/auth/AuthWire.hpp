@@ -7,26 +7,23 @@
 namespace luma::contracts::auth::wire {
 
 enum class Type : unsigned char {
-    RegisterBegin=1,
-    RegisterChallenge=2,
-    RegisterFinish=3,
-    RegisterOk=4,
-    LoginBegin=5,
-    LoginChallenge=6,
-    LoginProof=7,
-    LoginOk=8,
-    Logout=9,
-    LogoutOk=10,
-    ValidateSession=11,
-    Error=12,
-    Ping=13,
-    Pong=14,
-    GetProfile=15,
-    ProfileOk=16,
-    UpdateProfile=17,
-    UpdateProfileOk=18,
-    DeleteAccount=19,
-    DeleteAccountOk=20
+    RegisterBegin=1, RegisterChallenge=2, RegisterFinish=3, RegisterOk=4,
+    LoginBegin=5, LoginChallenge=6, LoginProof=7, LoginOk=8,
+    Logout=9, LogoutOk=10, ValidateSession=11, Error=12, Ping=13, Pong=14,
+    GetProfile=15, ProfileOk=16, UpdateProfile=17, UpdateProfileOk=18,
+    DeleteAccount=19, DeleteAccountOk=20,
+    RequestEmailVerification=21, EmailVerificationIssued=22,
+    VerifyEmail=23, EmailVerified=24,
+    ChangePasswordBegin=25, ChangePasswordChallenge=26,
+    ChangePasswordFinish=27, PasswordChanged=28,
+    RequestPasswordReset=29, PasswordResetIssued=30,
+    ResetPassword=31, PasswordResetOk=32,
+    GetSecuritySummary=33, SecuritySummaryOk=34,
+    EnableMfa=35, MfaEnabled=36, DisableMfa=37, MfaDisabled=38,
+    GetSessions=39, SessionsOk=40,
+    RevokeSession=41, SessionRevoked=42,
+    RevokeOtherSessions=43, SessionsRevoked=44,
+    GetSecurityEvents=45, SecurityEventsOk=46
 };
 
 struct Packet {
