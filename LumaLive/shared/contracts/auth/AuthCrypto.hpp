@@ -104,6 +104,9 @@ inline std::vector<std::uint8_t> from_hex(std::string_view s){
     for(std::size_t i=0;i<out.size();++i){int hi=nib(s[2*i]),lo=nib(s[2*i+1]);if(hi<0||lo<0)throw std::invalid_argument("invalid hex");out[i]=std::uint8_t((hi<<4)|lo);}return out;
 }
 inline bool constant_time_equal(std::span<const std::uint8_t> a,std::span<const std::uint8_t> b){
-    if(a.size()!=b.size())return false;std::uint8_t v=0;for(std::size_t i=0;i<a.size();++i)v|=std::uint8_t(a[i]^b[i]);return v==0;
+    if(a.size()!=b.size()) return false;
+    std::uint8_t v=0;
+    for(std::size_t i=0;i<a.size();++i) v|=std::uint8_t(a[i]^b[i]);
+    return v==0;
 }
 }
