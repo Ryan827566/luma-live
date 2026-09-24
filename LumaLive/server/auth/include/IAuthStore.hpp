@@ -21,6 +21,7 @@ struct AuthUserRecord {
     bool phone_verified{false};
     bool mfa_enabled{false};
     std::string mfa_recovery_hash;
+    std::string mfa_totp_secret_hex;
     std::string email_verify_hash;
     std::int64_t email_verify_expires{0};
     std::string reset_token_hash;
