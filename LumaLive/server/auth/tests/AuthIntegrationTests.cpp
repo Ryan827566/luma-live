@@ -163,8 +163,8 @@ int main() {
 
     auto locked=luma::client::account::CreateAccountService();
     assert(locked->Connect("127.0.0.1",19121).success);
-    for(int i=0;i<5;++i)assert(!locked->Login("bob.test","bad password","lock-test","Lock Test"));
-    assert(!locked->Login("bob.test","reset correct horse","lock-test","Lock Test"));
+    for(int i=0;i<5;++i)assert(!locked->Login("bob.test","bad password","lock-test","Lock Test").success);
+    assert(!locked->Login("bob.test","reset correct horse","lock-test","Lock Test").success);
 
     assert(bobLogin->GetSecuritySummary().success);
     assert(bobLogin->GetSecurityEvents().success);
