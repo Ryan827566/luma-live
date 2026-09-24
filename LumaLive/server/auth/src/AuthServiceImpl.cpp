@@ -1,4 +1,5 @@
 #include "IAuthService.hpp"
+#include "ISmsProvider.hpp"
 #include "contracts/auth/Auth.hpp"
 #include "contracts/auth/AuthCrypto.hpp"
 #include "contracts/auth/AuthWire.hpp"
@@ -175,6 +176,8 @@ struct PhoneChallenge{
 
 class AuthServiceImpl final:public IAuthService{
 public:
+    AuthServiceImpl():sms_provider_(CreateSmsProviderFromEnvironment()){}
+
     Result Start()override{return StartOnPort(9100);}
 
     Result StartOnPort(std::uint16_t port)override{
@@ -258,7 +261,24 @@ public:
         return Result::Ok();
     }
 
+    Result ConfigureSmsProvider(std::unique_ptr<ISmsProvider> provider)override{
+        if(!provider)return Result::Failure(ErrorCode::InvalidArgument,"SMS provider is null");
+        std::lock_guard lock(lifecycle_mutex_);
+        if(running_)return Result::Failure(ErrorCode::InvalidState,"configure SMS provider before start");
+        sms_provider_=std::move(provider);
+        return Result::Ok();
+    }
+
 private:
+    SmsSendResult SendSmsOtp(
+        std::string_view phone,
+        std::string_view purpose,
+        std::string_view code,
+        std::chrono::seconds ttl){
+        if(!sms_provider_)return {false,{},{},"SMS provider is not configured"};
+        return sms_provider_->SendOtp(phone,purpose,code,ttl);
+    }
+
     bool Load(){
         {
             std::lock_guard lock(store_mutex_);
@@ -1042,7 +1062,6 @@ private:
         }
 
         case Type::RequestPhoneVerification: {
-            std::lock_guard phone_lock(phone_challenge_mutex_);
             if(p.fields.size()!=2||p.fields[0]!=c.token){
                 bad("invalid_session","invalid session");return;
             }
@@ -1051,24 +1070,40 @@ private:
             const auto phone=normalize_phone(p.fields[1]);
             if(phone.empty()){bad("invalid_phone","invalid phone number");return;}
 
-            std::lock_guard lock(store_mutex_);
-            auto user_it=users_.find(user_id);
-            if(user_it==users_.end()){bad("invalid_session","account no longer exists");return;}
-
-            const auto existing=by_phone_.find(phone);
-            if(existing!=by_phone_.end()&&existing->second!=user_id){
-                bad("phone_exists","phone number is already bound to another account");return;
-            }
-
             const auto challenge_id=make_id();
             const auto code=make_otp_code();
             const auto expires=now_epoch()+5*60;
-            phone_challenges_[challenge_id]=PhoneChallenge{
-                PhoneChallenge::Kind::Verification,phone,user_id,
-                sha256_text(challenge_id+"|"+code),expires,5};
 
-            AppendAudit(user_id,"phone_verification_code_requested","SMS verification code issued");
-            send(Type::PhoneVerificationIssued,{challenge_id,code,std::to_string(expires)});
+            {
+                std::lock_guard phone_lock(phone_challenge_mutex_);
+                std::lock_guard lock(store_mutex_);
+                const auto user_it=users_.find(user_id);
+                if(user_it==users_.end()){bad("invalid_session","account no longer exists");return;}
+
+                const auto existing=by_phone_.find(phone);
+                if(existing!=by_phone_.end()&&existing->second!=user_id){
+                    bad("phone_exists","phone number is already bound to another account");return;
+                }
+
+                phone_challenges_[challenge_id]=PhoneChallenge{
+                    PhoneChallenge::Kind::Verification,phone,user_id,
+                    sha256_text(challenge_id+"|"+code),expires,5};
+            }
+
+            const auto delivery=SendSmsOtp(phone,"phone_verification",code,std::chrono::seconds(5*60));
+            if(!delivery.accepted){
+                {
+                    std::lock_guard phone_lock(phone_challenge_mutex_);
+                    phone_challenges_.erase(challenge_id);
+                }
+                AppendAudit(user_id,"phone_verification_delivery_failed","SMS provider rejected verification code");
+                bad("sms_delivery_failed","unable to send SMS verification code");
+                return;
+            }
+
+            AppendAudit(user_id,"phone_verification_code_requested","SMS verification code accepted by provider");
+            send(Type::PhoneVerificationIssued,{
+                challenge_id,delivery.debug_code,std::to_string(expires)});
             return;
         }
 
@@ -1141,7 +1176,6 @@ private:
         }
 
         case Type::RequestPhoneLoginCode: {
-            std::lock_guard phone_lock(phone_challenge_mutex_);
             if(p.fields.size()!=1){
                 bad("invalid_phone","invalid phone request");return;
             }
@@ -1166,15 +1200,32 @@ private:
             const auto challenge_id=make_id();
             const auto code=make_otp_code();
             const auto expires=now_epoch()+5*60;
-            phone_challenges_[challenge_id]=PhoneChallenge{
-                PhoneChallenge::Kind::Login,phone,user_id,
-                sha256_text(challenge_id+"|"+code),expires,5};
-
-            if(!user_id.empty()){
-                AppendAudit(user_id,"phone_login_code_requested","SMS login code issued");
+            {
+                std::lock_guard phone_lock(phone_challenge_mutex_);
+                phone_challenges_[challenge_id]=PhoneChallenge{
+                    PhoneChallenge::Kind::Login,phone,user_id,
+                    sha256_text(challenge_id+"|"+code),expires,5};
             }
 
-            send(Type::PhoneLoginCodeIssued,{challenge_id,code,std::to_string(expires)});
+            std::string debug_code;
+            if(!user_id.empty()){
+                const auto delivery=SendSmsOtp(
+                    phone,"phone_login",code,std::chrono::seconds(5*60));
+                if(delivery.accepted){
+                    debug_code=delivery.debug_code;
+                    AppendAudit(user_id,"phone_login_code_requested","SMS login code accepted by provider");
+                }else{
+                    {
+                        std::lock_guard phone_lock(phone_challenge_mutex_);
+                        phone_challenges_.erase(challenge_id);
+                    }
+                    AppendAudit(user_id,"phone_login_delivery_failed","SMS provider rejected login code");
+                }
+            }
+
+            // Keep the request response shape identical in all cases. An unknown
+            // phone number and a provider failure do not expose account existence.
+            send(Type::PhoneLoginCodeIssued,{challenge_id,debug_code,std::to_string(expires)});
             return;
         }
 
@@ -1593,6 +1644,7 @@ private:
     std::thread accept_thread_;
     std::vector<std::thread> client_threads_;
     mutable std::mutex lifecycle_mutex_,clients_mutex_,store_mutex_,session_mutex_,rate_mutex_,audit_mutex_;
+    std::unique_ptr<ISmsProvider> sms_provider_;
     std::unordered_map<Socket,ClientState> clients_;
     std::unordered_map<std::string,SessionRecord> sessions_;
     std::unordered_map<std::string,UserRecord> users_;
