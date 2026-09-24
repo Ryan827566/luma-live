@@ -8,6 +8,7 @@
 #include <iostream>
 #include <span>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -91,6 +92,20 @@ int main() {
     assert(alice->GetSecuritySummary().success);
     assert(alice->Security().email_verified);
 
+    const phone="+14155552673";
+    const phoneVerification=alice->RequestPhoneVerification(phone);
+    assert(phoneVerification.success);
+    const auto phoneVerificationChallenge=ExtractAfter(
+        phoneVerification.message,"challenge="," expires=");
+    const auto phoneVerificationCode=ExtractAfter(
+        phoneVerification.message,"SMS verification code="," challenge=");
+    assert(!phoneVerificationChallenge.empty()&&!phoneVerificationCode.empty());
+    assert(alice->VerifyPhone(phoneVerificationChallenge,phoneVerificationCode).success);
+    assert(alice->GetProfile().success);
+    assert(alice->Session().user.phone==phone);
+    assert(alice->GetSecuritySummary().success);
+    assert(alice->Security().phone_verified);
+
     auto alice2=luma::client::account::CreateAccountService();
     assert(alice2->Connect("127.0.0.1",19121).success);
     assert(alice2->Login("alice.test","correct horse","alice-phone","Alice Phone").success);
@@ -127,6 +142,26 @@ int main() {
     assert(alice->Security().mfa_enabled);
 
     assert(alice->Logout().success);
+
+    auto alicePhone=luma::client::account::CreateAccountService();
+    assert(alicePhone->Connect("127.0.0.1",19121).success);
+    const auto phoneCodeRequest=alicePhone->RequestPhoneLoginCode(phone);
+    assert(phoneCodeRequest.success);
+    const auto phoneLoginChallenge=ExtractAfter(
+        phoneCodeRequest.message,"challenge="," expires=");
+    const auto phoneLoginCode=ExtractAfter(
+        phoneCodeRequest.message,"SMS login code="," challenge=");
+    assert(!phoneLoginChallenge.empty()&&!phoneLoginCode.empty());
+    assert(alicePhone->LoginWithPhoneCode(
+        phoneLoginChallenge,phoneLoginCode,"alice-phone","Alice Phone",recovery_code).success);
+    assert(alicePhone->GetProfile().success);
+    assert(alicePhone->Session().user.phone==phone);
+    assert(alicePhone->Security().phone_verified || alicePhone->GetSecuritySummary().success);
+    assert(alicePhone->Logout().success);
+    assert(alicePhone->LoginWithPhoneCode(
+        phoneLoginChallenge,phoneLoginCode,"alice-phone","Alice Phone",recovery_code).success==false);
+    alicePhone->Stop();
+
     assert(!alice->Login("alice.test","correct horse","alice-pc","Alice PC").success);
     assert(alice->Login("alice.test","correct horse","alice-pc","Alice PC",recovery_code).success);
     assert(alice->Logout().success);
