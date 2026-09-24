@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 #include "contracts/errors/Error.hpp"
+#include "ISmsProvider.hpp"
 
 namespace luma::server::auth {
 class IAuthService {
@@ -14,6 +15,7 @@ public:
     virtual bool IsRunning() const = 0;
     virtual std::uint16_t Port() const = 0;
     virtual shared::contracts::Result ConfigureStore(std::string path) = 0;
+    virtual shared::contracts::Result ConfigureSmsProvider(std::unique_ptr<ISmsProvider> provider) = 0;
 };
 std::unique_ptr<IAuthService> CreateAuthService();
 }
