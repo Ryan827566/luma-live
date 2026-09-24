@@ -1,4 +1,5 @@
 #include "IAuthService.hpp"
+#include "IAuthStore.hpp"
 #include "ISmsProvider.hpp"
 #include "contracts/auth/Auth.hpp"
 #include "contracts/auth/AuthCrypto.hpp"
@@ -7,8 +8,6 @@
 #include <atomic>
 #include <chrono>
 #include <cctype>
-#include <filesystem>
-#include <fstream>
 #include <iomanip>
 #include <mutex>
 #include <sstream>
@@ -176,7 +175,9 @@ struct PhoneChallenge{
 
 class AuthServiceImpl final:public IAuthService{
 public:
-    AuthServiceImpl():sms_provider_(CreateSmsProviderFromEnvironment()){}
+    explicit AuthServiceImpl(std::unique_ptr<IAuthStore> store={})
+        :auth_store_(store?std::move(store):CreateAuthStoreFromEnvironment()),
+         sms_provider_(CreateSmsProviderFromEnvironment()){}
 
     Result Start()override{return StartOnPort(9100);}
 
@@ -184,7 +185,14 @@ public:
         std::lock_guard lock(lifecycle_mutex_);
         if(running_)return Result::Failure(ErrorCode::InvalidState,"auth server already running");
         if(!port||!init_sockets())return Result::Failure(ErrorCode::InvalidArgument,"invalid auth port");
-        if(!Load())return Result::Failure(ErrorCode::Internal,"unable to load auth store: "+store_path_);
+        if(!auth_store_){
+            return Result::Failure(ErrorCode::Internal,"auth database store is not configured");
+        }
+        if(auto db=auth_store_->Open();!db.IsOk())return db;
+        if(!Load()){
+            auth_store_->Close();
+            return Result::Failure(ErrorCode::Internal,"unable to load auth database");
+        }
 
         Socket s=::socket(AF_INET,SOCK_STREAM,0);
         if(s==kInvalidSocket)return Result::Failure(ErrorCode::Internal,"socket creation failed");
@@ -198,6 +206,7 @@ public:
 
         if(::bind(s,reinterpret_cast<sockaddr*>(&a),sizeof(a))!=0||::listen(s,32)!=0){
             close_socket(s);
+            auth_store_->Close();
             return Result::Failure(ErrorCode::Internal,"unable to bind auth port");
         }
 
@@ -247,25 +256,20 @@ public:
             std::lock_guard sl(session_mutex_);
             sessions_.clear();
         }
+        if(auth_store_)auth_store_->Close();
         return Result::Ok();
     }
 
     bool IsRunning()const override{return running_.load();}
     std::uint16_t Port()const override{return port_;}
 
-    Result ConfigureStore(std::string path)override{
-        if(path.empty())return Result::Failure(ErrorCode::InvalidArgument,"store path is empty");
-        std::lock_guard lock(store_mutex_);
-        if(running_)return Result::Failure(ErrorCode::InvalidState,"configure store before start");
-        store_path_=std::move(path);
-        return Result::Ok();
-    }
-
-    Result ConfigureSmsProvider(std::unique_ptr<ISmsProvider> provider)override{
-        if(!provider)return Result::Failure(ErrorCode::InvalidArgument,"SMS provider is null");
+    Result ConfigureDatabase(std::string connection_string) override{
+        if(connection_string.empty())return Result::Failure(
+            ErrorCode::InvalidArgument,"database connection string is empty");
         std::lock_guard lock(lifecycle_mutex_);
-        if(running_)return Result::Failure(ErrorCode::InvalidState,"configure SMS provider before start");
-        sms_provider_=std::move(provider);
+        if(running_)return Result::Failure(
+            ErrorCode::InvalidState,"configure database before start");
+        auth_store_=CreatePostgresAuthStore(std::move(connection_string));
         return Result::Ok();
     }
 
@@ -280,158 +284,88 @@ private:
     }
 
     bool Load(){
+        if(!auth_store_)return false;
+
+        std::vector<AuthUserRecord> rows;
+        if(!auth_store_->LoadUsers(rows).IsOk())return false;
+
         {
             std::lock_guard lock(store_mutex_);
             users_.clear();
             by_username_.clear();
             by_email_.clear();
+            by_phone_.clear();
 
-            std::ifstream in(store_path_);
-            if(in){
-                std::string line;
-                while(std::getline(in,line)){
-                    if(line.empty())continue;
+            for(auto& row:rows){
+                UserRecord u{};
+                u.id=std::move(row.id);
+                u.username=std::move(row.username);
+                u.email=std::move(row.email);
+                u.display_name=std::move(row.display_name);
+                u.avatar_url=std::move(row.avatar_url);
+                u.phone=std::move(row.phone);
+                u.salt_hex=std::move(row.salt_hex);
+                u.verifier_hex=std::move(row.verifier_hex);
+                u.email_verified=row.email_verified;
+                u.phone_verified=row.phone_verified;
+                u.mfa_enabled=row.mfa_enabled;
+                u.mfa_recovery_hash=std::move(row.mfa_recovery_hash);
+                u.email_verify_hash=std::move(row.email_verify_hash);
+                u.email_verify_expires=row.email_verify_expires;
+                u.reset_token_hash=std::move(row.reset_token_hash);
+                u.reset_token_expires=row.reset_token_expires;
 
-                    std::vector<std::string>p;
-                    std::string cur;
-                    for(char c:line){
-                        if(c=='\t'){p.push_back(std::move(cur));cur.clear();}
-                        else cur.push_back(c);
-                    }
-                    p.push_back(std::move(cur));
-
-                    if((p.size()!=7&&p.size()!=8&&p.size()!=15&&p.size()!=17)||p[0]!="1")return false;
-
-                    UserRecord u{};
-                    u.id=p[1];
-                    u.username=p[2];
-                    u.email=p[3];
-                    u.display_name=p[4];
-
-                    if(p.size()==7){
-                        u.avatar_url.clear();
-                        u.salt_hex=p[5];
-                        u.verifier_hex=p[6];
-                    }else{
-                        u.avatar_url=p[5];
-                        u.salt_hex=p[6];
-                        u.verifier_hex=p[7];
-                        if(p.size()==15||p.size()==17){
-                            u.email_verified=p[8]=="1";
-                            u.mfa_enabled=p[9]=="1";
-                            u.mfa_recovery_hash=p[10];
-                            u.email_verify_hash=p[11];
-                            u.email_verify_expires=std::stoll(p[12]);
-                            u.reset_token_hash=p[13];
-                            u.reset_token_expires=std::stoll(p[14]);
-                            if(p.size()==17){
-                                u.phone=p[15];
-                                u.phone_verified=p[16]=="1";
-                            }
-                        }
-                    }
-
-                    users_[u.id]=u;
-                    by_username_[normalize(u.username)]=u.id;
-                    by_email_[normalize(u.email)]=u.id;
-                    if(!u.phone.empty()&&u.phone_verified)by_phone_[u.phone]=u.id;
-                }
+                users_[u.id]=u;
+                by_username_[normalize(u.username)]=u.id;
+                by_email_[normalize(u.email)]=u.id;
+                if(u.phone_verified&&!u.phone.empty())by_phone_[u.phone]=u.id;
             }
         }
 
-        std::lock_guard lock(audit_mutex_);
-        audits_.clear();
-        std::ifstream audit(store_path_+".security.log");
-        if(audit){
-            std::string line;
-            while(std::getline(audit,line)){
-                std::vector<std::string>p;
-                std::string cur;
-                for(char c:line){
-                    if(c=='\t'){p.push_back(std::move(cur));cur.clear();}
-                    else cur.push_back(c);
-                }
-                p.push_back(std::move(cur));
-                if(p.size()!=5)continue;
-                AuditRecord a{};
-                a.user_id=p[1];
-                a.security_event.event_id=p[0];
-                a.security_event.created_at_epoch_seconds=std::stoll(p[2]);
-                a.security_event.type=p[3];
-                a.security_event.detail=p[4];
-                audits_.push_back(std::move(a));
-                if(audits_.size()>512)audits_.erase(audits_.begin());
+        std::vector<AuthSecurityEventRecord> events;
+        if(!auth_store_->LoadSecurityEvents(events).IsOk())return false;
+        {
+            std::lock_guard lock(audit_mutex_);
+            audits_.clear();
+            audits_.reserve(events.size());
+            for(auto& event:events){
+                AuditRecord record{};
+                record.user_id=std::move(event.user_id);
+                record.security_event.event_id=std::move(event.event_id);
+                record.security_event.type=std::move(event.type);
+                record.security_event.detail=std::move(event.detail);
+                record.security_event.created_at_epoch_seconds=event.created_at_epoch_seconds;
+                audits_.push_back(std::move(record));
             }
         }
         return true;
     }
 
     bool SaveUnlocked(){
-        std::filesystem::path tmp=store_path_+".tmp";
-        std::filesystem::path backup=store_path_+".bak";
-        std::error_code ec;
-
-        const auto parent=std::filesystem::path(store_path_).parent_path();
-        if(!parent.empty()){
-            std::filesystem::create_directories(parent,ec);
-            if(ec)return false;
-        }
-
-        std::filesystem::remove(tmp,ec);
-        std::ofstream out(tmp,std::ios::trunc);
-        if(!out)return false;
-
+        if(!auth_store_)return false;
+        std::vector<AuthUserRecord> rows;
+        rows.reserve(users_.size());
         for(const auto&[_,u]:users_){
-            out<<"1\t"<<u.id
-               <<"\t"<<u.username
-               <<"\t"<<u.email
-               <<"\t"<<u.display_name
-               <<"\t"<<u.avatar_url
-               <<"\t"<<u.salt_hex
-               <<"\t"<<u.verifier_hex
-               <<"\t"<<(u.email_verified?"1":"0")
-               <<"\t"<<(u.mfa_enabled?"1":"0")
-               <<"\t"<<u.mfa_recovery_hash
-               <<"\t"<<u.email_verify_hash
-               <<"\t"<<u.email_verify_expires
-               <<"\t"<<u.reset_token_hash
-               <<"\t"<<u.reset_token_expires
-               <<"\t"<<u.phone
-               <<"\t"<<(u.phone_verified?"1":"0")<<"\n";
+            AuthUserRecord row{};
+            row.id=u.id;
+            row.username=u.username;
+            row.email=u.email;
+            row.display_name=u.display_name;
+            row.avatar_url=u.avatar_url;
+            row.phone=u.phone;
+            row.salt_hex=u.salt_hex;
+            row.verifier_hex=u.verifier_hex;
+            row.email_verified=u.email_verified;
+            row.phone_verified=u.phone_verified;
+            row.mfa_enabled=u.mfa_enabled;
+            row.mfa_recovery_hash=u.mfa_recovery_hash;
+            row.email_verify_hash=u.email_verify_hash;
+            row.email_verify_expires=u.email_verify_expires;
+            row.reset_token_hash=u.reset_token_hash;
+            row.reset_token_expires=u.reset_token_expires;
+            rows.push_back(std::move(row));
         }
-        out.close();
-        if(!out){
-            std::filesystem::remove(tmp,ec);
-            return false;
-        }
-
-        std::filesystem::remove(backup,ec);
-        ec.clear();
-        const bool had_existing=std::filesystem::exists(store_path_,ec);
-        if(ec)return false;
-
-        if(had_existing){
-            ec.clear();
-            std::filesystem::rename(store_path_,backup,ec);
-            if(ec){
-                std::filesystem::remove(tmp,ec);
-                return false;
-            }
-        }
-
-        ec.clear();
-        std::filesystem::rename(tmp,store_path_,ec);
-        if(ec){
-            std::filesystem::remove(tmp,ec);
-            if(had_existing){
-                std::error_code restore_ec;
-                std::filesystem::rename(backup,store_path_,restore_ec);
-            }
-            return false;
-        }
-
-        std::filesystem::remove(backup,ec);
-        return true;
+        return auth_store_->ReplaceUsers(rows).IsOk();
     }
 
     bool Send(Socket s,const Packet& p){
@@ -555,11 +489,14 @@ private:
             if(audits_.size()>512)audits_.erase(audits_.begin());
         }
 
-        std::ofstream out(store_path_+".security.log",std::ios::app);
-        if(out){
-            out<<record.security_event.event_id<<"\t"<<record.user_id<<"\t"
-               <<record.security_event.created_at_epoch_seconds<<"\t"
-               <<record.security_event.type<<"\t"<<record.security_event.detail<<"\n";
+        if(auth_store_){
+            AuthSecurityEventRecord event{};
+            event.event_id=record.security_event.event_id;
+            event.user_id=record.user_id;
+            event.type=record.security_event.type;
+            event.detail=record.security_event.detail;
+            event.created_at_epoch_seconds=record.security_event.created_at_epoch_seconds;
+            (void)auth_store_->AppendSecurityEvent(event);
         }
     }
 
@@ -1637,13 +1574,13 @@ private:
         }
     }
 
-    std::string store_path_{"./luma_auth_users.db"};
     std::atomic<bool> running_{false};
     std::atomic<Socket> listen_socket_{kInvalidSocket};
     std::uint16_t port_{0};
     std::thread accept_thread_;
     std::vector<std::thread> client_threads_;
     mutable std::mutex lifecycle_mutex_,clients_mutex_,store_mutex_,session_mutex_,rate_mutex_,audit_mutex_;
+    std::unique_ptr<IAuthStore> auth_store_;
     std::unique_ptr<ISmsProvider> sms_provider_;
     std::unordered_map<Socket,ClientState> clients_;
     std::unordered_map<std::string,SessionRecord> sessions_;
@@ -1655,8 +1592,8 @@ private:
     std::vector<AuditRecord> audits_;
 };
 
-std::unique_ptr<IAuthService>CreateAuthService(){
-    return std::make_unique<AuthServiceImpl>();
+std::unique_ptr<IAuthService>CreateAuthService(std::unique_ptr<IAuthStore> store){
+    return std::make_unique<AuthServiceImpl>(std::move(store));
 }
 
 }
