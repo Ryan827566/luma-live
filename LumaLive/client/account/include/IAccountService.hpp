@@ -30,6 +30,7 @@ public:
         std::string mfa_code = {}) = 0;
     virtual OperationResult Logout() = 0;
     virtual OperationResult ValidateSession() = 0;
+    virtual OperationResult RefreshSession() = 0;
 
     virtual OperationResult GetProfile() = 0;
     virtual OperationResult UpdateProfile(std::string username,std::string email,std::string display_name,std::string avatar_url) = 0;
