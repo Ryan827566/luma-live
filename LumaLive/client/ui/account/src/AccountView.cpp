@@ -32,8 +32,11 @@ std::string wide_to_utf8(const std::wstring& value) {
 }
 std::wstring GetText(HWND h) {
     const int n=GetWindowTextLengthW(h);
-    std::wstring out(static_cast<std::size_t>(n),L'\0');
-    if(n>0) GetWindowTextW(h,out.data(),n+1);
+    std::wstring out(static_cast<std::size_t>(n)+1,L'\0');
+    if(n>0) {
+        GetWindowTextW(h,out.data(),n+1);
+        out.resize(static_cast<std::size_t>(n));
+    }
     return out;
 }
 void SetStatus(HWND window,const std::wstring& value){SetWindowTextW(GetDlgItem(window,ID_STATUS),value.c_str());}
@@ -77,7 +80,7 @@ private:
     void CreateControls() {
         AddLabel(L"认证服务器",24,20,100);AddEdit(ID_HOST,L"127.0.0.1",130,16,220);
         AddLabel(L"端口",365,20,40);AddEdit(ID_PORT,L"9100",405,16,70);
-        AddLabel(L"用户名",24,62,100);AddEdit(ID_USERNAME,L"",130,58,345);
+        AddLabel(L"用户名 / 邮箱",24,62,100);AddEdit(ID_USERNAME,L"",130,58,345);
         AddLabel(L"邮箱",24,104,100);AddEdit(ID_EMAIL,L"",130,100,345);
         AddLabel(L"显示名称",24,146,100);AddEdit(ID_DISPLAY,L"",130,142,345);
         AddLabel(L"密码",24,188,100);AddEdit(ID_PASSWORD,L"",130,184,345,true);
