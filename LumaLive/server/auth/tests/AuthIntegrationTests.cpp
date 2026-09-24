@@ -92,7 +92,7 @@ int main() {
     assert(alice->Security().email_verified);
 
     const std::string phone="+14155552673";
-    const phoneVerification=alice->RequestPhoneVerification(phone);
+    const auto phoneVerification=alice->RequestPhoneVerification(phone);
     assert(phoneVerification.success);
     const auto phoneVerificationChallenge=ExtractAfter(
         phoneVerification.message,"challenge="," expires=");
