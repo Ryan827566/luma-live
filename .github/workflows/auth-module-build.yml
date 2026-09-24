@@ -11,15 +11,33 @@ on:
 jobs:
   auth-build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: lumalive_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d lumalive_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install PostgreSQL client runtime
+        run: sudo apt-get update && sudo apt-get install -y libpq5 postgresql-client
+
       - name: Compile auth integration test
         run: |
-          g++ -std=c++20 -Wall -Wextra -Werror -pthread             -I LumaLive/shared             -I LumaLive/server/auth/include             -I LumaLive/client/account/include             LumaLive/server/auth/src/AuthServiceImpl.cpp             LumaLive/server/auth/src/AuthStore.cpp             LumaLive/server/auth/src/SmsProvider.cpp             LumaLive/client/account/src/AccountService.cpp             LumaLive/server/auth/tests/AuthIntegrationTests.cpp             -o auth_integration_test
+          g++ -std=c++20 -Wall -Wextra -Werror -pthread             -I LumaLive/shared             -I LumaLive/server/auth/include             -I LumaLive/client/account/include             LumaLive/server/auth/src/AuthServiceImpl.cpp             LumaLive/server/auth/src/AuthStore.cpp             LumaLive/server/auth/src/SmsProvider.cpp             LumaLive/client/account/src/AccountService.cpp             LumaLive/server/auth/tests/AuthIntegrationTests.cpp             -o auth_integration_test -ldl
 
       - name: Run auth integration test
+        env:
+          LUMALIVE_AUTH_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/lumalive_test
         run: ./auth_integration_test
 
       - name: Compile auth server
