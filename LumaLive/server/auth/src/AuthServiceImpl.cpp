@@ -152,9 +152,11 @@ struct SessionRecord{
     std::string device_id;
     std::string device_name;
     std::string remote_address;
+    std::string refresh_token_hash;
     std::int64_t created{0};
     std::int64_t last_seen{0};
     std::int64_t expires{0};
+    std::int64_t refresh_expires{0};
 };
 
 struct FailureState{
@@ -814,8 +816,10 @@ private:
 
             const auto session_id=make_id();
             const auto token=make_token();
+            const auto refresh_token=make_token();
             const auto now=now_epoch();
             const auto expires=now+24*60*60;
+            const auto refresh_expires=now+30*24*60*60;
 
             bool new_network=true;
             {
@@ -827,7 +831,8 @@ private:
                     }
                 }
                 sessions_[token]=SessionRecord{
-                    session_id,user_id,c.device_id,c.device_name,c.remote_address,now,now,expires};
+                    session_id,user_id,c.device_id,c.device_name,c.remote_address,
+                    sha256_text(refresh_token),now,now,expires,refresh_expires};
             }
 
             c.pending={};
@@ -838,7 +843,59 @@ private:
             send(Type::LoginOk,{
                 token,session_id,c.device_id,c.device_name,it->second.id,
                 it->second.username,it->second.email,it->second.display_name,
-                std::to_string(expires)});
+                std::to_string(expires),refresh_token,std::to_string(refresh_expires)});
+            return;
+        }
+
+        case Type::RefreshSession: {
+            if(p.fields.size()!=2||p.fields[0]!=c.token){
+                bad("invalid_session","invalid session");return;
+            }
+            const auto user_id=require_session();
+            if(user_id.empty()){bad("invalid_session","session expired or invalid");return;}
+            if(p.fields[1].empty()){
+                bad("invalid_refresh_token","refresh token is required");return;
+            }
+
+            std::string new_access;
+            std::string new_refresh;
+            SessionRecord session;
+            const auto now=now_epoch();
+            {
+                std::lock_guard sl(session_mutex_);
+                const auto it=sessions_.find(c.token);
+                if(it==sessions_.end()||it->second.refresh_expires<=now){
+                    bad("invalid_refresh_token","refresh token expired or invalid");return;
+                }
+                bool valid=false;
+                try{
+                    valid=constant_time_equal(
+                        from_hex(it->second.refresh_token_hash),
+                        from_hex(sha256_text(p.fields[1])));
+                }catch(...){valid=false;}
+                if(!valid){
+                    bad("invalid_refresh_token","refresh token expired or invalid");return;
+                }
+
+                new_access=make_token();
+                new_refresh=make_token();
+                session=it->second;
+                session.refresh_token_hash=sha256_text(new_refresh);
+                session.last_seen=now;
+                session.expires=now+24*60*60;
+                sessions_.erase(it);
+                sessions_[new_access]=session;
+            }
+
+            std::lock_guard lock(store_mutex_);
+            const auto it=users_.find(user_id);
+            if(it==users_.end()){bad("invalid_session","account no longer exists");return;}
+            c.token=new_access;
+            AppendAudit(user_id,"session_refreshed","access and refresh tokens rotated");
+            send(Type::RefreshSessionOk,{
+                new_access,new_refresh,session.session_id,session.device_id,session.device_name,
+                it->second.id,it->second.username,it->second.email,it->second.display_name,
+                std::to_string(session.expires),std::to_string(session.refresh_expires)});
             return;
         }
 
@@ -872,13 +929,20 @@ private:
             if(it==users_.end()){
                 bad("invalid_session","account no longer exists");return;
             }
-            send(Type::LoginOk,{
-                c.token,
-                sessions_.at(c.token).session_id,
-                sessions_.at(c.token).device_id,
-                sessions_.at(c.token).device_name,
-                it->second.id,it->second.username,it->second.email,it->second.display_name,
-                std::to_string(expires)});
+            std::string refresh_token;
+            std::int64_t refresh_expires=0;
+            {
+                std::lock_guard sl(session_mutex_);
+                const auto sit=sessions_.find(c.token);
+                if(sit==sessions_.end()){bad("invalid_session","session expired or invalid");return;}
+                // Refresh tokens are never persisted in plaintext; this response is only for
+                // the current connection, so the client keeps its token from the login/refresh response.
+                // ValidateSession therefore does not re-issue a refresh token.
+                send(Type::LoginOk,{
+                    c.token,sit->second.session_id,sit->second.device_id,sit->second.device_name,
+                    it->second.id,it->second.username,it->second.email,it->second.display_name,
+                    std::to_string(sit->second.expires),std::string(),std::to_string(sit->second.refresh_expires)});
+            }
             return;
         }
 
@@ -1278,8 +1342,10 @@ private:
             c.device_name=p.fields[3];
             const auto session_id=make_id();
             const auto token=make_token();
+            const auto refresh_token=make_token();
             const auto now=now_epoch();
             const auto expires=now+24*60*60;
+            const auto refresh_expires=now+30*24*60*60;
             bool new_network=true;
             {
                 std::lock_guard sl(session_mutex_);
@@ -1289,7 +1355,8 @@ private:
                     }
                 }
                 sessions_[token]=SessionRecord{
-                    session_id,user_id,c.device_id,c.device_name,c.remote_address,now,now,expires};
+                    session_id,user_id,c.device_id,c.device_name,c.remote_address,
+                    sha256_text(refresh_token),now,now,expires,refresh_expires};
             }
             c.token=token;
             AppendAudit(user_id,"phone_login_success","SMS login succeeded");
@@ -1297,7 +1364,7 @@ private:
             send(Type::LoginOk,{
                 token,session_id,c.device_id,c.device_name,it->second.id,
                 it->second.username,it->second.email,it->second.display_name,
-                std::to_string(expires)});
+                std::to_string(expires),refresh_token,std::to_string(refresh_expires)});
             return;
         }
 
@@ -1634,6 +1701,7 @@ private:
         case Type::PhoneVerificationIssued:
         case Type::PhoneVerified:
         case Type::PhoneLoginCodeIssued:
+        case Type::RefreshSessionOk:
         case Type::Error:
         case Type::Pong:
             bad("unexpected_packet","unexpected authentication packet");return;
