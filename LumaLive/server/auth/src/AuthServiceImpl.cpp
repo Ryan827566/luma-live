@@ -1042,6 +1042,7 @@ private:
         }
 
         case Type::RequestPhoneVerification: {
+            std::lock_guard phone_lock(phone_challenge_mutex_);
             if(p.fields.size()!=2||p.fields[0]!=c.token){
                 bad("invalid_session","invalid session");return;
             }
@@ -1072,6 +1073,7 @@ private:
         }
 
         case Type::VerifyPhone: {
+            std::lock_guard phone_lock(phone_challenge_mutex_);
             if(p.fields.size()!=3||p.fields[0]!=c.token){
                 bad("invalid_session","invalid session");return;
             }
@@ -1139,6 +1141,7 @@ private:
         }
 
         case Type::RequestPhoneLoginCode: {
+            std::lock_guard phone_lock(phone_challenge_mutex_);
             if(p.fields.size()!=1){
                 bad("invalid_phone","invalid phone request");return;
             }
@@ -1176,6 +1179,7 @@ private:
         }
 
         case Type::PhoneLogin: {
+            std::lock_guard phone_lock(phone_challenge_mutex_);
             if(p.fields.size()!=4&&p.fields.size()!=5){
                 bad("invalid_phone_login","challenge, code, device id and device name are required");return;
             }
@@ -1595,6 +1599,7 @@ private:
     std::unordered_map<std::string,std::string> by_username_,by_email_,by_phone_;
     std::unordered_map<std::string,FailureState> failures_;
     std::unordered_map<std::string,PhoneChallenge> phone_challenges_;
+    mutable std::mutex phone_challenge_mutex_;
     std::vector<AuditRecord> audits_;
 };
 
