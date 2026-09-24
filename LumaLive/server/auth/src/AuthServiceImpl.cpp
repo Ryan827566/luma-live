@@ -513,7 +513,9 @@ private:
 
     void RecordLoginFailure(
         const std::string& identifier,const std::string& user_id,const std::string& remote){
-        const auto key=LoginRateKey(identifier,remote);
+        const auto key=user_id.empty()
+            ? LoginRateKey(identifier,remote)
+            : LoginUserRateKey(user_id,remote);
         const auto now=now_epoch();
         bool locked=false;
         {
@@ -540,6 +542,12 @@ private:
         const std::string& identifier,const std::string& remote){
         std::lock_guard lock(rate_mutex_);
         failures_.erase(LoginRateKey(identifier,remote));
+    }
+
+    void ClearUserLoginFailures(
+        const std::string& user_id,const std::string& remote){
+        std::lock_guard lock(rate_mutex_);
+        failures_.erase(LoginUserRateKey(user_id,remote));
     }
 
     bool TooManyResetRequests(const std::string& identifier){
@@ -728,7 +736,7 @@ private:
                 bad("invalid_credentials","invalid username or password");return;
             }
 
-            ClearLoginFailures(user_id,c.remote_address);
+            ClearUserLoginFailures(user_id,c.remote_address);
             ClearLoginFailures(login_identifier,c.remote_address);
 
             const auto session_id=make_id();
