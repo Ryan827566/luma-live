@@ -489,8 +489,8 @@ private:
         std::ofstream out(store_path_+".security.log",std::ios::app);
         if(out){
             out<<record.security_event.event_id<<"\t"<<record.user_id<<"\t"
-               <<record.event.created_at_epoch_seconds<<"\t"
-               <<record.event.type<<"\t"<<record.event.detail<<"\n";
+               <<record.security_event.created_at_epoch_seconds<<"\t"
+               <<record.security_event.type<<"\t"<<record.security_event.detail<<"\n";
         }
     }
 
