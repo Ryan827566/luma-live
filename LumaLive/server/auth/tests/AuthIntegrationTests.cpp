@@ -8,7 +8,6 @@
 #include <iostream>
 #include <span>
 #include <string>
-#include <thread>
 
 namespace {
 
@@ -156,7 +155,8 @@ int main() {
         phoneLoginChallenge,phoneLoginCode,"alice-phone","Alice Phone",recovery_code).success);
     assert(alicePhone->GetProfile().success);
     assert(alicePhone->Session().user.phone==phone);
-    assert(alicePhone->Security().phone_verified || alicePhone->GetSecuritySummary().success);
+    assert(alicePhone->GetSecuritySummary().success);
+    assert(alicePhone->Security().phone_verified);
     assert(alicePhone->Logout().success);
     assert(alicePhone->LoginWithPhoneCode(
         phoneLoginChallenge,phoneLoginCode,"alice-phone","Alice Phone",recovery_code).success==false);
