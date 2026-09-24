@@ -1,0 +1,27 @@
+name: auth-module-build
+
+on:
+  push:
+    branches:
+      - codex/auth-registration-login
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  auth-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compile auth integration test
+        run: |
+          g++ -std=c++20 -Wall -Wextra -Werror -pthread             -I LumaLive/shared             -I LumaLive/server/auth/include             -I LumaLive/client/account/include             LumaLive/server/auth/src/AuthServiceImpl.cpp             LumaLive/client/account/src/AccountService.cpp             LumaLive/server/auth/tests/AuthIntegrationTests.cpp             -o auth_integration_test
+
+      - name: Run auth integration test
+        run: ./auth_integration_test
+
+      - name: Compile auth server
+        run: |
+          g++ -std=c++20 -Wall -Wextra -Werror -pthread             -I LumaLive/shared             -I LumaLive/server/auth/include             LumaLive/server/auth/src/AuthServiceImpl.cpp             LumaLive/apps/luma-auth-server/src/main.cpp             -o luma_auth_server
