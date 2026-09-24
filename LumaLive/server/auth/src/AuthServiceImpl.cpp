@@ -7,7 +7,6 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -91,7 +90,18 @@ private:
 bool Load(){std::lock_guard lock(store_mutex_);users_.clear();by_username_.clear();by_email_.clear();std::ifstream in(store_path_);if(!in)return true;std::string line;while(std::getline(in,line)){if(line.empty())continue;std::vector<std::string>p;std::string cur;for(char c:line){if(c=='\t'){p.push_back(std::move(cur));cur.clear();}else cur.push_back(c);}p.push_back(std::move(cur));if(p.size()!=7||p[0]!="1")return false;UserRecord u{p[1],p[2],p[3],p[4],p[5],p[6]};users_[u.id]=u;by_username_[normalize(u.username)]=u.id;by_email_[normalize(u.email)]=u.id;}return true;}
 bool SaveUnlocked(){std::filesystem::path tmp=store_path_+".tmp";if(auto parent=std::filesystem::path(store_path_).parent_path();!parent.empty())std::filesystem::create_directories(parent);std::ofstream out(tmp,std::ios::trunc);if(!out)return false;for(const auto&[_,u]:users_)out<<"1\t"<<u.id<<"\t"<<u.username<<"\t"<<u.email<<"\t"<<u.display_name<<"\t"<<u.salt_hex<<"\t"<<u.verifier_hex<<"\n";out.close();std::error_code ec;std::filesystem::remove(store_path_,ec);std::filesystem::rename(tmp,store_path_,ec);if(ec){std::filesystem::remove(tmp,ec);return false;}return true;}
 bool Send(Socket s,const Packet&p){auto msg=luma::contracts::auth::wire::encode(p);std::size_t off=0;while(off<msg.size()){int n=::send(s,msg.data()+off,static_cast<int>(msg.size()-off),0);if(n<=0)return false;off+=static_cast<std::size_t>(n);}return true;}
-bool RecvLine(Socket s,std::string&line){line.clear();char c=0;while(running_){int n=::recv(s,&c,1,0);if(n<=0)return false;if(c=='\n')return true;if(line.size()>=64*1024)return false;}return false;}
+bool RecvLine(Socket s,std::string&line){
+ line.clear();
+ char c=0;
+ while(running_){
+  const int n=::recv(s,&c,1,0);
+  if(n<=0) return false;
+  if(c=='\n') return true;
+  line.push_back(c);
+  if(line.size()>=64*1024) return false;
+ }
+ return false;
+}
 void AcceptLoop(){
  while(running_){sockaddr_in a{};
 #ifdef _WIN32
@@ -107,11 +117,9 @@ void ClientLoop(Socket s){
   if(!RecvLine(s,line)) break;
   if(line.empty()) continue;
   try{
-   std::cerr << "auth rx fd=" << s << " line=[" << line << "] size=" << line.size() << "\n";
    auto packet=luma::contracts::auth::wire::decode_line(line);
    Handle(s,packet);
   }catch(const std::exception& e){
-   std::cerr << "auth client error: " << e.what() << "\n";
    Send(s,{Type::Error,{"invalid_packet",e.what()}});
    break;
   }
