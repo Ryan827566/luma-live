@@ -353,14 +353,9 @@ private:
         ~ResultGuard(){ if(result)api.PQclear(result); }
     };
 
-    static std::string Value(PGresult* result,int row,int column,PostgresApi* api=nullptr) {
-        if(!api) return {};
-        char* value=api->PQgetvalue(result,row,column);
-        return value?std::string(value):std::string{};
-    }
-
     std::string Value(PGresult* result,int row,int column) const {
-        return Value(result,row,column,const_cast<PostgresApi*>(&api_));
+        char* value=api_.PQgetvalue(result,row,column);
+        return value?std::string(value):std::string{};
     }
 
     bool BoolValue(PGresult* result,int row,int column) const {
