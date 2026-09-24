@@ -495,7 +495,11 @@ private:
     }
 
     static std::string LoginRateKey(const std::string& identifier,const std::string& remote){
-        return "login|"+normalize(identifier)+"|"+remote;
+        return "login|identifier|"+normalize(identifier)+"|"+remote;
+    }
+
+    static std::string LoginUserRateKey(const std::string& user_id,const std::string& remote){
+        return "login|user|"+user_id+"|"+remote;
     }
 
     bool IsLocked(const std::string& key,std::int64_t now){
@@ -656,8 +660,7 @@ private:
             }
 
             const auto&u=users_.at(user_id);
-            if(IsLocked(LoginRateKey(u.username,c.remote_address),now_epoch())||
-               IsLocked(LoginRateKey(u.email,c.remote_address),now_epoch())){
+            if(IsLocked(LoginUserRateKey(u.id,c.remote_address),now_epoch())){
                 bad("temporarily_locked","too many failed login attempts; try again later");
                 return;
             }
@@ -716,17 +719,16 @@ private:
 
                 if(!proof_ok||!mfa_ok){
                     c.pending={};
-                    RecordLoginFailure(it->second.username,user_id,c.remote_address);
+                    RecordLoginFailure(user_id,user_id,c.remote_address);
                     bad("invalid_credentials","invalid username or password");return;
                 }
             }catch(...){
                 c.pending={};
-                RecordLoginFailure(it->second.username,user_id,c.remote_address);
+                RecordLoginFailure(user_id,user_id,c.remote_address);
                 bad("invalid_credentials","invalid username or password");return;
             }
 
-            ClearLoginFailures(it->second.username,c.remote_address);
-            ClearLoginFailures(it->second.email,c.remote_address);
+            ClearLoginFailures(user_id,c.remote_address);
             ClearLoginFailures(login_identifier,c.remote_address);
 
             const auto session_id=make_id();
@@ -1078,10 +1080,8 @@ private:
                 std::uint32_t failed=0;
                 {
                     std::lock_guard rl(rate_mutex_);
-                    auto ui=failures_.find(LoginRateKey(it->second.username,c.remote_address));
+                    auto ui=failures_.find(LoginUserRateKey(it->second.id,c.remote_address));
                     if(ui!=failures_.end())failed=ui->second.count;
-                    auto ei=failures_.find(LoginRateKey(it->second.email,c.remote_address));
-                    if(ei!=failures_.end()&&ei->second.count>failed)failed=ei->second.count;
                 }
 
                 std::uint32_t active=0;
