@@ -16,11 +16,13 @@ struct UserProfile {
 
 struct AuthSession {
     std::string token;
+    std::string refresh_token;
     std::string session_id;
     std::string device_id;
     std::string device_name;
     UserProfile user;
     std::int64_t expires_at_epoch_seconds{0};
+    std::int64_t refresh_expires_at_epoch_seconds{0};
 };
 
 struct SecuritySummary {
