@@ -62,6 +62,10 @@ public:
         security_={};
         sessions_.clear();
         events_.clear();
+        pending_phone_verification_={};
+        pending_phone_login_={};
+        pending_phone_login_number_.clear();
+        events_.clear();
         return{true,"stopped"};
     }
 
@@ -162,12 +166,13 @@ public:
         Packet q;
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
-        if(q.type!=Type::ProfileOk||q.fields.size()!=5)return{false,"invalid profile response"};
+        if(q.type!=Type::ProfileOk||q.fields.size()!=6)return{false,"invalid profile response"};
         session_.user.user_id=q.fields[0];
         session_.user.username=q.fields[1];
         session_.user.email=q.fields[2];
         session_.user.display_name=q.fields[3];
         session_.user.avatar_url=q.fields[4];
+        session_.user.phone=q.fields[5];
         return{true,"profile loaded"};
     }
 
@@ -179,12 +184,13 @@ public:
         Packet q;
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
-        if(q.type!=Type::UpdateProfileOk||q.fields.size()!=5)return{false,"invalid profile update response"};
+        if(q.type!=Type::UpdateProfileOk||q.fields.size()!=6)return{false,"invalid profile update response"};
         session_.user.user_id=q.fields[0];
         session_.user.username=q.fields[1];
         session_.user.email=q.fields[2];
         session_.user.display_name=q.fields[3];
         session_.user.avatar_url=q.fields[4];
+        session_.user.phone=q.fields[5];
         return{true,"profile updated"};
     }
 
@@ -197,6 +203,9 @@ public:
         if(q.type==Type::Error)return Error(q);
         if(q.type!=Type::DeleteAccountOk)return{false,"invalid account deletion response"};
         session_={};security_={};sessions_.clear();events_.clear();
+        pending_phone_verification_={};
+        pending_phone_login_={};
+        pending_phone_login_number_.clear();
         return{true,"account deleted"};
     }
 
@@ -221,6 +230,86 @@ public:
         return{true,"email verified"};
     }
 
+    OperationResult RequestPhoneVerification(std::string phone)override{
+        if(phone.empty()||phone.size()>32)return{false,"invalid phone number"};
+        std::lock_guard lock(mutex_);
+        if(!AuthenticatedLocked())return{false,"not authenticated"};
+        if(!Send({Type::RequestPhoneVerification,{session_.token,phone}}))return{false,"send failed"};
+        Packet q;if(!Recv(q))return{false,"receive failed"};
+        if(q.type==Type::Error)return Error(q);
+        if(q.type!=Type::PhoneVerificationIssued||q.fields.size()!=3)
+            return{false,"invalid phone verification response"};
+        pending_phone_verification_=PendingPhoneChallenge{q.fields[0],std::stoll(q.fields[2])};
+        return{true,"SMS verification code="+q.fields[1]+" challenge="+q.fields[0]+" expires="+q.fields[2]};
+    }
+
+    OperationResult VerifyPhone(std::string challenge_id,std::string code)override{
+        if(challenge_id.empty()||code.empty())return{false,"invalid phone verification challenge"};
+        std::lock_guard lock(mutex_);
+        if(!AuthenticatedLocked())return{false,"not authenticated"};
+        if(!Send({Type::VerifyPhone,{session_.token,challenge_id,code}}))return{false,"send failed"};
+        Packet q;if(!Recv(q))return{false,"receive failed"};
+        if(q.type==Type::Error)return Error(q);
+        if(q.type!=Type::PhoneVerified||q.fields.size()!=1)
+            return{false,"invalid phone verification response"};
+        pending_phone_verification_={};
+        session_.user.phone=q.fields[0];
+        security_.phone_verified=true;
+        return{true,"phone verified"};
+    }
+
+    OperationResult RequestPhoneLoginCode(std::string phone)override{
+        if(phone.empty()||phone.size()>32)return{false,"invalid phone number"};
+        std::lock_guard lock(mutex_);
+        if(!running_)return{false,"account service is not connected"};
+        if(!Send({Type::RequestPhoneLoginCode,{phone}}))return{false,"send failed"};
+        Packet q;if(!Recv(q))return{false,"receive failed"};
+        if(q.type==Type::Error)return Error(q);
+        if(q.type!=Type::PhoneLoginCodeIssued||q.fields.size()!=3)
+            return{false,"invalid SMS login response"};
+        pending_phone_login_=PendingPhoneChallenge{q.fields[0],std::stoll(q.fields[2])};
+        pending_phone_login_number_=phone;
+        return{true,"SMS login code="+q.fields[1]+" challenge="+q.fields[0]+" expires="+q.fields[2]};
+    }
+
+    OperationResult LoginWithPhoneCode(
+        std::string challenge_id,
+        std::string code,
+        std::string device_id,
+        std::string device_name,
+        std::string mfa_code)override{
+        if(challenge_id.empty()||code.empty())return{false,"invalid SMS login challenge"};
+        std::lock_guard lock(mutex_);
+        if(!running_)return{false,"account service is not connected"};
+        if(device_id.empty())device_id="default-device";
+        if(device_name.empty())device_name="LumaLive Client";
+        if(!valid_text(device_id,128)||!valid_text(device_name,128))
+            return{false,"invalid device information"};
+
+        std::vector<std::string> fields{challenge_id,code,device_id,device_name};
+        if(!mfa_code.empty())fields.push_back(mfa_code);
+        if(!Send({Type::PhoneLogin,std::move(fields)}))return{false,"send failed"};
+
+        Packet q;if(!Recv(q))return{false,"receive failed"};
+        if(q.type==Type::Error)return Error(q);
+        if(q.type!=Type::LoginOk||q.fields.size()!=9)
+            return{false,"invalid phone login response"};
+
+        session_.token=q.fields[0];
+        session_.session_id=q.fields[1];
+        session_.device_id=q.fields[2];
+        session_.device_name=q.fields[3];
+        session_.user.user_id=q.fields[4];
+        session_.user.username=q.fields[5];
+        session_.user.email=q.fields[6];
+        session_.user.display_name=q.fields[7];
+        session_.user.avatar_url.clear();
+        session_.user.phone=pending_phone_login_number_;
+        session_.expires_at_epoch_seconds=std::stoll(q.fields[8]);
+        pending_phone_login_={};
+        return{true,"phone SMS login successful"};
+    }
+
     OperationResult ChangePassword(std::string current_password,std::string new_password)override{
         if(current_password.size()<8||current_password.size()>128||new_password.size()<8||new_password.size()>128)
             return{false,"invalid password data"};
@@ -239,6 +328,9 @@ public:
         if(q.type==Type::Error)return Error(q);
         if(q.type!=Type::PasswordChanged)return{false,"invalid password change response"};
         session_={};security_={};sessions_.clear();events_.clear();
+        pending_phone_verification_={};
+        pending_phone_login_={};
+        pending_phone_login_number_.clear();
         return{true,"password changed; all sessions signed out"};
     }
 
@@ -279,6 +371,9 @@ public:
         security_={};
         sessions_.clear();
         events_.clear();
+        pending_phone_verification_={};
+        pending_phone_login_={};
+        pending_phone_login_number_.clear();
         return{true,"password reset successful; all sessions signed out"};
     }
 
@@ -288,11 +383,12 @@ public:
         if(!Send({Type::GetSecuritySummary,{session_.token}}))return{false,"send failed"};
         Packet q;if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
-        if(q.type!=Type::SecuritySummaryOk||q.fields.size()!=4)return{false,"invalid security summary"};
+        if(q.type!=Type::SecuritySummaryOk||q.fields.size()!=5)return{false,"invalid security summary"};
         security_.email_verified=q.fields[0]=="1";
-        security_.mfa_enabled=q.fields[1]=="1";
-        security_.failed_login_attempts=static_cast<std::uint32_t>(std::stoul(q.fields[2]));
-        security_.active_session_count=static_cast<std::uint32_t>(std::stoul(q.fields[3]));
+        security_.phone_verified=q.fields[1]=="1";
+        security_.mfa_enabled=q.fields[2]=="1";
+        security_.failed_login_attempts=static_cast<std::uint32_t>(std::stoul(q.fields[3]));
+        security_.active_session_count=static_cast<std::uint32_t>(std::stoul(q.fields[4]));
         return{true,"security summary loaded"};
     }
 
@@ -480,9 +576,16 @@ private:
         std::string salt_hex;
         std::int64_t expires_at{0};
     };
+    struct PendingPhoneChallenge{
+        std::string challenge_id;
+        std::int64_t expires_at{0};
+    };
     std::vector<contracts::auth::DeviceSession> sessions_;
     std::vector<contracts::auth::SecurityEvent> events_;
     std::unordered_map<std::string,PendingReset> pending_reset_challenges_;
+    PendingPhoneChallenge pending_phone_verification_;
+    PendingPhoneChallenge pending_phone_login_;
+    std::string pending_phone_login_number_;
 };
 
 std::unique_ptr<IAccountService>CreateAccountService(){return std::make_unique<AccountService>();}
