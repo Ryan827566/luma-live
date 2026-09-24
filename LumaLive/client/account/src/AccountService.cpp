@@ -7,6 +7,7 @@
 
 #ifdef _WIN32
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #pragma comment(lib,"ws2_32.lib")
 using Socket=SOCKET; constexpr Socket kInvalidSocket=INVALID_SOCKET;
 inline void close_socket(Socket s){::closesocket(s);}
@@ -32,7 +33,7 @@ public:
  OperationResult Connect(std::string host,std::uint16_t port)override{
   Stop();if(host.empty()||!port||!init_sockets())return{false,"invalid account server address"};host_=std::move(host);port_=port;
   Socket s=::socket(AF_INET,SOCK_STREAM,0);if(s==kInvalidSocket)return{false,"socket creation failed"};
-  sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(port_);if(::inet_pton(AF_INET,host_.c_str(),&a.sin_addr)!=1){close_socket(s);return{false,"host must be an IPv4 address"};}
+  sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(port_);if(::InetPtonA(AF_INET,host_.c_str(),&a.sin_addr)!=1){close_socket(s);return{false,"host must be an IPv4 address"};}
   if(::connect(s,reinterpret_cast<sockaddr*>(&a),sizeof(a))!=0){close_socket(s);return{false,"unable to connect to auth server"};}
   socket_=s;running_=true;return{true,"connected"};
  }
@@ -71,7 +72,9 @@ public:
  OperationResult Execute(std::string_view operation)override{if(operation.empty())return{false,"operation is empty"};return{true,std::string(operation)};}
 private:
  static bool valid_register(const std::string&u,const std::string&e,const std::string&d,const std::string&p){if(u.size()<3||u.size()>32||e.size()<3||e.size()>254||d.empty()||d.size()>64||p.size()<8||p.size()>128)return false;for(char c:u)if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='.'||c=='_'||c=='-'))return false;return e.find('@')!=std::string::npos&&e.find('|')==std::string::npos&&d.find('|')==std::string::npos;}
- bool Send(const Packet&p){auto msg=luma::contracts::auth::wire::encode(p);std::size_t off=0;while(off<msg.size()){int n=::send(socket_,msg.data()+off,static_cast<int>(msg.size()-off),0);if(n<=0)return false;off+=static_cast<std::size_t>(n);}return true;}
+ bool Send(const Packet&p){
+  auto msg=luma::contracts::auth::wire::encode(p);
+  std::size_t off=0;while(off<msg.size()){int n=::send(socket_,msg.data()+off,static_cast<int>(msg.size()-off),0);if(n<=0)return false;off+=static_cast<std::size_t>(n);}return true;}
  bool Recv(Packet&out){std::string line;char c=0;while(true){int n=::recv(socket_,&c,1,0);if(n<=0)return false;if(c=='\n')break;if(line.size()>64*1024)return false;}try{out=luma::contracts::auth::wire::decode_line(line);return true;}catch(...){return false;}}
  OperationResult Error(const Packet&p){return p.fields.size()>=2?OperationResult{false,p.fields[1]}:OperationResult{false,"authentication server error"};}
  std::string host_{"127.0.0.1"};std::uint16_t port_{9100};std::atomic<bool>running_{false};Socket socket_{kInvalidSocket};mutable std::mutex mutex_;contracts::auth::AuthSession session_;
