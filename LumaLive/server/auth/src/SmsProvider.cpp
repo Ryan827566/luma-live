@@ -6,6 +6,20 @@ namespace luma::server::auth {
 
 namespace {
 
+std::string EnvironmentValue(const char* name) {
+#ifdef _WIN32
+    char* value=nullptr;
+    std::size_t length=0;
+    if(_dupenv_s(&value,&length,name)!=0||!value)return {};
+    std::string result(value);
+    std::free(value);
+    return result;
+#else
+    const char* value=std::getenv(name);
+    return value?std::string(value):std::string{};
+#endif
+}
+
 class DevelopmentSmsProvider final : public ISmsProvider {
 public:
     SmsSendResult SendOtp(
@@ -43,8 +57,7 @@ std::unique_ptr<ISmsProvider> CreateDevelopmentSmsProvider() {
 }
 
 std::unique_ptr<ISmsProvider> CreateSmsProviderFromEnvironment() {
-    const char* raw = std::getenv("LUMALIVE_SMS_PROVIDER");
-    const std::string provider = raw ? raw : "";
+    const std::string provider=EnvironmentValue("LUMALIVE_SMS_PROVIDER");
     if (provider.empty() || provider == "mock" || provider == "development") {
         return CreateDevelopmentSmsProvider();
     }
