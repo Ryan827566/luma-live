@@ -27,7 +27,8 @@ enum class Type : unsigned char {
     RequestPhoneVerification=47, PhoneVerificationIssued=48,
     VerifyPhone=49, PhoneVerified=50,
     RequestPhoneLoginCode=51, PhoneLoginCodeIssued=52,
-    PhoneLogin=53
+    PhoneLogin=53,
+    RefreshSession=54, RefreshSessionOk=55
 };
 
 struct Packet {
