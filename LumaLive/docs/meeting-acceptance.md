@@ -22,3 +22,7 @@ Next:
 5. Verify three local clients receive each other's decoded media, isolation, mute/video/share, removal/end and failures; physical-device/two-machine/TURN checks remain separately pending.
 
 Policy: host departure ends the current meeting; no host transfer yet. Participant names are session identifiers, not authenticated user accounts. Removing a member revokes current membership; it is not an account ban. No meeting UI is shipped in this checkpoint. Do not begin broadcasting until meeting scope is implemented, verified and committed.
+
+## One-time remaining-budget extension
+
+User authorized spending the remaining quota for this turn only; future turns retain the 20% checkpoint/stop rule. Added and passed six-member capacity, vacancy reuse, duplicate identity rejection and binding cleanup checks, plus ten TCP join/end races with completion barriers asserting no Joined event arrives after Ended. Release build and all meeting signaling tests passed. Multiparty media and UI are still not implemented.
