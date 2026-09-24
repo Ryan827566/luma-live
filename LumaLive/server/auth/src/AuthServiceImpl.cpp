@@ -120,9 +120,21 @@ void Handle(Socket s,const Packet&p){
   if(p.fields.size()!=1||c.token.empty()||p.fields[0]!=c.token){bad("invalid_session","invalid session");return;}{std::lock_guard sl(session_mutex_);sessions_.erase(c.token);}c.token.clear();send(Type::LogoutOk);return;
  case Type::ValidateSession:
   if(p.fields.size()!=1){bad("invalid_session","token required");return;}
-  {SessionRecord sr;{std::lock_guard sl(session_mutex_);auto it=sessions_.find(p.fields[0]);if(it==sessions_.end()||it->second.expires<=now_epoch()){if(it!=sessions_.end())sessions_.erase(it);bad("invalid_session","session expired or invalid");return;}sr=it->second;}{std::lock_guard lock(store_mutex_);auto it=users_.find(sr.user_id);if(it==users_.end()){bad("invalid_session","account no longer exists");return;}c.token=p.fields[0];send(Type::LoginOk,{c.token,it->second.id,it->second.username,it->second.email,it->second.display_name,std::to_string(sr.expires)});}return;
+  {SessionRecord sr;{std::lock_guard sl(session_mutex_);auto it=sessions_.find(p.fields[0]);if(it==sessions_.end()||it->second.expires<=now_epoch()){if(it!=sessions_.end())sessions_.erase(it);bad("invalid_session","session expired or invalid");return;}sr=it->second;}{std::lock_guard lock(store_mutex_);auto it=users_.find(sr.user_id);if(it==users_.end()){bad("invalid_session","account no longer exists");return;}c.token=p.fields[0];send(Type::LoginOk,{c.token,it->second.id,it->second.username,it->second.email,it->second.display_name,std::to_string(sr.expires)});}}
+  return;
  case Type::Ping:send(Type::Pong);return;
- default:bad("unsupported","unsupported auth operation");return;
+ case Type::RegisterChallenge:
+ case Type::RegisterOk:
+ case Type::LoginChallenge:
+ case Type::LoginOk:
+ case Type::LogoutOk:
+ case Type::Error:
+ case Type::Pong:
+     bad("unexpected_packet","unexpected authentication packet");
+     return;
+ default:
+     bad("unsupported","unsupported auth operation");
+     return;
  }
 }
 std::string store_path_{"./luma_auth_users.db"};std::atomic<bool>running_{false};std::atomic<Socket>listen_socket_{kInvalidSocket};std::uint16_t port_{0};std::thread accept_thread_;std::vector<std::thread>client_threads_;mutable std::mutex lifecycle_mutex_,clients_mutex_,store_mutex_,session_mutex_;std::unordered_map<Socket,ClientState>clients_;std::unordered_map<std::string,SessionRecord>sessions_;std::unordered_map<std::string,UserRecord>users_;std::unordered_map<std::string,std::string>by_username_,by_email_;
