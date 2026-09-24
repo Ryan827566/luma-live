@@ -26,3 +26,9 @@ Policy: host departure ends the current meeting; no host transfer yet. Participa
 ## One-time remaining-budget extension
 
 User authorized spending the remaining quota for this turn only; future turns retain the 20% checkpoint/stop rule. Added and passed six-member capacity, vacancy reuse, duplicate identity rejection and binding cleanup checks, plus ten TCP join/end races with completion barriers asserting no Joined event arrives after Ended. Release build and all meeting signaling tests passed. Multiparty media and UI are still not implemented.
+
+## Meeting client session controller
+
+Added MeetingSession with UI-thread lifecycle/state, queued transport events, registration timeout, bounded event queue, epoch filtering, participant roster and host identity, host-only local removal/end controls, source/microphone state propagation, membership-gated SDP/ICE handoff, and cleanup on leave/end/removal/failure. This is a control layer, not a multiparty media implementation or meeting UI.
+
+Release build and three-client MeetingSessionTests passed: synchronized roster/roles, media-state updates, ordinary-member permission denial, host removal, rejoin using the same client object, leave, end, and missing-meeting failure. Next integrate per-peer WebRTC media and clocked audio mixing, then the meeting UI and three-way decoded-media acceptance.
