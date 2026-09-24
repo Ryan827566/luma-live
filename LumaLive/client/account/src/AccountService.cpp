@@ -4,7 +4,6 @@
 #include <atomic>
 #include <chrono>
 #include <mutex>
-#include <iostream>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -82,7 +81,19 @@ private:
  bool Send(const Packet&p){
   auto msg=luma::contracts::auth::wire::encode(p);
   std::size_t off=0;while(off<msg.size()){int n=::send(socket_,msg.data()+off,static_cast<int>(msg.size()-off),0);if(n<=0)return false;off+=static_cast<std::size_t>(n);}return true;}
- bool Recv(Packet&out){std::string line;char c=0;while(true){int n=::recv(socket_,&c,1,0);if(n<=0)return false;if(c=='\n')break;if(line.size()>64*1024)return false;}try{out=luma::contracts::auth::wire::decode_line(line);return true;}catch(...){return false;}}
+ bool Recv(Packet&out){
+  std::string line;
+  char c=0;
+  while(true){
+    const int n=::recv(socket_,&c,1,0);
+    if(n<=0) return false;
+    if(c=='\n') break;
+    line.push_back(c);
+    if(line.size()>64*1024) return false;
+  }
+  try{out=luma::contracts::auth::wire::decode_line(line);return true;}
+  catch(...){return false;}
+ }
  OperationResult Error(const Packet&p){return p.fields.size()>=2?OperationResult{false,p.fields[1]}:OperationResult{false,"authentication server error"};}
  std::string host_{"127.0.0.1"};std::uint16_t port_{9100};std::atomic<bool>running_{false};Socket socket_{kInvalidSocket};mutable std::mutex mutex_;contracts::auth::AuthSession session_;
 };
