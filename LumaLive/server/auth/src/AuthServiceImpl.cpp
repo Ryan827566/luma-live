@@ -36,7 +36,8 @@ using luma::contracts::auth::crypto::hex;
 using luma::contracts::auth::crypto::hmac_sha256;
 using luma::contracts::auth::crypto::pbkdf2_hmac_sha256;
 using luma::contracts::auth::crypto::random_bytes;
-using luma::contracts::auth::wire::Packet; using luma::contracts::auth::wire::Type;
+using luma::contracts::auth::wire::Packet;
+using luma::contracts::auth::wire::Type;
 
 namespace {
 struct UserRecord{
@@ -62,7 +63,7 @@ bool valid_username(std::string_view s){
 
 bool valid_email(std::string_view s){
     if(s.size()<3||s.size()>254)return false;
-    auto at=s.find('@');
+    const auto at=s.find('@');
     return at!=std::string_view::npos&&at>0&&at+1<s.size()&&s.find('@',at+1)==std::string_view::npos;
 }
 
@@ -92,13 +93,15 @@ public:
         if(running_)return Result::Failure(ErrorCode::InvalidState,"auth server already running");
         if(!port||!init_sockets())return Result::Failure(ErrorCode::InvalidArgument,"invalid auth port");
         if(!Load())return Result::Failure(ErrorCode::Internal,"unable to load auth store: "+store_path_);
+
         Socket s=::socket(AF_INET,SOCK_STREAM,0);
         if(s==kInvalidSocket)return Result::Failure(ErrorCode::Internal,"socket creation failed");
         int yes=1;
         setsockopt(s,SOL_SOCKET,SO_REUSEADDR,reinterpret_cast<const char*>(&yes),sizeof(yes));
         sockaddr_in a{};a.sin_family=AF_INET;a.sin_addr.s_addr=htonl(INADDR_ANY);a.sin_port=htons(port);
         if(::bind(s,reinterpret_cast<sockaddr*>(&a),sizeof(a))!=0||::listen(s,32)!=0){
-            close_socket(s);return Result::Failure(ErrorCode::Internal,"unable to bind auth port");
+            close_socket(s);
+            return Result::Failure(ErrorCode::Internal,"unable to bind auth port");
         }
         listen_socket_=s;port_=port;running_=true;
         accept_thread_=std::thread(&AuthServiceImpl::AcceptLoop,this);
@@ -108,6 +111,7 @@ public:
     Result Stop()override{
         std::lock_guard lock(lifecycle_mutex_);
         if(!running_&&!accept_thread_.joinable())return Result::Ok();
+
         running_=false;
         Socket s=listen_socket_.exchange(kInvalidSocket);
         if(s!=kInvalidSocket){
@@ -119,6 +123,7 @@ public:
             close_socket(s);
         }
         if(accept_thread_.joinable())accept_thread_.join();
+
         {
             std::lock_guard cl(clients_mutex_);
             for(auto&[_,c]:clients_){
@@ -131,6 +136,7 @@ public:
         }
         for(auto& t:client_threads_)if(t.joinable())t.join();
         client_threads_.clear();
+
         {
             std::lock_guard cl(clients_mutex_);
             clients_.clear();
@@ -149,23 +155,49 @@ public:
         if(path.empty())return Result::Failure(ErrorCode::InvalidArgument,"store path is empty");
         std::lock_guard lock(store_mutex_);
         if(running_)return Result::Failure(ErrorCode::InvalidState,"configure store before start");
-        store_path_=std::move(path);return Result::Ok();
+        store_path_=std::move(path);
+        return Result::Ok();
     }
 
 private:
     bool Load(){
         std::lock_guard lock(store_mutex_);
-        users_.clear();by_username_.clear();by_email_.clear();
+        users_.clear();
+        by_username_.clear();
+        by_email_.clear();
+
         std::ifstream in(store_path_);
         if(!in)return true;
+
         std::string line;
         while(std::getline(in,line)){
             if(line.empty())continue;
-            std::vector<std::string>p;std::string cur;
-            for(char c:line){if(c=='\t'){p.push_back(std::move(cur));cur.clear();}else cur.push_back(c);}
+
+            std::vector<std::string>p;
+            std::string cur;
+            for(char c:line){
+                if(c=='\t'){p.push_back(std::move(cur));cur.clear();}
+                else cur.push_back(c);
+            }
             p.push_back(std::move(cur));
-            if(p.size()!=8||p[0]!="1")return false;
-            UserRecord u{p[1],p[2],p[3],p[4],p[5],p[6],p[7]};
+
+            if((p.size()!=7&&p.size()!=8)||p[0]!="1")return false;
+
+            UserRecord u{};
+            u.id=p[1];
+            u.username=p[2];
+            u.email=p[3];
+            u.display_name=p[4];
+            if(p.size()==7){
+                u.avatar_url.clear();
+                u.salt_hex=p[5];
+                u.verifier_hex=p[6];
+            }else{
+                u.avatar_url=p[5];
+                u.salt_hex=p[6];
+                u.verifier_hex=p[7];
+            }
+
             users_[u.id]=u;
             by_username_[normalize(u.username)]=u.id;
             by_email_[normalize(u.email)]=u.id;
@@ -175,16 +207,37 @@ private:
 
     bool SaveUnlocked(){
         std::filesystem::path tmp=store_path_+".tmp";
-        if(auto parent=std::filesystem::path(store_path_).parent_path();!parent.empty())std::filesystem::create_directories(parent);
+        std::error_code ec;
+
+        const auto parent=std::filesystem::path(store_path_).parent_path();
+        if(!parent.empty()){
+            std::filesystem::create_directories(parent,ec);
+            if(ec)return false;
+        }
+
         std::ofstream out(tmp,std::ios::trunc);
         if(!out)return false;
-        for(const auto&[_,u]:users_)
-            out<<"1\t"<<u.id<<"\t"<<u.username<<"\t"<<u.email<<"\t"<<u.display_name<<"\t"<<u.avatar_url<<"\t"<<u.salt_hex<<"\t"<<u.verifier_hex<<"\n";
+
+        for(const auto&[_,u]:users_){
+            out<<"1\t"<<u.id
+               <<"\t"<<u.username
+               <<"\t"<<u.email
+               <<"\t"<<u.display_name
+               <<"\t"<<u.avatar_url
+               <<"\t"<<u.salt_hex
+               <<"\t"<<u.verifier_hex<<"\n";
+        }
         out.close();
-        std::error_code ec;
+        if(!out)return false;
+
+        ec.clear();
         std::filesystem::remove(store_path_,ec);
+        ec.clear();
         std::filesystem::rename(tmp,store_path_,ec);
-        if(ec){std::filesystem::remove(tmp,ec);return false;}
+        if(ec){
+            std::filesystem::remove(tmp,ec);
+            return false;
+        }
         return true;
     }
 
@@ -222,8 +275,13 @@ private:
 #endif
             Socket listen=listen_socket_.load();
             if(listen==kInvalidSocket)break;
+
             Socket s=::accept(listen,reinterpret_cast<sockaddr*>(&a),&n);
-            if(s==kInvalidSocket){if(running_)continue;break;}
+            if(s==kInvalidSocket){
+                if(running_)continue;
+                break;
+            }
+
             {
                 std::lock_guard lock(clients_mutex_);
                 clients_.emplace(s,ClientState{s,{},{}}); 
@@ -245,6 +303,7 @@ private:
                 break;
             }
         }
+
         {
             std::lock_guard lock(clients_mutex_);
             clients_.erase(s);
@@ -261,6 +320,7 @@ private:
     void Handle(Socket s,const Packet&p){
         auto send=[&](Type t,std::vector<std::string>f={}){return Send(s,{t,std::move(f)});};
         auto bad=[&](const char*c,const char*m){send(Type::Error,{c,m});};
+
         std::lock_guard client_lock(clients_mutex_);
         auto&c=Client(s);
 
@@ -275,6 +335,13 @@ private:
             return it->second.user_id;
         };
 
+        auto session_expiry=[&]() -> std::int64_t {
+            if(c.token.empty())return 0;
+            std::lock_guard sl(session_mutex_);
+            const auto it=sessions_.find(c.token);
+            return it==sessions_.end()?0:it->second.expires;
+        };
+
         switch(p.type){
         case Type::RegisterBegin:
             if(p.fields.size()!=3||!valid_username(p.fields[0])||!valid_email(p.fields[1])||!valid_display_name(p.fields[2])){
@@ -286,8 +353,11 @@ private:
                     bad("already_exists","username or email already exists");return;
                 }
             }
-            c.pending=Pending{Pending::Kind::Register,p.fields[0],normalize(p.fields[1]),p.fields[2],"",hex(random_bytes(16)),hex(random_bytes(32))};
-            send(Type::RegisterChallenge,{c.pending.salt_hex,c.pending.nonce_hex});return;
+            c.pending=Pending{
+                Pending::Kind::Register,p.fields[0],normalize(p.fields[1]),p.fields[2],
+                "",hex(random_bytes(16)),hex(random_bytes(32))};
+            send(Type::RegisterChallenge,{c.pending.salt_hex,c.pending.nonce_hex});
+            return;
 
         case Type::RegisterFinish:
             if(c.pending.kind!=Pending::Kind::Register||p.fields.size()!=1){
@@ -296,19 +366,32 @@ private:
             {
                 std::lock_guard lock(store_mutex_);
                 if(by_username_.count(normalize(c.pending.username))||by_email_.count(normalize(c.pending.email))){
-                    c.pending={};bad("already_exists","username or email already exists");return;
+                    c.pending={};
+                    bad("already_exists","username or email already exists");
+                    return;
                 }
-                UserRecord u;
-                u.id=make_id();u.username=c.pending.username;u.email=c.pending.email;
-                u.display_name=c.pending.display_name;u.avatar_url.clear();
-                u.salt_hex=c.pending.salt_hex;u.verifier_hex=p.fields[0];
+
+                UserRecord u{};
+                u.id=make_id();
+                u.username=c.pending.username;
+                u.email=c.pending.email;
+                u.display_name=c.pending.display_name;
+                u.avatar_url.clear();
+                u.salt_hex=c.pending.salt_hex;
+                u.verifier_hex=p.fields[0];
+
                 users_[u.id]=u;
                 by_username_[normalize(u.username)]=u.id;
                 by_email_[normalize(u.email)]=u.id;
+
                 if(!SaveUnlocked()){
-                    users_.erase(u.id);by_username_.erase(normalize(u.username));by_email_.erase(normalize(u.email));
-                    bad("storage_error","unable to persist account");return;
+                    users_.erase(u.id);
+                    by_username_.erase(normalize(u.username));
+                    by_email_.erase(normalize(u.email));
+                    bad("storage_error","unable to persist account");
+                    return;
                 }
+
                 c.pending={};
                 send(Type::RegisterOk,{u.id,u.username,u.email,u.display_name});
             }
@@ -327,9 +410,14 @@ private:
                     auto ie=by_email_.find(normalize(p.fields[0]));
                     if(ie!=by_email_.end())id=ie->second;
                 }
-                if(id.empty()){bad("invalid_credentials","invalid username or password");return;}
+                if(id.empty()){
+                    bad("invalid_credentials","invalid username or password");
+                    return;
+                }
+
                 const auto&u=users_.at(id);
-                c.pending=Pending{Pending::Kind::Login,"","","",u.id,u.salt_hex,hex(random_bytes(32))};
+                c.pending=Pending{
+                    Pending::Kind::Login,"","","",u.id,u.salt_hex,hex(random_bytes(32))};
                 send(Type::LoginChallenge,{u.id,u.display_name,u.email,u.salt_hex,c.pending.nonce_hex});
             }
             return;
@@ -341,21 +429,33 @@ private:
             {
                 std::lock_guard lock(store_mutex_);
                 const auto it=users_.find(c.pending.user_id);
-                if(it==users_.end()){c.pending={};bad("invalid_credentials","invalid username or password");return;}
+                if(it==users_.end()){
+                    c.pending={};
+                    bad("invalid_credentials","invalid username or password");
+                    return;
+                }
+
                 const auto verifier=from_hex(it->second.verifier_hex);
                 const auto nonce=from_hex(c.pending.nonce_hex);
                 const auto supplied=from_hex(p.fields[0]);
                 const auto expected=hmac_sha256(verifier,nonce);
+
                 if(!constant_time_equal(expected,supplied)){
-                    c.pending={};bad("invalid_credentials","invalid username or password");return;
+                    c.pending={};
+                    bad("invalid_credentials","invalid username or password");
+                    return;
                 }
-                c.pending={};c.token=make_token();
+
+                c.pending={};
+                c.token=make_token();
                 const auto expires=now_epoch()+24*60*60;
                 {
                     std::lock_guard sl(session_mutex_);
                     sessions_[c.token]=SessionRecord{it->second.id,expires};
                 }
-                send(Type::LoginOk,{c.token,it->second.id,it->second.username,it->second.email,it->second.display_name,std::to_string(expires)});
+                send(Type::LoginOk,{
+                    c.token,it->second.id,it->second.username,it->second.email,
+                    it->second.display_name,std::to_string(expires)});
             }
             return;
 
@@ -364,9 +464,12 @@ private:
                 bad("invalid_session","invalid session");return;
             }
             {
-                std::lock_guard sl(session_mutex_);sessions_.erase(c.token);
+                std::lock_guard sl(session_mutex_);
+                sessions_.erase(c.token);
             }
-            c.token.clear();send(Type::LogoutOk);return;
+            c.token.clear();
+            send(Type::LogoutOk);
+            return;
 
         case Type::ValidateSession:
             if(p.fields.size()!=1||p.fields[0]!=c.token){
@@ -374,12 +477,20 @@ private:
             }
             {
                 const auto user_id=require_session();
-                if(user_id.empty()){bad("invalid_session","session expired or invalid");return;}
+                const auto expires=session_expiry();
+                if(user_id.empty()||expires==0){
+                    bad("invalid_session","session expired or invalid");
+                    return;
+                }
                 std::lock_guard lock(store_mutex_);
                 const auto it=users_.find(user_id);
-                if(it==users_.end()){bad("invalid_session","account no longer exists");return;}
-                send(Type::LoginOk,{c.token,it->second.id,it->second.username,it->second.email,it->second.display_name,
-                    std::to_string(require_session().empty()?0:sessions_.at(c.token).expires)});
+                if(it==users_.end()){
+                    bad("invalid_session","account no longer exists");
+                    return;
+                }
+                send(Type::LoginOk,{
+                    c.token,it->second.id,it->second.username,it->second.email,
+                    it->second.display_name,std::to_string(expires)});
             }
             return;
 
@@ -388,10 +499,16 @@ private:
                 bad("invalid_session","invalid session");return;
             }
             const auto user_id=require_session();
-            if(user_id.empty()){bad("invalid_session","session expired or invalid");return;}
+            if(user_id.empty()){
+                bad("invalid_session","session expired or invalid");
+                return;
+            }
             std::lock_guard lock(store_mutex_);
             const auto it=users_.find(user_id);
-            if(it==users_.end()){bad("invalid_session","account no longer exists");return;}
+            if(it==users_.end()){
+                bad("invalid_session","account no longer exists");
+                return;
+            }
             const auto&u=it->second;
             send(Type::ProfileOk,{u.id,u.username,u.email,u.display_name,u.avatar_url});
             return;
@@ -401,27 +518,40 @@ private:
             if(p.fields.size()!=5||p.fields[0]!=c.token){
                 bad("invalid_session","invalid session");return;
             }
-            if(!valid_username(p.fields[1])||!valid_email(p.fields[2])||!valid_display_name(p.fields[3])||!valid_avatar_url(p.fields[4])){
-                bad("invalid_profile","invalid profile fields");return;
+            if(!valid_username(p.fields[1])||!valid_email(p.fields[2])||
+               !valid_display_name(p.fields[3])||!valid_avatar_url(p.fields[4])){
+                bad("invalid_profile","invalid profile fields");
+                return;
             }
+
             const auto user_id=require_session();
-            if(user_id.empty()){bad("invalid_session","session expired or invalid");return;}
+            if(user_id.empty()){
+                bad("invalid_session","session expired or invalid");
+                return;
+            }
 
             std::lock_guard lock(store_mutex_);
             auto user_it=users_.find(user_id);
-            if(user_it==users_.end()){bad("invalid_session","account no longer exists");return;}
+            if(user_it==users_.end()){
+                bad("invalid_session","account no longer exists");
+                return;
+            }
+
             const auto old_username=normalize(user_it->second.username);
             const auto old_email=normalize(user_it->second.email);
             const auto new_username=normalize(p.fields[1]);
             const auto new_email=normalize(p.fields[2]);
 
-            auto username_it=by_username_.find(new_username);
+            const auto username_it=by_username_.find(new_username);
             if(username_it!=by_username_.end()&&username_it->second!=user_id){
-                bad("already_exists","username already exists");return;
+                bad("already_exists","username already exists");
+                return;
             }
-            auto email_it=by_email_.find(new_email);
+
+            const auto email_it=by_email_.find(new_email);
             if(email_it!=by_email_.end()&&email_it->second!=user_id){
-                bad("already_exists","email already exists");return;
+                bad("already_exists","email already exists");
+                return;
             }
 
             const UserRecord old=user_it->second;
@@ -441,7 +571,8 @@ private:
                 by_email_.erase(new_email);
                 by_username_[old_username]=user_id;
                 by_email_[old_email]=user_id;
-                bad("storage_error","unable to persist profile changes");return;
+                bad("storage_error","unable to persist profile changes");
+                return;
             }
 
             const auto&u=user_it->second;
@@ -453,20 +584,34 @@ private:
             if(p.fields.size()!=1||p.fields[0]!=c.token){
                 bad("invalid_session","invalid session");return;
             }
+
             const auto user_id=require_session();
-            if(user_id.empty()){bad("invalid_session","session expired or invalid");return;}
+            if(user_id.empty()){
+                bad("invalid_session","session expired or invalid");
+                return;
+            }
 
             std::lock_guard lock(store_mutex_);
             auto user_it=users_.find(user_id);
-            if(user_it==users_.end()){bad("invalid_session","account no longer exists");return;}
-            const auto username=normalize(user_it->second.username);
-            const auto email=normalize(user_it->second.email);
+            if(user_it==users_.end()){
+                bad("invalid_session","account no longer exists");
+                return;
+            }
+
+            const UserRecord old=user_it->second;
+            const auto username=normalize(old.username);
+            const auto email=normalize(old.email);
+
             users_.erase(user_it);
             by_username_.erase(username);
             by_email_.erase(email);
 
             if(!SaveUnlocked()){
-                bad("storage_error","unable to persist account deletion");return;
+                users_[old.id]=old;
+                by_username_[username]=old.id;
+                by_email_[email]=old.id;
+                bad("storage_error","unable to persist account deletion");
+                return;
             }
 
             {
@@ -476,13 +621,15 @@ private:
                     else ++it;
                 }
             }
+
             c.token.clear();
             send(Type::DeleteAccountOk);
             return;
         }
 
         case Type::Ping:
-            send(Type::Pong);return;
+            send(Type::Pong);
+            return;
 
         case Type::RegisterChallenge:
         case Type::RegisterOk:
@@ -494,10 +641,12 @@ private:
         case Type::DeleteAccountOk:
         case Type::Error:
         case Type::Pong:
-            bad("unexpected_packet","unexpected authentication packet");return;
+            bad("unexpected_packet","unexpected authentication packet");
+            return;
 
         default:
-            bad("unsupported","unsupported auth operation");return;
+            bad("unsupported","unsupported auth operation");
+            return;
         }
     }
 
