@@ -207,6 +207,7 @@ private:
 
     bool SaveUnlocked(){
         std::filesystem::path tmp=store_path_+".tmp";
+        std::filesystem::path backup=store_path_+".bak";
         std::error_code ec;
 
         const auto parent=std::filesystem::path(store_path_).parent_path();
@@ -215,6 +216,7 @@ private:
             if(ec)return false;
         }
 
+        std::filesystem::remove(tmp,ec);
         std::ofstream out(tmp,std::ios::trunc);
         if(!out)return false;
 
@@ -228,16 +230,37 @@ private:
                <<"\t"<<u.verifier_hex<<"\n";
         }
         out.close();
-        if(!out)return false;
+        if(!out){
+            std::filesystem::remove(tmp,ec);
+            return false;
+        }
 
+        std::filesystem::remove(backup,ec);
         ec.clear();
-        std::filesystem::remove(store_path_,ec);
+        const bool had_existing=std::filesystem::exists(store_path_,ec);
+        if(ec)return false;
+
+        if(had_existing){
+            ec.clear();
+            std::filesystem::rename(store_path_,backup,ec);
+            if(ec){
+                std::filesystem::remove(tmp,ec);
+                return false;
+            }
+        }
+
         ec.clear();
         std::filesystem::rename(tmp,store_path_,ec);
         if(ec){
             std::filesystem::remove(tmp,ec);
+            if(had_existing){
+                std::error_code restore_ec;
+                std::filesystem::rename(backup,store_path_,restore_ec);
+            }
             return false;
         }
+
+        std::filesystem::remove(backup,ec);
         return true;
     }
 
