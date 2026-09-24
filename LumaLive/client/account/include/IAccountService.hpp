@@ -37,6 +37,16 @@ public:
 
     virtual OperationResult RequestEmailVerification() = 0;
     virtual OperationResult VerifyEmail(std::string verification_token) = 0;
+    virtual OperationResult RequestPhoneVerification(std::string phone) = 0;
+    virtual OperationResult VerifyPhone(std::string challenge_id,std::string code) = 0;
+
+    virtual OperationResult RequestPhoneLoginCode(std::string phone) = 0;
+    virtual OperationResult LoginWithPhoneCode(
+        std::string challenge_id,
+        std::string code,
+        std::string device_id = {},
+        std::string device_name = {},
+        std::string mfa_code = {}) = 0;
     virtual OperationResult ChangePassword(std::string current_password,std::string new_password) = 0;
     virtual OperationResult RequestPasswordReset(std::string identifier) = 0;
     virtual OperationResult ResetPassword(std::string reset_token,std::string new_password) = 0;
