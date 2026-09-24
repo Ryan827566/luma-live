@@ -1593,6 +1593,10 @@ private:
     std::vector<AuditRecord> audits_;
 };
 
+std::unique_ptr<IAuthService>CreateAuthService(){
+    return std::make_unique<AuthServiceImpl>();
+}
+
 std::unique_ptr<IAuthService>CreateAuthService(std::unique_ptr<IAuthStore> store){
     return std::make_unique<AuthServiceImpl>(std::move(store));
 }
