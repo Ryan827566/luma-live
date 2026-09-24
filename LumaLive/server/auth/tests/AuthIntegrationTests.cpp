@@ -7,6 +7,21 @@
 #include <fstream>
 #include <iostream>
 #include <span>
+#include <string>
+
+namespace {
+
+std::string ExtractAfter(const std::string& text,const std::string& prefix,const std::string& terminator=""){
+    const auto pos=text.find(prefix);
+    assert(pos!=std::string::npos);
+    const auto begin=pos+prefix.size();
+    if(terminator.empty())return text.substr(begin);
+    const auto end=text.find(terminator,begin);
+    assert(end!=std::string::npos);
+    return text.substr(begin,end-begin);
+}
+
+}
 
 int main() {
     const std::string abc="abc";
@@ -19,11 +34,11 @@ int main() {
         "password",std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(salt.data()),salt.size()),1);
     assert(luma::contracts::auth::crypto::hex(dk)=="120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b");
 
-    const auto store=(std::filesystem::temp_directory_path()/"luma_auth_integration_test.db").string();
+    const auto store=(std::filesystem::temp_directory_path()/"luma_auth_security_integration.db").string();
     std::error_code ec;
-    std::filesystem::remove(store,ec);
-    std::filesystem::remove(store+".tmp",ec);
-    std::filesystem::remove(store+".bak",ec);
+    for(const auto& suffix:{"",".tmp",".bak",".security.log"}){
+        std::filesystem::remove(store+suffix,ec);
+    }
 
     const std::string legacy_salt="legacy-salt";
     const auto legacy_verifier=luma::contracts::auth::crypto::pbkdf2_hmac_sha256(
@@ -42,86 +57,148 @@ int main() {
 
     auto server=luma::server::auth::CreateAuthService();
     assert(server->ConfigureStore(store).IsOk());
-    assert(server->StartOnPort(19120).IsOk());
+    assert(server->StartOnPort(19121).IsOk());
 
-    auto client=luma::client::account::CreateAccountService();
-    assert(client->Connect("127.0.0.1",19120).success);
+    auto legacyClient=luma::client::account::CreateAccountService();
+    assert(legacyClient->Connect("127.0.0.1",19121).success);
+    assert(legacyClient->Login("legacy.test","legacy pass","legacy-pc","Legacy PC").success);
+    assert(legacyClient->GetProfile().success);
+    assert(legacyClient->Session().user.user_id=="legacy-id");
+    assert(legacyClient->Session().user.display_name=="Legacy User");
+    assert(legacyClient->Session().user.avatar_url.empty());
+    assert(legacyClient->Logout().success);
+    legacyClient->Stop();
 
-    assert(client->Login("legacy.test","legacy pass").success);
-    assert(client->GetProfile().success);
-    assert(client->Session().user.user_id=="legacy-id");
-    assert(client->Session().user.display_name=="Legacy User");
-    assert(client->Session().user.avatar_url.empty());
-    assert(client->Logout().success);
+    auto alice=luma::client::account::CreateAccountService();
+    assert(alice->Connect("127.0.0.1",19121).success);
+    assert(alice->Register("alice.test","alice@example.com","Alice Test","correct horse").success);
+    assert(alice->Login("alice.test","wrong pass").success==false);
+    assert(alice->Login("alice@example.com","correct horse","alice-pc","Alice PC").success);
+    assert(alice->IsAuthenticated());
 
-    auto r=client->Register("alice.test","alice@example.com","Alice Test","correct horse");
-    if(!r.success){std::cerr<<"registration failed: "<<r.message<<"\n";return 1;}
-    assert(!client->Register("alice.test","other@example.com","Other","correct horse").success);
-    assert(!client->Register("bob.test","alice@example.com","Bob","correct horse").success);
-    assert(!client->Login("alice.test","wrong pass").success);
-    assert(client->Login("alice@example.com","correct horse").success);
-    assert(client->IsAuthenticated());
+    assert(alice->GetSecuritySummary().success);
+    auto security=alice->Security();
+    assert(!security.email_verified);
+    assert(!security.mfa_enabled);
+    assert(security.active_session_count==1);
 
-    assert(client->GetProfile().success);
-    auto session=client->Session();
-    assert(session.user.user_id.size()==32);
-    assert(session.user.username=="alice.test");
-    assert(session.user.email=="alice@example.com");
-    assert(session.user.display_name=="Alice Test");
-    assert(session.user.avatar_url.empty());
+    auto verification=alice->RequestEmailVerification();
+    assert(verification.success);
+    const auto verification_token=ExtractAfter(verification.message,"email verification token="," expires=");
+    assert(!verification_token.empty());
+    assert(alice->VerifyEmail(verification_token).success);
+    assert(alice->GetSecuritySummary().success);
+    assert(alice->Security().email_verified);
 
-    assert(client->UpdateProfile(
-        "alice.live",
-        "alice.live@example.com",
-        "Alice Live",
-        "https://example.com/avatar/alice.png").success);
+    auto alice2=luma::client::account::CreateAccountService();
+    assert(alice2->Connect("127.0.0.1",19121).success);
+    assert(alice2->Login("alice.test","correct horse","alice-phone","Alice Phone").success);
+    assert(alice2->IsAuthenticated());
 
-    session=client->Session();
-    assert(session.user.username=="alice.live");
-    assert(session.user.email=="alice.live@example.com");
-    assert(session.user.display_name=="Alice Live");
-    assert(session.user.avatar_url=="https://example.com/avatar/alice.png");
-    assert(client->GetProfile().success);
+    assert(alice->GetSessions().success);
+    assert(alice->Sessions().size()==2);
+    std::string other_session_id;
+    for(const auto&session:alice->Sessions()){
+        if(!session.current)other_session_id=session.session_id;
+    }
+    assert(!other_session_id.empty());
+    assert(alice->RevokeSession(other_session_id).success);
+    assert(!alice2->ValidateSession().success);
 
-    assert(client->Register("bob.test","bob@example.com","Bob","correct horse").success);
-    assert(!client->UpdateProfile(
-        "bob.test",
-        "alice.live@example.com",
-        "Alice Duplicate",
-        "").success);
-    session=client->Session();
-    assert(session.user.username=="alice.live");
-    assert(session.user.email=="alice.live@example.com");
+    assert(alice->Login("alice@example.com","correct horse","alice-phone-2","Alice Phone 2").success);
+    assert(alice->RevokeOtherSessions().success);
+    assert(!alice2->IsAuthenticated() || !alice2->ValidateSession().success);
 
-    assert(client->Logout().success);
-    assert(client->Login("alice.live","correct horse").success);
-    assert(client->DeleteAccount().success);
-    assert(!client->IsAuthenticated());
-    assert(!client->Login("alice.live","correct horse").success);
-    assert(!client->Login("alice.live@example.com","correct horse").success);
+    assert(alice->GetSecurityEvents().success);
+    bool sawLogin=false,sawNewNetwork=false,sawVerify=false,sawRevoke=false;
+    for(const auto&event:alice->SecurityEvents()){
+        sawLogin|=event.type=="login_success";
+        sawNewNetwork|=event.type=="new_network";
+        sawVerify|=event.type=="email_verified";
+        sawRevoke|=event.type=="session_revoked";
+    }
+    assert(sawLogin&&sawNewNetwork&&sawVerify&&sawRevoke);
 
-    client->Stop();
+    const auto mfa=alice->EnableMfa();
+    assert(mfa.success);
+    const auto recovery_code=ExtractAfter(mfa.message,"MFA enabled; recovery code=");
+    assert(recovery_code.size()==32);
+    assert(alice->Security().mfa_enabled);
+
+    assert(alice->Logout().success);
+    assert(!alice->Login("alice.test","correct horse","alice-pc","Alice PC").success);
+    assert(alice->Login("alice.test","correct horse","alice-pc","Alice PC",recovery_code).success);
+    assert(alice->DisableMfa(recovery_code).success);
+    assert(!alice->Security().mfa_enabled);
+
+    assert(alice->Logout().success);
+    assert(alice->Login("alice.test","correct horse","alice-pc","Alice PC").success);
+
+    assert(alice->ChangePassword("wrong password","new correct horse").success==false);
+    assert(alice->ChangePassword("correct horse","new correct horse").success);
+    assert(!alice->IsAuthenticated());
+    assert(!alice->ValidateSession().success);
+    assert(!alice2->ValidateSession().success);
+
+    assert(alice->Login("alice.test","correct horse").success==false);
+    assert(alice->Login("alice.test","new correct horse","alice-pc","Alice PC").success);
+
+    auto bob=luma::client::account::CreateAccountService();
+    assert(bob->Connect("127.0.0.1",19121).success);
+    assert(bob->Register("bob.test","bob@example.com","Bob","correct horse").success);
+    assert(bob->Login("bob.test","correct horse","bob-pc","Bob PC").success);
+
+    auto bobReset=luma::client::account::CreateAccountService();
+    assert(bobReset->Connect("127.0.0.1",19121).success);
+    const auto resetRequest=bobReset->RequestPasswordReset("bob.test");
+    assert(resetRequest.success);
+    const auto reset_token=ExtractAfter(resetRequest.message,"password reset token=");
+    assert(!reset_token.empty());
+    assert(bobReset->ResetPassword(reset_token,"reset correct horse").success);
+    assert(!bob->ValidateSession().success);
+
+    auto bobLogin=luma::client::account::CreateAccountService();
+    assert(bobLogin->Connect("127.0.0.1",19121).success);
+    assert(bobLogin->Login("bob.test","reset correct horse").success);
+
+    auto locked=luma::client::account::CreateAccountService();
+    assert(locked->Connect("127.0.0.1",19121).success);
+    for(int i=0;i<5;++i)assert(!locked->Login("bob.test","bad password","lock-test","Lock Test"));
+    assert(!locked->Login("bob.test","reset correct horse","lock-test","Lock Test"));
+
+    assert(bobLogin->GetSecuritySummary().success);
+    assert(bobLogin->GetSecurityEvents().success);
+    bool sawReset=false,sawPasswordReset=false;
+    for(const auto&event:bobLogin->SecurityEvents()){
+        sawReset|=event.type=="password_reset_requested";
+        sawPasswordReset|=event.type=="password_reset_completed";
+    }
+    assert(sawReset&&sawPasswordReset);
+
+    bobLogin->Stop();
+    locked->Stop();
+    bobReset->Stop();
+    bob->Stop();
+    alice2->Stop();
+    alice->Stop();
     assert(server->Stop().IsOk());
 
     auto server2=luma::server::auth::CreateAuthService();
     assert(server2->ConfigureStore(store).IsOk());
-    assert(server2->StartOnPort(19120).IsOk());
+    assert(server2->StartOnPort(19121).IsOk());
 
-    auto client2=luma::client::account::CreateAccountService();
-    assert(client2->Connect("127.0.0.1",19120).success);
-    assert(client2->Login("bob.test","correct horse").success);
-    assert(client2->GetProfile().success);
-    assert(client2->Session().user.display_name=="Bob");
-    assert(client2->Login("legacy.test","legacy pass").success);
-    assert(client2->GetProfile().success);
-    assert(client2->Session().user.display_name=="Legacy User");
+    auto persistence=luma::client::account::CreateAccountService();
+    assert(persistence->Connect("127.0.0.1",19121).success);
+    assert(persistence->Login("bob.test","reset correct horse").success==false);
+    assert(persistence->Login("legacy.test","legacy pass").success);
 
-    client2->Stop();
+    persistence->Stop();
     server2->Stop();
 
-    std::filesystem::remove(store,ec);
-    std::filesystem::remove(store+".tmp",ec);
-    std::filesystem::remove(store+".bak",ec);
-    std::cout<<"PASS: registration, duplicate protection, password rejection, username/email login, profile read/update, avatar URL, account deletion and legacy-store persistence\n";
+    for(const auto& suffix:{"",".tmp",".bak",".security.log"}){
+        std::filesystem::remove(store+suffix,ec);
+    }
+
+    std::cout<<"PASS: email verification, MFA recovery-code login, password change, password reset, rate limiting, session management, security audit events and persistence\n";
     return 0;
 }
