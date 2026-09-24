@@ -152,7 +152,7 @@ int main() {
     assert(bobReset->Connect("127.0.0.1",19121).success);
     const auto resetRequest=bobReset->RequestPasswordReset("bob.test");
     assert(resetRequest.success);
-    const auto reset_token=ExtractAfter(resetRequest.message,"password reset token=");
+    const auto reset_token=ExtractAfter(resetRequest.message,"password reset token="," expires=");
     assert(!reset_token.empty());
     assert(bobReset->ResetPassword(reset_token,"reset correct horse").success);
     assert(!bob->ValidateSession().success);
