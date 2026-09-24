@@ -133,7 +133,7 @@ struct PostgresApi {
         return target!=nullptr;
     }
 
-    shared::contracts::Result LoadLibrary() {
+    shared::contracts::Result LoadClientLibrary() {
 #ifdef _WIN32
         library=LoadLibraryA("libpq.dll");
         if(!library) library=LoadLibraryA("libpq5.dll");
@@ -177,7 +177,7 @@ public:
             shared::contracts::ErrorCode::InvalidArgument,
             "PostgreSQL connection string is empty");
 
-        auto library=api_.LoadLibrary();
+        auto library=api_.LoadClientLibrary();
         if(!library.IsOk()) return library;
 
         connection_=api_.PQconnectdb(connection_string_.c_str());
