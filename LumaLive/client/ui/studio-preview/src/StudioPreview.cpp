@@ -55,6 +55,8 @@ class StudioWindow {
     media::ScreenCaptureService screen_;
     VideoMailbox video_;AudioOutput audio_;
     VideoMailbox remoteVideo_;AudioOutput remoteAudio_;PreviewCall call_;
+    std::vector<std::string> shownPeers_;
+    CallState shownCallState_{CallState::Offline};
     std::atomic<uint64_t> remoteVideos_{0},remoteAudios_{0};
     std::atomic<float> remotePeak_{0};
     std::atomic<float> peak_{0};std::atomic<bool> monitor_{false};std::atomic<uint64_t> videoCount_{0},audioCount_{0};
@@ -112,6 +114,9 @@ class StudioWindow {
         OpenMedia(path);
     }
     void OpenMedia(const wchar_t* path){
+        screen_.Stop();SetWindowTextW(Control(ShareScreen),L"共享主屏幕");
+        capture_->StopCamera();SetWindowTextW(Control(Camera),L"开启摄像头");
+        EnableWindow(Control(CameraList),!cameras_.devices.empty());video_.Clear();
         CloseFile();cameraView_=false;fileName_=std::filesystem::path(path).filename().wstring();playback_=std::make_shared<PlaybackState>();
         auto* cb=new PlayerEvents(playback_);auto hr=MFPCreateMediaPlayer(nullptr,FALSE,0,cb,surface_,&player_);cb->Release();
         if(SUCCEEDED(hr)){player_->SetVolume(volume_/100.f);hr=player_->CreateMediaItemFromURL(path,FALSE,0,nullptr);}

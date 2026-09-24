@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstdint>
 #include <mutex>
+#include <memory>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -31,19 +32,19 @@ public:
     std::size_t RoomCount() const;
     std::size_t PeerCount(const std::string& room_id) const;
 private:
-    struct Client { luma_socket_t socket{kLumaInvalidSocket}; std::string room; std::string peer; };
+    struct SendState { std::mutex mutex; bool open{true}; };
+    struct Client { luma_socket_t socket{kLumaInvalidSocket}; std::string room; std::string peer; std::shared_ptr<SendState> send{std::make_shared<SendState>()}; };
     void AcceptLoop();
     void ClientLoop(luma_socket_t socket);
     void HandleMessage(Client& client, const luma::contracts::SignalingMessage& message);
     void Broadcast(const luma::contracts::SignalingMessage& message, const std::string& room, const std::string& exclude_peer = {});
-    bool Send(luma_socket_t socket, const luma::contracts::SignalingMessage& message);
+    bool Send(const Client& client, const luma::contracts::SignalingMessage& message);
     void RemoveClient(luma_socket_t socket);
     luma_socket_t listen_socket_{kLumaInvalidSocket};
     std::atomic<bool> running_{false};
     mutable std::mutex lifecycle_mutex_;
     std::thread accept_thread_;
     mutable std::mutex mutex_;
-    mutable std::mutex send_mutex_;
     mutable std::mutex listen_mutex_;
     std::unordered_map<luma_socket_t, Client> clients_;
     std::unordered_map<std::string, std::unordered_set<std::string>> rooms_;

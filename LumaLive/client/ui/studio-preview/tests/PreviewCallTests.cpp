@@ -31,6 +31,7 @@ void Until(std::initializer_list<PreviewCall*> calls, Predicate ready,
 }
 }
 int main() {
+    std::cout << std::unitbuf;
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     int result = 0;
     try {
@@ -147,8 +148,11 @@ int main() {
         Until({&a, &b, &observer, &timeout}, [&] { return a.State() == CallState::Incoming; });
         Until({&a, &b, &observer, &timeout}, [&] { return timeout.State() == CallState::Ready && a.State() == CallState::Ready; });
         Require(timeout.LastStatus() == "Call timed out", "Timeout status missing");
+        std::cout << "Stopping timeout participant\n";
         timeout.Stop();
+        std::cout << "Stopping signaling server\n";
         server.Stop();
+        std::cout << "Signaling server stopped\n";
         Until({&a, &b, &observer}, [&] { return !a.Active() && !b.Active() && !observer.Active(); });
         Require(a.Participants().empty() && b.Participants().empty(), "Disconnect retained participants");
         std::cout << "PASS: consent, targeting, busy, cancel, rejection, media, hangup, leave, reconnect, duplicate identity, timeout and server disconnect\n";
