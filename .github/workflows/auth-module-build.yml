@@ -40,6 +40,12 @@ jobs:
           LUMALIVE_AUTH_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/lumalive_test
         run: ./auth_integration_test
 
+
+      - name: Compile and run email provider unit test
+        run: |
+          g++ -std=c++20 -Wall -Wextra -Werror -pthread             -I LumaLive/server/auth/include             LumaLive/server/auth/src/EmailProvider.cpp             LumaLive/server/auth/tests/EmailProviderTests.cpp             -o email_provider_test
+          ./email_provider_test
+
       - name: Compile auth server
         run: |
           g++ -std=c++20 -Wall -Wextra -Werror -pthread             -I LumaLive/shared             -I LumaLive/server/auth/include             LumaLive/server/auth/src/AuthServiceImpl.cpp             LumaLive/server/auth/src/AuthStore.cpp             LumaLive/server/auth/src/SmsProvider.cpp             LumaLive/apps/luma-auth-server/src/main.cpp             -o luma_auth_server -ldl
