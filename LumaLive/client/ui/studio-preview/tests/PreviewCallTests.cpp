@@ -95,7 +95,11 @@ int main() {
                 int16_t sample = static_cast<int16_t>(std::sin((tick * 480 + i) * 440. * 6.283185307 / 48000) * 10000);
                 std::memcpy(audio.data.data() + i * 2, &sample, 2);
             }
-            a.Audio(audio); b.Audio(audio); ++tick;
+            a.Audio(audio);
+            // Independent sources avoid the echo canceller treating the remote
+            // test tone as locally played echo.
+            for(int i=0;i<480;++i){int16_t sample=static_cast<int16_t>(std::sin((tick*480+i)*733.*6.283185307/48000)*10000);std::memcpy(audio.data.data()+i*2,&sample,2);}
+            b.Audio(audio); ++tick;
             if (av > 15 && bv > 15 && loudA > 25 && loudB > 25 && a.DurationSeconds() >= 1) break;
             std::this_thread::sleep_for(10ms);
         }
@@ -127,7 +131,11 @@ int main() {
                     int16_t sample = static_cast<int16_t>(std::sin((tick * 480 + i) * 440. * 6.283185307 / 48000) * 10000);
                     std::memcpy(audio.data.data() + i * 2, &sample, 2);
                 }
-                a.Audio(audio); b.Audio(audio); ++tick;
+                a.Audio(audio);
+            // Independent sources avoid the echo canceller treating the remote
+            // test tone as locally played echo.
+            for(int i=0;i<480;++i){int16_t sample=static_cast<int16_t>(std::sin((tick*480+i)*733.*6.283185307/48000)*10000);std::memcpy(audio.data.data()+i*2,&sample,2);}
+            b.Audio(audio); ++tick;
                 if (a.State() == CallState::Connected && b.State() == CallState::Connected &&
                     av >= beforeAv + 5 && bv >= beforeBv + 5 && loudA >= beforeAa + 8 && loudB >= beforeBa + 8) break;
                 std::this_thread::sleep_for(10ms);
@@ -141,6 +149,11 @@ int main() {
             std::cout << "PASS: explicit ICE restart with continued decoded audio/video\n";
         }
 
+        Until({&a, &b, &observer}, [&] {
+            return a.NetworkStats().inbound_ready && b.NetworkStats().inbound_ready &&
+                a.NetworkStats().packets_received > 0 && b.NetworkStats().packets_received > 0;
+        });
+        std::cout << "PASS: both call controllers delivered real inbound network statistics\n";
         Require(a.Hangup(), "Hangup failed");
         Until({&a, &b, &observer}, [&] { return b.State() == CallState::Ready; });
         Require(a.Remote().empty() && b.Remote().empty(), "Hangup retained remote identity");

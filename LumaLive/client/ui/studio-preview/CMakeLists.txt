@@ -39,7 +39,7 @@ add_executable(luma_preview_call_tests tests/PreviewCallTests.cpp)
 target_include_directories(luma_preview_call_tests PRIVATE include)
 target_link_libraries(luma_preview_call_tests PRIVATE luma_client_webrtc luma_client_signaling luma_client_media_pipeline luma_signaling ole32)
 add_test(NAME luma_preview_call_tests COMMAND luma_preview_call_tests)
-set_tests_properties(luma_preview_call_tests PROPERTIES TIMEOUT 35)
+set_tests_properties(luma_preview_call_tests PROPERTIES TIMEOUT 60)
 
 add_executable(luma_file_playback_tests tests/FilePlaybackTests.cpp)
 target_compile_options(luma_file_playback_tests PRIVATE /utf-8)
