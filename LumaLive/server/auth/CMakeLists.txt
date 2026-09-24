@@ -1,9 +1,11 @@
-add_library(luma_auth STATIC src/AuthServiceImpl.cpp src/SmsProvider.cpp)
+add_library(luma_auth STATIC src/AuthServiceImpl.cpp src/AuthStore.cpp src/SmsProvider.cpp)
 target_include_directories(luma_auth PUBLIC include ${CMAKE_SOURCE_DIR}/shared)
 target_link_libraries(luma_auth PUBLIC luma_shared)
 target_compile_features(luma_auth PUBLIC cxx_std_20)
 if(WIN32)
   target_link_libraries(luma_auth PUBLIC ws2_32)
+elseif(UNIX AND NOT APPLE)
+  target_link_libraries(luma_auth PUBLIC dl)
 endif()
 
 add_executable(luma_auth_unit_tests tests/AuthServiceTests.cpp)
