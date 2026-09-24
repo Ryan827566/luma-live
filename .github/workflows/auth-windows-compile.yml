@@ -1,0 +1,41 @@
+name: auth-windows-compile
+
+on:
+  push:
+    branches:
+      - codex/auth-registration-login
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  compile:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Compile auth client and UI
+        shell: cmd
+        run: |
+          cl /nologo /std:c++20 /W4 /EHsc /c ^
+            /I LumaLive\shared ^
+            /I LumaLive\client\account\include ^
+            /I LumaLive\client\ui\account\include ^
+            LumaLive\client\account\src\AccountService.cpp ^
+            LumaLive\client\ui\account\src\AccountView.cpp
+
+      - name: Compile Studio entry point
+        shell: cmd
+        run: |
+          cl /nologo /std:c++20 /W4 /EHsc /c ^
+            /I LumaLive\shared ^
+            /I LumaLive\client\application\studio\include ^
+            /I LumaLive\client\ui\account\include ^
+            /I LumaLive\client\ui\scene-editor\include ^
+            /I LumaLive\client\ui\studio-shell\include ^
+            /I LumaLive\client\ui\studio-preview\include ^
+            LumaLive\apps\luma-studio\src\main.cpp
