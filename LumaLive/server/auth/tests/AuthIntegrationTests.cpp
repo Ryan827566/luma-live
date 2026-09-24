@@ -29,7 +29,7 @@ int main() {
     assert(client->Connect("127.0.0.1",19120).success);
 
     auto r=client->Register("alice.test","alice@example.com","Alice Test","correct horse");
-    assert(r.success);
+    if(!r.success){std::cerr<<"registration failed: "<<r.message<<"\n";return 1;}
     r=client->Register("alice.test","other@example.com","Other","correct horse");
     assert(!r.success);
     r=client->Login("alice.test","wrong pass");
