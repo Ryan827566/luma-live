@@ -2,6 +2,7 @@
 #include "IAccountService.hpp"
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -53,7 +54,7 @@ public:
         wc.lpfnWndProc=&Window::Proc;
         wc.hInstance=instance_;
         wc.lpszClassName=L"LumaLiveAccountWindow";
-        wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);
+        wc.hCursor=LoadCursorW(nullptr,MAKEINTRESOURCEW(32512));
         wc.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);
         RegisterClassW(&wc);
         window_=CreateWindowExW(0,wc.lpszClassName,L"LumaLive 账号登录",
