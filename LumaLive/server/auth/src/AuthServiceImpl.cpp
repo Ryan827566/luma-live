@@ -81,10 +81,6 @@ bool valid_text(std::string_view s,std::size_t max){
     return !s.empty()&&s.size()<=max&&luma::contracts::auth::wire::valid_field(s);
 }
 
-std::string network_key(const std::string& remote,const std::string& identifier){
-    return normalize(identifier)+"|"+remote;
-}
-
 struct UserRecord{
     std::string id,username,email,display_name,avatar_url,salt_hex,verifier_hex;
     bool email_verified{false};
