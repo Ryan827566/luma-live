@@ -31,16 +31,6 @@ using luma::contracts::auth::crypto::sha256;
 using luma::contracts::auth::wire::Packet;
 using luma::contracts::auth::wire::Type;
 
-namespace {
-std::string token_hash(const std::string& token){
-    const auto bytes=std::span<const std::uint8_t>(
-        reinterpret_cast<const std::uint8_t*>(token.data()),token.size());
-    return hex(sha256(bytes));
-}
-std::string get_field(const Packet& p,std::size_t index){
-    return index<p.fields.size()?p.fields[index]:std::string{};
-}
-}
 
 class AccountService final:public IAccountService{
 public:
@@ -112,7 +102,7 @@ public:
         const auto verifier=pbkdf2_hmac_sha256(p,from_hex(q.fields[3]));
         const auto proof=hmac_sha256(verifier,from_hex(q.fields[4]));
         const bool mfa_required=q.fields[5]=="1";
-        if(mfa_required&&mfa_code.empty())mfa_code="";
+        (void)mfa_required;
 
         if(!Send({Type::LoginProof,{hex(proof),mfa_code}}))return{false,"send failed"};
         if(!Recv(q))return{false,"receive failed"};
