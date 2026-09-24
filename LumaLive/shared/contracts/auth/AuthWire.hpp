@@ -23,7 +23,11 @@ enum class Type : unsigned char {
     GetSessions=39, SessionsOk=40,
     RevokeSession=41, SessionRevoked=42,
     RevokeOtherSessions=43, SessionsRevoked=44,
-    GetSecurityEvents=45, SecurityEventsOk=46
+    GetSecurityEvents=45, SecurityEventsOk=46,
+    RequestPhoneVerification=47, PhoneVerificationIssued=48,
+    VerifyPhone=49, PhoneVerified=50,
+    RequestPhoneLoginCode=51, PhoneLoginCodeIssued=52,
+    PhoneLogin=53
 };
 
 struct Packet {
