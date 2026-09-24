@@ -11,6 +11,7 @@ struct UserProfile {
     std::string email;
     std::string display_name;
     std::string avatar_url;
+    std::string phone;
 };
 
 struct AuthSession {
@@ -24,6 +25,7 @@ struct AuthSession {
 
 struct SecuritySummary {
     bool email_verified{false};
+    bool phone_verified{false};
     bool mfa_enabled{false};
     std::uint32_t failed_login_attempts{0};
     std::uint32_t active_session_count{0};
