@@ -9,6 +9,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <iomanip>
+#include <sstream>
 
 namespace luma::contracts::auth::crypto {
 namespace detail {
