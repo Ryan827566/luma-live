@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <mutex>
+#include <iostream>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -50,7 +51,8 @@ public:
   if(!running_) return {false,"account service is not connected"};
   if(!Send({Type::RegisterBegin,{u,e,d}})) return {false,"send failed"};
   Packet q;
-  if(!Recv(q) || q.type==Type::Error) return Error(q);
+  if(!Recv(q)) return {false,"receive failed"};
+  if(q.type==Type::Error) return Error(q);
   if(q.type!=Type::RegisterChallenge || q.fields.size()!=2) return {false,"invalid registration challenge"};
   auto verifier=pbkdf2_hmac_sha256(p,from_hex(q.fields[0]));if(!Send({Type::RegisterFinish,{hex(verifier)}}))return{false,"send failed"};if(!Recv(q)||q.type==Type::Error)return Error(q);if(q.type!=Type::RegisterOk||q.fields.size()!=4)return{false,"invalid registration response"};return{true,"registered user_id="+q.fields[0]};
  }
