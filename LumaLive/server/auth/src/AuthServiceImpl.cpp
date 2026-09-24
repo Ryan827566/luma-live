@@ -9,7 +9,6 @@
 #include <fstream>
 #include <iomanip>
 #include <mutex>
-#include <netdb.h>
 #include <sstream>
 #include <thread>
 #include <unordered_map>
