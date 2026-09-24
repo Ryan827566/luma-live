@@ -111,18 +111,20 @@ public:
         if(!Send({Type::LoginProof,{hex(proof),mfa_code}}))return{false,"send failed"};
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
-        if(q.type!=Type::LoginOk||q.fields.size()!=9)return{false,"invalid login response"};
+        if(q.type!=Type::LoginOk||q.fields.size()!=11)return{false,"invalid login response"};
 
         session_.token=q.fields[0];
-        session_.session_id=q.fields[1];
-        session_.device_id=q.fields[2];
-        session_.device_name=q.fields[3];
-        session_.user.user_id=q.fields[4];
-        session_.user.username=q.fields[5];
-        session_.user.email=q.fields[6];
-        session_.user.display_name=q.fields[7];
+        session_.refresh_token=q.fields[1];
+        session_.session_id=q.fields[2];
+        session_.device_id=q.fields[3];
+        session_.device_name=q.fields[4];
+        session_.user.user_id=q.fields[5];
+        session_.user.username=q.fields[6];
+        session_.user.email=q.fields[7];
+        session_.user.display_name=q.fields[8];
         session_.user.avatar_url.clear();
-        session_.expires_at_epoch_seconds=std::stoll(q.fields[8]);
+        session_.expires_at_epoch_seconds=std::stoll(q.fields[9]);
+        session_.refresh_expires_at_epoch_seconds=std::stoll(q.fields[10]);
         return{true,"login successful"};
     }
 
@@ -146,17 +148,43 @@ public:
         Packet q;
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
-        if(q.type!=Type::LoginOk||q.fields.size()!=9)return{false,"invalid session response"};
+        if(q.type!=Type::LoginOk||q.fields.size()!=11)return{false,"invalid session response"};
         session_.token=q.fields[0];
-        session_.session_id=q.fields[1];
-        session_.device_id=q.fields[2];
-        session_.device_name=q.fields[3];
-        session_.user.user_id=q.fields[4];
-        session_.user.username=q.fields[5];
-        session_.user.email=q.fields[6];
-        session_.user.display_name=q.fields[7];
-        session_.expires_at_epoch_seconds=std::stoll(q.fields[8]);
+        if(!q.fields[1].empty())session_.refresh_token=q.fields[1];
+        session_.session_id=q.fields[2];
+        session_.device_id=q.fields[3];
+        session_.device_name=q.fields[4];
+        session_.user.user_id=q.fields[5];
+        session_.user.username=q.fields[6];
+        session_.user.email=q.fields[7];
+        session_.user.display_name=q.fields[8];
+        session_.expires_at_epoch_seconds=std::stoll(q.fields[9]);
+        session_.refresh_expires_at_epoch_seconds=std::stoll(q.fields[10]);
         return{true,"session valid"};
+    }
+
+    OperationResult RefreshSession()override{
+        std::lock_guard lock(mutex_);
+        if(!running_||session_.token.empty()||session_.refresh_token.empty())
+            return{false,"refresh token is not available"};
+        if(!Send({Type::RefreshSession,{session_.token,session_.refresh_token}}))
+            return{false,"send failed"};
+        Packet q;if(!Recv(q))return{false,"receive failed"};
+        if(q.type==Type::Error)return Error(q);
+        if(q.type!=Type::RefreshSessionOk||q.fields.size()!=11)
+            return{false,"invalid refresh response"};
+        session_.token=q.fields[0];
+        session_.refresh_token=q.fields[1];
+        session_.session_id=q.fields[2];
+        session_.device_id=q.fields[3];
+        session_.device_name=q.fields[4];
+        session_.user.user_id=q.fields[5];
+        session_.user.username=q.fields[6];
+        session_.user.email=q.fields[7];
+        session_.user.display_name=q.fields[8];
+        session_.expires_at_epoch_seconds=std::stoll(q.fields[9]);
+        session_.refresh_expires_at_epoch_seconds=std::stoll(q.fields[10]);
+        return{true,"session refreshed"};
     }
 
     OperationResult GetProfile()override{
@@ -292,20 +320,22 @@ public:
 
         Packet q;if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
-        if(q.type!=Type::LoginOk||q.fields.size()!=9)
+        if(q.type!=Type::LoginOk||q.fields.size()!=11)
             return{false,"invalid phone login response"};
 
         session_.token=q.fields[0];
-        session_.session_id=q.fields[1];
-        session_.device_id=q.fields[2];
-        session_.device_name=q.fields[3];
-        session_.user.user_id=q.fields[4];
-        session_.user.username=q.fields[5];
-        session_.user.email=q.fields[6];
-        session_.user.display_name=q.fields[7];
+        session_.refresh_token=q.fields[1];
+        session_.session_id=q.fields[2];
+        session_.device_id=q.fields[3];
+        session_.device_name=q.fields[4];
+        session_.user.user_id=q.fields[5];
+        session_.user.username=q.fields[6];
+        session_.user.email=q.fields[7];
+        session_.user.display_name=q.fields[8];
         session_.user.avatar_url.clear();
         session_.user.phone=pending_phone_login_number_;
-        session_.expires_at_epoch_seconds=std::stoll(q.fields[8]);
+        session_.expires_at_epoch_seconds=std::stoll(q.fields[9]);
+        session_.refresh_expires_at_epoch_seconds=std::stoll(q.fields[10]);
         pending_phone_login_={};
         return{true,"phone SMS login successful"};
     }
@@ -402,9 +432,9 @@ public:
         if(!Send({Type::EnableMfa,{session_.token}}))return{false,"send failed"};
         Packet q;if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
-        if(q.type!=Type::MfaEnabled||q.fields.size()!=1)return{false,"invalid MFA enable response"};
+        if(q.type!=Type::MfaEnabled||q.fields.size()!=3)return{false,"invalid MFA enable response"};
         security_.mfa_enabled=true;
-        return{true,"MFA enabled; recovery code="+q.fields[0]};
+        return{true,"MFA enabled; recovery code="+q.fields[0]+"; TOTP secret="+q.fields[1]+"; otpauth="+q.fields[2]};
     }
 
     OperationResult DisableMfa(std::string recovery_code)override{
