@@ -59,6 +59,56 @@ inline std::array<std::uint8_t,32> sha256(std::span<const std::uint8_t> input){
     return out;
 }
 
+
+inline std::array<std::uint8_t,20> sha1(std::span<const std::uint8_t> input){
+    auto rol=[](std::uint32_t x,std::uint32_t n){return (x<<n)|(x>>(32u-n));};
+    const auto bit_len=std::uint64_t(input.size())*8u;
+    const auto total=((input.size()+9u+63u)/64u)*64u;
+    std::vector<std::uint8_t> msg(total,0);
+    std::copy(input.begin(),input.end(),msg.begin());
+    msg[input.size()]=0x80;
+    for(int i=0;i<8;++i) msg[total-1-i]=std::uint8_t(bit_len>>(8*i));
+    std::uint32_t h0=0x67452301u,h1=0xefcdab89u,h2=0x98badcfeu,h3=0x10325476u,h4=0xc3d2e1f0u;
+    for(std::size_t off=0;off<total;off+=64){
+        std::uint32_t w[80]{};
+        for(int i=0;i<16;++i) w[i]=detail::load32(msg.data()+off+4*i);
+        for(int i=16;i<80;++i) w[i]=rol(w[i-3]^w[i-8]^w[i-14]^w[i-16],1);
+        std::uint32_t a=h0,b=h1,cc=h2,d=h3,e=h4;
+        for(int i=0;i<80;++i){
+            std::uint32_t f=0,k=0;
+            if(i<20){f=(b&cc)|((~b)&d);k=0x5a827999u;}
+            else if(i<40){f=b^cc^d;k=0x6ed9eba1u;}
+            else if(i<60){f=(b&cc)|(b&d)|(cc&d);k=0x8f1bbcdcu;}
+            else {f=b^cc^d;k=0xca62c1d6u;}
+            const auto temp=rol(a,5)+f+e+k+w[i];
+            e=d;d=cc;cc=rol(b,30);b=a;a=temp;
+        }
+        h0+=a;h1+=b;h2+=cc;h3+=d;h4+=e;
+    }
+    std::array<std::uint8_t,20> out{};
+    detail::store32(out.data()+0,h0);detail::store32(out.data()+4,h1);detail::store32(out.data()+8,h2);
+    detail::store32(out.data()+12,h3);detail::store32(out.data()+16,h4);
+    return out;
+}
+
+inline std::array<std::uint8_t,20> hmac_sha1(std::span<const std::uint8_t> key,std::span<const std::uint8_t> message){
+    std::array<std::uint8_t,64> k0{};
+    if(key.size()>64){const auto kh=sha1(key);std::copy(kh.begin(),kh.end(),k0.begin());}
+    else std::copy(key.begin(),key.end(),k0.begin());
+    std::array<std::uint8_t,64> ipad{},opad{};
+    for(std::size_t i=0;i<64;++i){ipad[i]=std::uint8_t(k0[i]^0x36u);opad[i]=std::uint8_t(k0[i]^0x5cu);}
+    std::vector<std::uint8_t> inner;
+    inner.reserve(64+message.size());
+    inner.insert(inner.end(),ipad.begin(),ipad.end());
+    inner.insert(inner.end(),message.begin(),message.end());
+    const auto ih=sha1(inner);
+    std::vector<std::uint8_t> outer;
+    outer.reserve(64+ih.size());
+    outer.insert(outer.end(),opad.begin(),opad.end());
+    outer.insert(outer.end(),ih.begin(),ih.end());
+    return sha1(outer);
+}
+
 inline std::array<std::uint8_t,32> hmac_sha256(std::span<const std::uint8_t> key,std::span<const std::uint8_t> message){
     std::array<std::uint8_t,64> k0{};
     if(key.size()>64){const auto kh=sha256(key);std::copy(kh.begin(),kh.end(),k0.begin());}
@@ -90,6 +140,78 @@ inline std::array<std::uint8_t,32> pbkdf2_hmac_sha256(std::string_view password,
     return t;
 }
 
+
+inline std::string base32_encode(std::span<const std::uint8_t> bytes){
+    static constexpr char alphabet[]="ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    std::string out;
+    out.reserve((bytes.size()*8+4)/5);
+    std::uint32_t buffer=0;int bits=0;
+    for(const auto b:bytes){
+        buffer=(buffer<<8)|b;bits+=8;
+        while(bits>=5){bits-=5;out.push_back(alphabet[(buffer>>bits)&31u]);}
+    }
+    if(bits>0)out.push_back(alphabet[(buffer<<(5-bits))&31u]);
+    return out;
+}
+
+inline std::vector<std::uint8_t> base32_decode(std::string_view text){
+    auto value=[](char c)->int{
+        if(c>='A'&&c<='Z')return c-'A';
+        if(c>='a'&&c<='z')return c-'a';
+        if(c>='2'&&c<='7')return c-'2'+26;
+        return -1;
+    };
+    std::vector<std::uint8_t> out;
+    std::uint32_t buffer=0;int bits=0;
+    for(char c:text){
+        if(c==' '||c=='-'||c=='=')continue;
+        const int v=value(c);if(v<0)throw std::invalid_argument("invalid base32");
+        buffer=(buffer<<5)|std::uint32_t(v);bits+=5;
+        if(bits>=8){bits-=8;out.push_back(std::uint8_t((buffer>>bits)&0xffu));}
+    }
+    return out;
+}
+
+inline std::string uri_component(std::string_view value){
+    static constexpr char digits[]="0123456789ABCDEF";
+    std::string out;
+    for(unsigned char c:value){
+        if((c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='-'||c=='_'||c=='.'||c=='~')out.push_back(char(c));
+        else {out.push_back('%');out.push_back(digits[c>>4]);out.push_back(digits[c&0xf]);}
+    }
+    return out;
+}
+
+inline std::string make_totp_code(std::string_view secret_base32,std::int64_t epoch_seconds,std::uint32_t period=30,std::uint32_t digits=6){
+    if(period==0||digits<6||digits>8)throw std::invalid_argument("invalid TOTP parameters");
+    const auto secret=base32_decode(secret_base32);
+    const auto counter=std::uint64_t(epoch_seconds/std::int64_t(period));
+    std::array<std::uint8_t,8> message{};
+    for(int i=0;i<8;++i)message[7-i]=std::uint8_t(counter>>(8*i));
+    const auto digest=hmac_sha1(secret,message);
+    const auto offset=digest[19]&0x0fu;
+    const std::uint32_t binary=(std::uint32_t(digest[offset])&0x7fu)<<24 |
+        std::uint32_t(digest[offset+1])<<16 | std::uint32_t(digest[offset+2])<<8 | std::uint32_t(digest[offset+3]);
+    std::uint32_t mod=1;for(std::uint32_t i=0;i<digits;++i)mod*=10u;
+    std::ostringstream out;out<<std::setw(int(digits))<<std::setfill('0')<<(binary%mod);
+    return out.str();
+}
+
+inline bool verify_totp(std::string_view secret_base32,std::string_view code,std::int64_t epoch_seconds,std::int32_t window=1){
+    if(code.size()!=6&&code.size()!=7&&code.size()!=8)return false;
+    for(char c:code)if(c<'0'||c>'9')return false;
+    for(std::int32_t delta=-window;delta<=window;++delta){
+        const auto t=epoch_seconds+std::int64_t(delta)*30;
+        if(make_totp_code(secret_base32,t,30,static_cast<std::uint32_t>(code.size()))==code)return true;
+    }
+    return false;
+}
+
+inline std::string make_otpauth_uri(std::string_view secret_base32,std::string_view account,std::string_view issuer="LumaLive"){
+    return "otpauth://totp/"+uri_component(issuer)+":"+uri_component(account)+
+        "?secret="+std::string(secret_base32)+"&issuer="+uri_component(issuer)+
+        "&algorithm=SHA1&digits=6&period=30";
+}
 inline std::vector<std::uint8_t> random_bytes(std::size_t n){
     std::random_device rd;std::vector<std::uint8_t> out(n);for(auto&b:out)b=std::uint8_t(rd());return out;
 }
