@@ -78,13 +78,46 @@ bool valid_email(std::string_view s){
     return at!=std::string_view::npos&&at>0&&at+1<s.size()&&s.find('@',at+1)==std::string_view::npos;
 }
 
+std::string normalize_phone(std::string_view input){
+    std::string out;
+    out.reserve(16);
+    bool saw_plus=false;
+    for(char c:input){
+        if(c=='+'){
+            if(saw_plus||!out.empty())return {};
+            saw_plus=true;
+            out.push_back('+');
+        }else if(std::isdigit(static_cast<unsigned char>(c))){
+            out.push_back(c);
+        }else if(c==' '||c=='-'||c=='('||c==')'||c=='.'){
+            continue;
+        }else{
+            return {};
+        }
+    }
+    if(!saw_plus)out.insert(out.begin(),'+');
+    const auto digits=out.size()>0?out.size()-1:0;
+    if(digits<8||digits>15)return {};
+    return out;
+}
+
+std::string make_otp_code(){
+    const auto bytes=random_bytes(4);
+    const std::uint32_t value=(std::uint32_t(bytes[0])<<24)|
+        (std::uint32_t(bytes[1])<<16)|(std::uint32_t(bytes[2])<<8)|std::uint32_t(bytes[3]);
+    std::ostringstream out;
+    out<<std::setw(6)<<std::setfill('0')<<(value%1000000u);
+    return out.str();
+}
+
 bool valid_text(std::string_view s,std::size_t max){
     return !s.empty()&&s.size()<=max&&luma::contracts::auth::wire::valid_field(s);
 }
 
 struct UserRecord{
-    std::string id,username,email,display_name,avatar_url,salt_hex,verifier_hex;
+    std::string id,username,email,display_name,avatar_url,phone,salt_hex,verifier_hex;
     bool email_verified{false};
+    bool phone_verified{false};
     bool mfa_enabled{false};
     std::string mfa_recovery_hash;
     std::string email_verify_hash;
@@ -127,6 +160,15 @@ struct FailureState{
 struct AuditRecord{
     luma::contracts::auth::SecurityEvent security_event;
     std::string user_id;
+};
+
+struct PhoneChallenge{
+    enum class Kind{Verification,Login} kind{Kind::Login};
+    std::string phone;
+    std::string user_id;
+    std::string code_hash;
+    std::int64_t expires{0};
+    std::uint32_t attempts_remaining{5};
 };
 
 }
@@ -238,7 +280,7 @@ private:
                     }
                     p.push_back(std::move(cur));
 
-                    if((p.size()!=7&&p.size()!=8&&p.size()!=15)||p[0]!="1")return false;
+                    if((p.size()!=7&&p.size()!=8&&p.size()!=15&&p.size()!=17)||p[0]!="1")return false;
 
                     UserRecord u{};
                     u.id=p[1];
@@ -254,7 +296,7 @@ private:
                         u.avatar_url=p[5];
                         u.salt_hex=p[6];
                         u.verifier_hex=p[7];
-                        if(p.size()==15){
+                        if(p.size()==15||p.size()==17){
                             u.email_verified=p[8]=="1";
                             u.mfa_enabled=p[9]=="1";
                             u.mfa_recovery_hash=p[10];
@@ -262,12 +304,17 @@ private:
                             u.email_verify_expires=std::stoll(p[12]);
                             u.reset_token_hash=p[13];
                             u.reset_token_expires=std::stoll(p[14]);
+                            if(p.size()==17){
+                                u.phone=p[15];
+                                u.phone_verified=p[16]=="1";
+                            }
                         }
                     }
 
                     users_[u.id]=u;
                     by_username_[normalize(u.username)]=u.id;
                     by_email_[normalize(u.email)]=u.id;
+                    if(!u.phone.empty()&&u.phone_verified)by_phone_[u.phone]=u.id;
                 }
             }
         }
@@ -328,7 +375,9 @@ private:
                <<"\t"<<u.email_verify_hash
                <<"\t"<<u.email_verify_expires
                <<"\t"<<u.reset_token_hash
-               <<"\t"<<u.reset_token_expires<<"\n";
+               <<"\t"<<u.reset_token_expires
+               <<"\t"<<u.phone
+               <<"\t"<<(u.phone_verified?"1":"0")<<"\n";
         }
         out.close();
         if(!out){
@@ -548,6 +597,45 @@ private:
         const std::string& user_id,const std::string& remote){
         std::lock_guard lock(rate_mutex_);
         failures_.erase(LoginUserRateKey(user_id,remote));
+    }
+
+    bool TooManyPhoneCodeRequests(const std::string& phone,const std::string& remote){
+        const auto key="phone-code|"+phone+"|"+remote;
+        const auto now=now_epoch();
+        std::lock_guard lock(rate_mutex_);
+        auto&state=failures_[key];
+        if(state.window_started==0||now-state.window_started>600){
+            state.window_started=now;
+            state.count=0;
+            state.locked_until=0;
+        }
+        if(state.locked_until>now)return true;
+        if(state.count>=3){
+            state.locked_until=now+600;
+            return true;
+        }
+        ++state.count;
+        state.locked_until=now+60;
+        return false;
+    }
+
+    bool TooManyPhoneSourceRequests(const std::string& remote){
+        const auto key="phone-source|"+remote;
+        const auto now=now_epoch();
+        std::lock_guard lock(rate_mutex_);
+        auto&state=failures_[key];
+        if(state.window_started==0||now-state.window_started>600){
+            state.window_started=now;
+            state.count=0;
+            state.locked_until=0;
+        }
+        if(state.locked_until>now)return true;
+        if(state.count>=10){
+            state.locked_until=now+600;
+            return true;
+        }
+        ++state.count;
+        return false;
     }
 
     bool TooManyResetRequests(const std::string& identifier){
@@ -817,7 +905,7 @@ private:
                 std::lock_guard lock(store_mutex_);
                 const auto it=users_.find(user_id);
                 if(it==users_.end()){bad("invalid_session","account no longer exists");return;}
-                send(Type::ProfileOk,{it->second.id,it->second.username,it->second.email,it->second.display_name,it->second.avatar_url});
+                send(Type::ProfileOk,{it->second.id,it->second.username,it->second.email,it->second.display_name,it->second.avatar_url,it->second.phone});
             }
             return;
 
@@ -873,7 +961,7 @@ private:
                 AppendAudit(user_id,email_changed?"profile_email_changed":"profile_updated",
                     email_changed?"email changed; verification required":"profile updated");
                 const auto&u=user_it->second;
-                send(Type::UpdateProfileOk,{u.id,u.username,u.email,u.display_name,u.avatar_url});
+                send(Type::UpdateProfileOk,{u.id,u.username,u.email,u.display_name,u.avatar_url,u.phone});
             }
             return;
 
@@ -890,7 +978,8 @@ private:
                 const auto email=normalize(old.email);
                 users_.erase(it);
                 by_username_.erase(username);
-                by_email_.erase(email);
+                by_email_.erase(email);                if(old.phone_verified&&!old.phone.empty())by_phone_.erase(old.phone);
+
 
                 if(!SaveUnlocked()){
                     users_[old.id]=old;
@@ -949,6 +1038,229 @@ private:
             if(!SaveUnlocked()){bad("storage_error","unable to persist email verification");return;}
             AppendAudit(user_id,"email_verified","email address verified");
             send(Type::EmailVerified);
+            return;
+        }
+
+        case Type::RequestPhoneVerification: {
+            if(p.fields.size()!=2||p.fields[0]!=c.token){
+                bad("invalid_session","invalid session");return;
+            }
+            const auto user_id=require_session();
+            if(user_id.empty()){bad("invalid_session","session expired or invalid");return;}
+            const auto phone=normalize_phone(p.fields[1]);
+            if(phone.empty()){bad("invalid_phone","invalid phone number");return;}
+
+            std::lock_guard lock(store_mutex_);
+            auto user_it=users_.find(user_id);
+            if(user_it==users_.end()){bad("invalid_session","account no longer exists");return;}
+
+            const auto existing=by_phone_.find(phone);
+            if(existing!=by_phone_.end()&&existing->second!=user_id){
+                bad("phone_exists","phone number is already bound to another account");return;
+            }
+
+            const auto challenge_id=make_id();
+            const auto code=make_otp_code();
+            const auto expires=now_epoch()+5*60;
+            phone_challenges_[challenge_id]=PhoneChallenge{
+                PhoneChallenge::Kind::Verification,phone,user_id,
+                sha256_text(challenge_id+"|"+code),expires,5};
+
+            AppendAudit(user_id,"phone_verification_code_requested","SMS verification code issued");
+            send(Type::PhoneVerificationIssued,{challenge_id,code,std::to_string(expires)});
+            return;
+        }
+
+        case Type::VerifyPhone: {
+            if(p.fields.size()!=3||p.fields[0]!=c.token){
+                bad("invalid_session","invalid session");return;
+            }
+            const auto user_id=require_session();
+            if(user_id.empty()){bad("invalid_session","session expired or invalid");return;}
+
+            auto challenge_it=phone_challenges_.find(p.fields[1]);
+            if(challenge_it==phone_challenges_.end()||
+               challenge_it->second.kind!=PhoneChallenge::Kind::Verification||
+               challenge_it->second.user_id!=user_id){
+                bad("invalid_token","phone verification challenge is invalid or expired");return;
+            }
+
+            auto challenge=challenge_it->second;
+            if(challenge.expires<now_epoch()){
+                phone_challenges_.erase(challenge_it);
+                bad("verification_expired","phone verification challenge expired");return;
+            }
+
+            bool code_ok=false;
+            try{
+                code_ok=constant_time_equal(
+                    from_hex(challenge.code_hash),
+                    from_hex(sha256_text(p.fields[1]+"|"+p.fields[2])));
+            }catch(...){code_ok=false;}
+
+            if(!code_ok){
+                if(challenge.attempts_remaining>0)--challenge.attempts_remaining;
+                if(challenge.attempts_remaining==0)phone_challenges_.erase(challenge_it);
+                else challenge_it->second=challenge;
+                bad("invalid_token",challenge.attempts_remaining==0
+                    ?"too many invalid phone verification attempts"
+                    :"invalid phone verification code");
+                return;
+            }
+
+            std::lock_guard lock(store_mutex_);
+            auto user_it=users_.find(user_id);
+            if(user_it==users_.end()){phone_challenges_.erase(challenge_it);bad("invalid_session","account no longer exists");return;}
+            const auto existing=by_phone_.find(challenge.phone);
+            if(existing!=by_phone_.end()&&existing->second!=user_id){
+                phone_challenges_.erase(challenge_it);
+                bad("phone_exists","phone number is already bound to another account");return;
+            }
+
+            const auto old_phone=user_it->second.phone;
+            const auto old_verified=user_it->second.phone_verified;
+            if(old_verified&&!old_phone.empty()&&old_phone!=challenge.phone)by_phone_.erase(old_phone);
+
+            user_it->second.phone=challenge.phone;
+            user_it->second.phone_verified=true;
+            if(!SaveUnlocked()){
+                user_it->second.phone=old_phone;
+                user_it->second.phone_verified=old_verified;
+                if(old_verified&&!old_phone.empty())by_phone_[old_phone]=user_id;
+                phone_challenges_.erase(challenge_it);
+                bad("storage_error","unable to persist phone verification");return;
+            }
+
+            by_phone_[challenge.phone]=user_id;
+            phone_challenges_.erase(challenge_it);
+            AppendAudit(user_id,"phone_verified","phone number verified");
+            send(Type::PhoneVerified,{challenge.phone});
+            return;
+        }
+
+        case Type::RequestPhoneLoginCode: {
+            if(p.fields.size()!=1){
+                bad("invalid_phone","invalid phone request");return;
+            }
+            const auto phone=normalize_phone(p.fields[0]);
+            if(phone.empty()){bad("invalid_phone","invalid phone number");return;}
+
+            if(TooManyPhoneSourceRequests(c.remote_address)||
+               TooManyPhoneCodeRequests(phone,c.remote_address)){
+                bad("temporarily_locked","too many SMS code requests; try again later");return;
+            }
+
+            std::string user_id;
+            {
+                std::lock_guard lock(store_mutex_);
+                const auto it=by_phone_.find(phone);
+                if(it!=by_phone_.end()){
+                    const auto u=users_.find(it->second);
+                    if(u!=users_.end()&&u->second.phone_verified)user_id=u->second.id;
+                }
+            }
+
+            const auto challenge_id=make_id();
+            const auto code=make_otp_code();
+            const auto expires=now_epoch()+5*60;
+            phone_challenges_[challenge_id]=PhoneChallenge{
+                PhoneChallenge::Kind::Login,phone,user_id,
+                sha256_text(challenge_id+"|"+code),expires,5};
+
+            if(!user_id.empty()){
+                AppendAudit(user_id,"phone_login_code_requested","SMS login code issued");
+            }
+
+            send(Type::PhoneLoginCodeIssued,{challenge_id,code,std::to_string(expires)});
+            return;
+        }
+
+        case Type::PhoneLogin: {
+            if(p.fields.size()!=4&&p.fields.size()!=5){
+                bad("invalid_phone_login","challenge, code, device id and device name are required");return;
+            }
+            const auto challenge_id=p.fields[0];
+            auto challenge_it=phone_challenges_.find(challenge_id);
+            if(challenge_it==phone_challenges_.end()||
+               challenge_it->second.kind!=PhoneChallenge::Kind::Login){
+                bad("invalid_token","phone login challenge is invalid or expired");return;
+            }
+
+            auto challenge=challenge_it->second;
+            if(challenge.expires<now_epoch()){
+                phone_challenges_.erase(challenge_it);
+                bad("verification_expired","phone login challenge expired");return;
+            }
+
+            bool code_ok=false;
+            try{
+                code_ok=constant_time_equal(
+                    from_hex(challenge.code_hash),
+                    from_hex(sha256_text(challenge_id+"|"+p.fields[1])));
+            }catch(...){code_ok=false;}
+
+            const auto user_id=challenge.user_id;
+            if(!code_ok){
+                if(challenge.attempts_remaining>0)--challenge.attempts_remaining;
+                if(challenge.attempts_remaining==0)phone_challenges_.erase(challenge_it);
+                else challenge_it->second=challenge;
+                if(!user_id.empty())AppendAudit(user_id,"phone_login_failure",
+                    challenge.attempts_remaining==0?"SMS code attempts exhausted":"invalid SMS code");
+                bad("invalid_credentials","invalid phone login code");
+                return;
+            }
+
+            std::lock_guard lock(store_mutex_);
+            if(user_id.empty()){
+                phone_challenges_.erase(challenge_it);
+                bad("invalid_credentials","invalid phone login code");return;
+            }
+            const auto it=users_.find(user_id);
+            if(it==users_.end()||!it->second.phone_verified||it->second.phone!=challenge.phone){
+                phone_challenges_.erase(challenge_it);
+                bad("invalid_credentials","invalid phone login code");return;
+            }
+
+            const std::string mfa_code=p.size()==5?p.fields[4]:"";
+            if(it->second.mfa_enabled){
+                bool mfa_ok=false;
+                try{
+                    mfa_ok=!it->second.mfa_recovery_hash.empty()&&constant_time_equal(
+                        from_hex(it->second.mfa_recovery_hash),
+                        from_hex(sha256_text(mfa_code)));
+                }catch(...){mfa_ok=false;}
+                if(!mfa_ok){
+                    phone_challenges_.erase(challenge_it);
+                    AppendAudit(user_id,"phone_login_failure","invalid MFA recovery code");
+                    bad("invalid_credentials","invalid MFA code");return;
+                }
+            }
+
+            phone_challenges_.erase(challenge_it);
+            c.device_id=p.fields[2];
+            c.device_name=p.fields[3];
+            const auto session_id=make_id();
+            const auto token=make_token();
+            const auto now=now_epoch();
+            const auto expires=now+24*60*60;
+            bool new_network=true;
+            {
+                std::lock_guard sl(session_mutex_);
+                for(const auto&[_,session]:sessions_){
+                    if(session.user_id==user_id&&session.remote_address==c.remote_address){
+                        new_network=false;break;
+                    }
+                }
+                sessions_[token]=SessionRecord{
+                    session_id,user_id,c.device_id,c.device_name,c.remote_address,now,now,expires};
+            }
+            c.token=token;
+            AppendAudit(user_id,"phone_login_success","SMS login succeeded");
+            if(new_network)AppendAudit(user_id,"new_network","login from an unseen network address");
+            send(Type::LoginOk,{
+                token,session_id,c.device_id,c.device_name,it->second.id,
+                it->second.username,it->second.email,it->second.display_name,
+                std::to_string(expires)});
             return;
         }
 
@@ -1099,6 +1411,7 @@ private:
                 }
                 send(Type::SecuritySummaryOk,{
                     it->second.email_verified?"1":"0",
+                    it->second.phone_verified?"1":"0",
                     it->second.mfa_enabled?"1":"0",
                     std::to_string(failed),
                     std::to_string(active)});
@@ -1257,6 +1570,9 @@ private:
         case Type::SessionRevoked:
         case Type::SessionsRevoked:
         case Type::SecurityEventsOk:
+        case Type::PhoneVerificationIssued:
+        case Type::PhoneVerified:
+        case Type::PhoneLoginCodeIssued:
         case Type::Error:
         case Type::Pong:
             bad("unexpected_packet","unexpected authentication packet");return;
@@ -1276,8 +1592,9 @@ private:
     std::unordered_map<Socket,ClientState> clients_;
     std::unordered_map<std::string,SessionRecord> sessions_;
     std::unordered_map<std::string,UserRecord> users_;
-    std::unordered_map<std::string,std::string> by_username_,by_email_;
+    std::unordered_map<std::string,std::string> by_username_,by_email_,by_phone_;
     std::unordered_map<std::string,FailureState> failures_;
+    std::unordered_map<std::string,PhoneChallenge> phone_challenges_;
     std::vector<AuditRecord> audits_;
 };
 
