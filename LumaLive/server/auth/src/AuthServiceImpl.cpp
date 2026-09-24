@@ -1,4 +1,5 @@
 #include "IAuthService.hpp"
+#include "contracts/auth/Auth.hpp"
 #include "contracts/auth/AuthCrypto.hpp"
 #include "contracts/auth/AuthWire.hpp"
 #include <algorithm>
@@ -487,7 +488,7 @@ private:
 
         std::ofstream out(store_path_+".security.log",std::ios::app);
         if(out){
-            out<<record.event.event_id<<"\t"<<record.user_id<<"\t"
+            out<<record.security_event.event_id<<"\t"<<record.user_id<<"\t"
                <<record.event.created_at_epoch_seconds<<"\t"
                <<record.event.type<<"\t"<<record.event.detail<<"\n";
         }
