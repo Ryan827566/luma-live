@@ -124,7 +124,7 @@ struct FailureState{
 };
 
 struct AuditRecord{
-    luma::contracts::auth::SecurityEvent event;
+    luma::contracts::auth::SecurityEvent security_event;
     std::string user_id;
 };
 
@@ -287,10 +287,10 @@ private:
                 if(p.size()!=5)continue;
                 AuditRecord a{};
                 a.user_id=p[1];
-                a.event.event_id=p[0];
-                a.event.created_at_epoch_seconds=std::stoll(p[2]);
-                a.event.type=p[3];
-                a.event.detail=p[4];
+                a.security_event.event_id=p[0];
+                a.security_event.created_at_epoch_seconds=std::stoll(p[2]);
+                a.security_event.type=p[3];
+                a.security_event.detail=p[4];
                 audits_.push_back(std::move(a));
                 if(audits_.size()>512)audits_.erase(audits_.begin());
             }
@@ -474,10 +474,10 @@ private:
     void AppendAudit(const std::string& user_id,const std::string& type,const std::string& detail){
         AuditRecord record{};
         record.user_id=user_id;
-        record.event.event_id=make_id();
-        record.event.type=type;
-        record.event.detail=detail;
-        record.event.created_at_epoch_seconds=now_epoch();
+        record.security_event.event_id=make_id();
+        record.security_event.type=type;
+        record.security_event.detail=detail;
+        record.security_event.created_at_epoch_seconds=now_epoch();
 
         {
             std::lock_guard lock(audit_mutex_);
@@ -716,12 +716,14 @@ private:
             if(p.fields.size()!=1||c.token.empty()||p.fields[0]!=c.token){
                 bad("invalid_session","invalid session");return;
             }
-            const auto user_id=require_session();
             {
-                std::lock_guard sl(session_mutex_);
-                sessions_.erase(c.token);
+                const auto user_id=require_session();
+                {
+                    std::lock_guard sl(session_mutex_);
+                    sessions_.erase(c.token);
+                }
+                AppendAudit(user_id,"logout","current session signed out");
             }
-            AppendAudit(user_id,"logout","current session signed out");
             c.token.clear();
             send(Type::LogoutOk);
             return;
@@ -1032,7 +1034,7 @@ private:
                     auto ui=failures_.find(normalize(it->second.username));
                     if(ui!=failures_.end())failed=ui->second.count;
                     auto ei=failures_.find(normalize(it->second.email));
-                    if(ei!=failures_.end())failed=std::max(failed,ei->second.count);
+                    if(ei!=failures_.end()&&ei->second.count>failed)failed=ei->second.count;
                 }
 
                 std::uint32_t active=0;
@@ -1167,10 +1169,10 @@ private:
                 }
                 fields.push_back(std::to_string(own.size()));
                 for(const auto*e:own){
-                    fields.push_back(e->event.event_id);
-                    fields.push_back(e->event.type);
-                    fields.push_back(e->event.detail);
-                    fields.push_back(std::to_string(e->event.created_at_epoch_seconds));
+                    fields.push_back(e->security_event.event_id);
+                    fields.push_back(e->security_event.type);
+                    fields.push_back(e->security_event.detail);
+                    fields.push_back(std::to_string(e->security_event.created_at_epoch_seconds));
                 }
                 send(Type::SecurityEventsOk,std::move(fields));
             }
