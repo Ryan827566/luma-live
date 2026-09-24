@@ -494,6 +494,10 @@ private:
         }
     }
 
+    static std::string LoginRateKey(const std::string& identifier,const std::string& remote){
+        return "login|"+normalize(identifier)+"|"+remote;
+    }
+
     bool IsLocked(const std::string& key,std::int64_t now){
         std::lock_guard lock(rate_mutex_);
         auto it=failures_.find(key);
@@ -503,7 +507,9 @@ private:
         return false;
     }
 
-    void RecordLoginFailure(const std::string& key,const std::string& user_id){
+    void RecordLoginFailure(
+        const std::string& identifier,const std::string& user_id,const std::string& remote){
+        const auto key=LoginRateKey(identifier,remote);
         const auto now=now_epoch();
         bool locked=false;
         {
@@ -520,12 +526,16 @@ private:
                 locked=true;
             }
         }
-        AppendAudit(user_id,"login_failure",locked?"account temporarily locked":"invalid credentials");
+        AppendAudit(
+            user_id,
+            "login_failure",
+            locked?"login rate limit reached for source":"invalid credentials");
     }
 
-    void ClearLoginFailures(const std::string& identifier){
+    void ClearLoginFailures(
+        const std::string& identifier,const std::string& remote){
         std::lock_guard lock(rate_mutex_);
-        failures_.erase(normalize(identifier));
+        failures_.erase(LoginRateKey(identifier,remote));
     }
 
     bool TooManyResetRequests(const std::string& identifier){
@@ -611,7 +621,7 @@ private:
             }
 
             const auto identifier_key=normalize(p.fields[0]);
-            if(IsLocked(identifier_key,now_epoch())){
+            if(IsLocked(LoginRateKey(identifier_key,c.remote_address),now_epoch())){
                 bad("temporarily_locked","too many failed login attempts; try again later");return;
             }
 
@@ -623,22 +633,47 @@ private:
                 auto ie=by_email_.find(identifier_key);
                 if(ie!=by_email_.end())user_id=ie->second;
             }
+
+            c.device_id=p.fields[1];
+            c.device_name=p.fields[2];
+
             if(user_id.empty()){
-                RecordLoginFailure(identifier_key,{});
-                bad("invalid_credentials","invalid username or password");return;
+                // Keep the login protocol shape identical for unknown identifiers.
+                // The user existence check is deferred until LoginProof.
+                c.pending=Pending{
+                    Pending::Kind::Login,
+                    p.fields[0],
+                    "",
+                    "",
+                    "",
+                    hex(random_bytes(16)),
+                    hex(random_bytes(32)),
+                    ""
+                };
+                send(Type::LoginChallenge,{
+                    c.pending.salt_hex,c.pending.nonce_hex,"0"});
+                return;
             }
 
             const auto&u=users_.at(user_id);
-            if(IsLocked(normalize(u.username),now_epoch())||
-               IsLocked(normalize(u.email),now_epoch())){
+            if(IsLocked(LoginRateKey(u.username,c.remote_address),now_epoch())||
+               IsLocked(LoginRateKey(u.email,c.remote_address),now_epoch())){
                 bad("temporarily_locked","too many failed login attempts; try again later");
                 return;
             }
-            c.device_id=p.fields[1];
-            c.device_name=p.fields[2];
-            c.pending=Pending{Pending::Kind::Login,"","","",u.id,u.salt_hex,hex(random_bytes(32)),""};
+
+            c.pending=Pending{
+                Pending::Kind::Login,
+                "",
+                "",
+                "",
+                u.id,
+                u.salt_hex,
+                hex(random_bytes(32)),
+                ""
+            };
             send(Type::LoginChallenge,{
-                u.id,u.display_name,u.email,u.salt_hex,c.pending.nonce_hex,u.mfa_enabled?"1":"0"});
+                c.pending.salt_hex,c.pending.nonce_hex,u.mfa_enabled?"1":"0"});
             return;
         }
 
@@ -647,11 +682,21 @@ private:
                 bad("invalid_state","login challenge missing");return;
             }
             const auto user_id=c.pending.user_id;
+            const auto login_identifier=c.pending.username;
             std::lock_guard lock(store_mutex_);
+            if(user_id.empty()){
+                c.pending={};
+                RecordLoginFailure(login_identifier,{},c.remote_address);
+                bad("invalid_credentials","invalid username or password");
+                return;
+            }
+
             const auto it=users_.find(user_id);
             if(it==users_.end()){
                 c.pending={};
-                bad("invalid_credentials","invalid username or password");return;
+                RecordLoginFailure(login_identifier,{},c.remote_address);
+                bad("invalid_credentials","invalid username or password");
+                return;
             }
 
             try{
@@ -671,17 +716,18 @@ private:
 
                 if(!proof_ok||!mfa_ok){
                     c.pending={};
-                    RecordLoginFailure(normalize(it->second.username),user_id);
+                    RecordLoginFailure(it->second.username,user_id,c.remote_address);
                     bad("invalid_credentials","invalid username or password");return;
                 }
             }catch(...){
                 c.pending={};
-                RecordLoginFailure(normalize(it->second.username),user_id);
+                RecordLoginFailure(it->second.username,user_id,c.remote_address);
                 bad("invalid_credentials","invalid username or password");return;
             }
 
-            ClearLoginFailures(normalize(it->second.username));
-            ClearLoginFailures(normalize(it->second.email));
+            ClearLoginFailures(it->second.username,c.remote_address);
+            ClearLoginFailures(it->second.email,c.remote_address);
+            ClearLoginFailures(login_identifier,c.remote_address);
 
             const auto session_id=make_id();
             const auto token=make_token();
@@ -1032,9 +1078,9 @@ private:
                 std::uint32_t failed=0;
                 {
                     std::lock_guard rl(rate_mutex_);
-                    auto ui=failures_.find(normalize(it->second.username));
+                    auto ui=failures_.find(LoginRateKey(it->second.username,c.remote_address));
                     if(ui!=failures_.end())failed=ui->second.count;
-                    auto ei=failures_.find(normalize(it->second.email));
+                    auto ei=failures_.find(LoginRateKey(it->second.email,c.remote_address));
                     if(ei!=failures_.end()&&ei->second.count>failed)failed=ei->second.count;
                 }
 
