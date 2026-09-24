@@ -7,6 +7,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -120,6 +121,7 @@ void ClientLoop(Socket s){
    auto packet=luma::contracts::auth::wire::decode_line(line);
    Handle(s,packet);
   }catch(const std::exception& e){
+   std::cerr << "auth client exception: " << e.what() << "\n";
    Send(s,{Type::Error,{"invalid_packet",e.what()}});
    break;
   }
