@@ -17,5 +17,6 @@ public:
     virtual std::uint16_t Port() const = 0;
     virtual shared::contracts::Result ConfigureDatabase(std::string connection_string) = 0;
 };
-std::unique_ptr<IAuthService> CreateAuthService(std::unique_ptr<IAuthStore> store = {});
+std::unique_ptr<IAuthService> CreateAuthService();
+std::unique_ptr<IAuthService> CreateAuthService(std::unique_ptr<IAuthStore> store);
 }
