@@ -929,7 +929,6 @@ private:
             if(it==users_.end()){
                 bad("invalid_session","account no longer exists");return;
             }
-            std::int64_t refresh_expires=0;
             {
                 std::lock_guard sl(session_mutex_);
                 const auto sit=sessions_.find(c.token);
