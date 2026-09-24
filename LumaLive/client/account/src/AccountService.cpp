@@ -97,11 +97,11 @@ public:
         Packet q;
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
-        if(q.type!=Type::LoginChallenge||q.fields.size()!=6)return{false,"invalid login challenge"};
+        if(q.type!=Type::LoginChallenge||q.fields.size()!=3)return{false,"invalid login challenge"};
 
-        const auto verifier=pbkdf2_hmac_sha256(p,from_hex(q.fields[3]));
-        const auto proof=hmac_sha256(verifier,from_hex(q.fields[4]));
-        const bool mfa_required=q.fields[5]=="1";
+        const auto verifier=pbkdf2_hmac_sha256(p,from_hex(q.fields[0]));
+        const auto proof=hmac_sha256(verifier,from_hex(q.fields[1]));
+        const bool mfa_required=q.fields[2]=="1";
         (void)mfa_required;
 
         if(!Send({Type::LoginProof,{hex(proof),mfa_code}}))return{false,"send failed"};
