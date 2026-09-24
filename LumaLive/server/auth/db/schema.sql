@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS luma_auth_users (
     phone_verified BOOLEAN NOT NULL DEFAULT FALSE,
     mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     mfa_recovery_hash TEXT NOT NULL DEFAULT '',
+    mfa_totp_secret_hex TEXT NOT NULL DEFAULT '',
     email_verify_hash TEXT NOT NULL DEFAULT '',
     email_verify_expires BIGINT NOT NULL DEFAULT 0,
     reset_token_hash TEXT NOT NULL DEFAULT '',
