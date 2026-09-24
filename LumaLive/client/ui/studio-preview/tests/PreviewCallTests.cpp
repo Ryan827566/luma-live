@@ -57,9 +57,13 @@ int main() {
                 b.Participants().size() == 2 && observer.Participants().size() == 2;
         });
         Require(a.Remote().empty() && b.Remote().empty(), "Joining unexpectedly started a call");
+        Require(!a.Reconnect(), "Ready participant bypassed call consent with reconnect");
+        Require(a.SetVideoSource("camera") && b.SetVideoSource("camera"), "Video source setup failed");
+        Require(!a.SetVideoSource("invalid"), "Invalid video source was accepted");
         Require(!a.Call("missing") && !a.Call("a"), "Invalid target accepted");
         Require(a.Call("b"), "Invite failed");
         Until({&a, &b, &observer}, [&] { return b.State() == CallState::Incoming; });
+        Require(!a.Reconnect() && !b.Reconnect(), "Pending invite bypassed consent with reconnect");
         Require(b.Reject(), "Reject failed");
         Until({&a, &b, &observer}, [&] { return a.State() == CallState::Ready; });
         Require(a.LastStatus().find("rejected") != std::string::npos, "Rejection status lost");
@@ -101,9 +105,46 @@ int main() {
         Require(a.State() == CallState::Connected && b.State() == CallState::Connected, "Connected state missing");
         Require(a.DurationSeconds() >= 1, "Call duration did not advance");
         Require(leaked == 0 && observer.Remote().empty(), "Media leaked to uninvolved participant");
+        Require(a.RemoteVideoSource() == "camera" && b.RemoteVideoSource() == "camera", "Accepted call lost source state");
+        Require(a.SetVideoSource("off"), "Video off notification failed");
+        Until({&a, &b, &observer}, [&] { return b.RemoteVideoSource() == "off"; });
+        Require(a.SetVideoSource("camera"), "Video resume notification failed");
+        Until({&a, &b, &observer}, [&] { return b.RemoteVideoSource() == "camera"; });
+        const auto originalDuration = a.DurationSeconds();
+        for (auto* initiator : {&a, &b}) {
+            const int beforeAv = av.load(), beforeBv = bv.load();
+            const int beforeAa = loudA.load(), beforeBa = loudB.load();
+            Require(initiator->Reconnect(), "Explicit reconnect failed");
+            Require(!initiator->Reconnect(), "Concurrent restart was accepted");
+            const auto restartDeadline = std::chrono::steady_clock::now() + 8s;
+            while (std::chrono::steady_clock::now() < restartDeadline) {
+                for (auto* call : {&a, &b, &observer}) call->Poll();
+                if (tick % 3 == 0) {
+                    video.timestamp_us = static_cast<uint64_t>(tick) * 10000;
+                    a.Video(video); b.Video(video);
+                }
+                for (int i = 0; i < 480; ++i) {
+                    int16_t sample = static_cast<int16_t>(std::sin((tick * 480 + i) * 440. * 6.283185307 / 48000) * 10000);
+                    std::memcpy(audio.data.data() + i * 2, &sample, 2);
+                }
+                a.Audio(audio); b.Audio(audio); ++tick;
+                if (a.State() == CallState::Connected && b.State() == CallState::Connected &&
+                    av >= beforeAv + 5 && bv >= beforeBv + 5 && loudA >= beforeAa + 8 && loudB >= beforeBa + 8) break;
+                std::this_thread::sleep_for(10ms);
+            }
+            Require(a.State() == CallState::Connected && b.State() == CallState::Connected,
+                    "ICE restart did not return to connected");
+            Require(av >= beforeAv + 5 && bv >= beforeBv + 5 && loudA >= beforeAa + 8 && loudB >= beforeBa + 8,
+                    "Bidirectional media did not continue after restart");
+            Require(a.Remote() == "b" && b.Remote() == "a" && a.DurationSeconds() >= originalDuration,
+                    "Restart replaced call identity or reset duration");
+            std::cout << "PASS: explicit ICE restart with continued decoded audio/video\n";
+        }
+
         Require(a.Hangup(), "Hangup failed");
         Until({&a, &b, &observer}, [&] { return b.State() == CallState::Ready; });
         Require(a.Remote().empty() && b.Remote().empty(), "Hangup retained remote identity");
+        Require(a.RemoteVideoSource() == "off" && b.RemoteVideoSource() == "off", "Hangup retained remote video source");
         Require(b.Call("a"), "Reverse call failed");
         Until({&a, &b, &observer}, [&] { return a.State() == CallState::Incoming; });
         b.Stop();

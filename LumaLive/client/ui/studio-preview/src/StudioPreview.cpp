@@ -23,7 +23,7 @@ namespace luma::client::ui::preview {
 namespace {
 using Microsoft::WRL::ComPtr;
 constexpr COLORREF Bg=RGB(8,10,13), Panel=RGB(16,19,24), Border=RGB(39,45,55), Ink=RGB(232,237,245), Muted=RGB(145,155,171), Mint=RGB(0,145,245);
-enum Id {Open=100,Camera,Microphone,Monitor,Volume,TestSound,Refresh,CameraList,MicList,Pause,Stop,FileMode,CameraMode,FullScreen,Join,Host,Room,RemoteMode,Identity,Peers,Dial,AcceptCall,RejectCall,EndCall,ShareScreen};
+enum Id {Open=100,Camera,Microphone,Monitor,Volume,TestSound,Refresh,CameraList,MicList,Pause,Stop,FileMode,CameraMode,FullScreen,Join,Host,Room,RemoteMode,Identity,Peers,Dial,AcceptCall,RejectCall,EndCall,ShareScreen,Reconnect};
 std::wstring Wide(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),nullptr,0);std::wstring out(n,L' ');MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),out.data(),n);return out;}
 void Fill(HDC dc,RECT r,COLORREF c){auto b=CreateSolidBrush(c);FillRect(dc,&r,b);DeleteObject(b);}
 void Text(HDC dc,const std::wstring& s,RECT r,HFONT font,COLORREF color=Ink,UINT flags=DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS){auto old=SelectObject(dc,font);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,color);DrawTextW(dc,s.c_str(),-1,&r,flags);SelectObject(dc,old);}
@@ -57,6 +57,7 @@ class StudioWindow {
     VideoMailbox remoteVideo_;AudioOutput remoteAudio_;PreviewCall call_;
     std::vector<std::string> shownPeers_;
     CallState shownCallState_{CallState::Offline};
+    std::string reportedScreenError_;
     std::atomic<uint64_t> remoteVideos_{0},remoteAudios_{0};
     std::atomic<float> remotePeak_{0};
     std::atomic<float> peak_{0};std::atomic<bool> monitor_{false};std::atomic<uint64_t> videoCount_{0},audioCount_{0};
@@ -84,15 +85,15 @@ class StudioWindow {
         EnableWindow(Control(Camera),!cameras_.devices.empty());EnableWindow(Control(Microphone),!microphones_.devices.empty());
     }
     void ToggleCamera(){
-        if(screen_.IsCapturing()){screen_.Stop();SetWindowTextW(Control(ShareScreen),L"共享主屏幕");}
-        if(capture_->IsCameraCapturing()){capture_->StopCamera();video_.Clear();SetWindowTextW(Control(Camera),L"开启摄像头");status_=L"摄像头已关闭";}
+        if(screen_.IsCapturing()){screen_.Stop();call_.SetVideoSource("off");SetWindowTextW(Control(ShareScreen),L"共享主屏幕");}
+        if(capture_->IsCameraCapturing()){capture_->StopCamera();call_.SetVideoSource("off");video_.Clear();SetWindowTextW(Control(Camera),L"开启摄像头");status_=L"摄像头已关闭";}
         else {
             auto index=SendMessageW(Control(CameraList),CB_GETCURSEL,0,0);if(index<0||size_t(index)>=cameras_.devices.size())return;
             cameraView_=true;CloseFile();videoCount_=0;media::CameraCaptureConfig config;config.device_id=cameras_.devices[index].id;
             auto callback=[this](VideoFrame frame){video_.Put(frame);call_.Video(frame);++videoCount_;};
             auto result=capture_->StartCamera(config,callback);
             if(!result.IsOk()){config.width=640;config.height=480;result=capture_->StartCamera(config,callback);}
-            if(result.IsOk()){SetWindowTextW(Control(Camera),L"关闭摄像头");status_=L"摄像头已开启 · 等待第一帧";}
+            if(result.IsOk()){call_.SetVideoSource("camera");SetWindowTextW(Control(Camera),L"关闭摄像头");status_=L"摄像头已开启 · 等待第一帧";}
             else status_=L"摄像头无法开启："+Wide(result.Message())+L"。请检查系统隐私权限或关闭占用它的程序。";
         }
         EnableWindow(Control(CameraList),!capture_->IsCameraCapturing()&&!cameras_.devices.empty());
@@ -114,7 +115,7 @@ class StudioWindow {
         OpenMedia(path);
     }
     void OpenMedia(const wchar_t* path){
-        screen_.Stop();SetWindowTextW(Control(ShareScreen),L"共享主屏幕");
+        screen_.Stop();call_.SetVideoSource("off");SetWindowTextW(Control(ShareScreen),L"共享主屏幕");
         capture_->StopCamera();SetWindowTextW(Control(Camera),L"开启摄像头");
         EnableWindow(Control(CameraList),!cameras_.devices.empty());video_.Clear();
         CloseFile();cameraView_=false;fileName_=std::filesystem::path(path).filename().wstring();playback_=std::make_shared<PlaybackState>();
@@ -134,7 +135,7 @@ class StudioWindow {
         if(fullscreen_){MoveWindow(surface_,0,0,rc.right,rc.bottom,TRUE);ShowWindow(remoteSurface_,SW_HIDE);for(auto c:controls_)if(c)ShowWindow(c,SW_HIDE);return;}
         ShowWindow(remoteSurface_,SW_SHOW);for(auto c:controls_)if(c)ShowWindow(c,SW_SHOW);ShowWindow(Control(RemoteMode),SW_HIDE);
         const int x=left_+16, end=width_-right_-16, total=end-x, deck=(total-16)/2;
-        const int deckHeight=std::clamp(deck*9/16,180,std::max(180,height_-470));
+        const int deckHeight=std::clamp(deck*9/16,180,std::max(180,height_-534));
         preview_=R(x,130,deck,deckHeight);remotePreview_=R(x+deck+16,130,deck,deckHeight);
         MoveWindow(surface_,preview_.left,preview_.top,preview_.right-preview_.left,preview_.bottom-preview_.top,TRUE);
         MoveWindow(remoteSurface_,remotePreview_.left,remotePreview_.top,remotePreview_.right-remotePreview_.left,remotePreview_.bottom-remotePreview_.top,TRUE);
@@ -147,7 +148,7 @@ class StudioWindow {
         Place(Monitor,mx+12,lower_+118,sourceWidth-24,34);Place(Volume,mx+12,lower_+204,sourceWidth-24,30);Place(TestSound,mx+12,lower_+250,sourceWidth-24,34);
         Place(Host,rx,224,right_-32,28);Place(Room,rx,280,right_-32,28);
         Place(Identity,rx,336,right_-32,28);Place(Join,rx,374,right_-32,32);Place(Peers,rx,438,right_-32,140);
-        Place(Dial,rx,478,right_-32,32);Place(AcceptCall,rx,518,(right_-40)/2,32);Place(RejectCall,rx+(right_-40)/2+8,518,(right_-40)/2,32);Place(EndCall,rx,558,right_-32,32);
+        Place(Dial,rx,478,right_-32,32);Place(AcceptCall,rx,518,(right_-40)/2,32);Place(RejectCall,rx+(right_-40)/2+8,518,(right_-40)/2,32);Place(EndCall,rx,558,(right_-40)/2,32);Place(Reconnect,rx+(right_-40)/2+8,558,(right_-40)/2,32);
         if(player_&&!cameraView_)player_->UpdateVideo();InvalidateRect(window_,nullptr,FALSE);
     }
     void PaintSurface(HWND target,HDC dc){
@@ -155,7 +156,7 @@ class StudioWindow {
         if(!remote&&!cameraView_&&player_&&playback_&&playback_->ready){player_->UpdateVideo();return;}
         auto frame=remote?remoteVideo_.Get():(cameraView_?video_.Get():nullptr);
         if(frame){double ratio=std::min(double(r.right)/frame->width,double(r.bottom)/frame->height);int w=int(frame->width*ratio),h=int(frame->height*ratio);BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=frame->width;info.bmiHeader.biHeight=-static_cast<LONG>(frame->height);info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;info.bmiHeader.biCompression=BI_RGB;SetStretchBltMode(dc,COLORONCOLOR);StretchDIBits(dc,(r.right-w)/2,(r.bottom-h)/2,w,h,0,0,frame->width,frame->height,frame->data.data(),&info,DIB_RGB_COLORS,SRCCOPY);}
-        else {RECT t{S(20),r.bottom/2-S(28),r.right-S(20),r.bottom/2};Text(dc,remote?L"等待远端画面":(cameraView_?L"摄像头尚未开启":L"本地媒体预览"),t,body_,Ink,DT_CENTER|DT_VCENTER|DT_SINGLELINE);t.top+=S(34);t.bottom+=S(34);Text(dc,remote?L"两端加入同一房间，即可实时连线":(cameraView_?L"选择下方设备，开启视频输入":L"打开视频或音频文件开始播放"),t,small_,Muted,DT_CENTER|DT_VCENTER|DT_SINGLELINE);}
+        else {RECT t{S(20),r.bottom/2-S(28),r.right-S(20),r.bottom/2};Text(dc,remote?(call_.State()==CallState::Connected&&call_.RemoteVideoSource()=="off"?L"对方已关闭视频":L"等待远端画面"):(cameraView_?L"摄像头尚未开启":L"本地媒体预览"),t,body_,Ink,DT_CENTER|DT_VCENTER|DT_SINGLELINE);t.top+=S(34);t.bottom+=S(34);Text(dc,remote?L"选择房间内的对象，接听后开始通话":(cameraView_?L"选择下方设备，开启视频输入":L"打开视频或音频文件开始播放"),t,small_,Muted,DT_CENTER|DT_VCENTER|DT_SINGLELINE);}
     }
     void Paint(HDC dc){
         RECT all;GetClientRect(window_,&all);Fill(dc,all,Bg);if(fullscreen_)return;
@@ -187,7 +188,10 @@ class StudioWindow {
         Label(dc,state,rx,600,right_-32,26,body_,call_.State()==CallState::Incoming?RGB(255,187,80):Mint);
         Label(dc,Wide(call_.Remote())+L"   "+std::to_wstring(call_.DurationSeconds())+L" 秒",rx,630,right_-32,24,small_,Muted);
         Label(dc,L"接收视频 "+std::to_wstring(remoteVideos_.load())+L" 帧 / 音频 "+std::to_wstring(remoteAudios_.load())+L" 包",rx,658,right_-32,24,small_,Muted);
-        Label(dc,L"麦克风监听请使用耳机",rx,696,right_-32,26,small_,Muted);
+        const auto& network=call_.NetworkStats();
+        std::wstring quality=L"网络统计：等待采样";
+        if(network.report_ready){wchar_t loss[40]{};swprintf_s(loss,L"%.1f%%",network.packet_loss_percent);quality=L"RTT "+(network.rtt_ready?std::to_wstring(static_cast<int>(network.round_trip_time_ms))+L"ms":L"—")+L" · 累计丢包 "+(network.inbound_ready?std::wstring(loss):L"—");}
+        Label(dc,quality,rx,684,right_-32,22,small_,Muted);
         Fill(dc,R(left_,height_-38,width_-left_,38),Bg);Fill(dc,R(left_,height_-39,width_-left_,1),Border);Label(dc,status_,x,height_-36,width_-x-16,32,small_,Muted);
     }
     // Render only this application's own drawing and controls, without capturing the desktop.
@@ -223,7 +227,7 @@ class StudioWindow {
         switch(id){
         case Open:OpenFile();break;
         case Camera:ToggleCamera();break;
-        case ShareScreen:if(screen_.IsCapturing()){screen_.Stop();video_.Clear();SetWindowTextW(Control(ShareScreen),L"共享主屏幕");status_=L"屏幕共享已停止";}else{capture_->StopCamera();SetWindowTextW(Control(Camera),L"开启摄像头");EnableWindow(Control(CameraList),!cameras_.devices.empty());CloseFile();cameraView_=true;videoCount_=0;if(screen_.Start([this](VideoFrame f){video_.Put(f);call_.Video(f);++videoCount_;})){SetWindowTextW(Control(ShareScreen),L"停止共享主屏幕");status_=L"正在共享主屏幕 · 通话接通后对方可见";}else status_=Wide(screen_.LastError());}break;
+        case ShareScreen:if(screen_.IsCapturing()){screen_.Stop();call_.SetVideoSource("off");video_.Clear();SetWindowTextW(Control(ShareScreen),L"共享主屏幕");status_=L"屏幕共享已停止";}else{capture_->StopCamera();SetWindowTextW(Control(Camera),L"开启摄像头");EnableWindow(Control(CameraList),!cameras_.devices.empty());CloseFile();cameraView_=true;videoCount_=0;reportedScreenError_.clear();call_.SetVideoSource("off");if(screen_.Start([this](VideoFrame f){video_.Put(f);call_.Video(f);++videoCount_;})){call_.SetVideoSource("screen");SetWindowTextW(Control(ShareScreen),L"停止共享主屏幕");status_=L"正在共享主屏幕 · 通话接通后对方可见";}else status_=Wide(screen_.LastError());}break;
         case Microphone:ToggleMicrophone();break;
         case Monitor:monitor_=!monitor_;if(!monitor_)audio_.Close();SetWindowTextW(Control(Monitor),monitor_?L"监听：开启":L"监听：关闭");break;
         case TestSound:TestAudio();break;
@@ -245,6 +249,7 @@ class StudioWindow {
             if(call_.Start(endpoint,static_cast<uint16_t>(port),utf8(room),peer,std::move(cb))){SetWindowTextW(Control(Join),L"离开房间");EnableWindow(Control(Host),FALSE);EnableWindow(Control(Room),FALSE);EnableWindow(Control(Identity),FALSE);status_=L"正在加入房间，成功后选择对象发起通话";}else status_=L"无法加入房间 · 请先启动信令服务器，并检查地址及端口";
             break;
         }
+        case Reconnect:call_.Reconnect();status_=Wide(call_.LastStatus());break;
         case Dial:{auto index=SendMessageW(Control(Peers),CB_GETCURSEL,0,0);if(index>=0&&size_t(index)<shownPeers_.size())call_.Call(shownPeers_[index]);status_=Wide(call_.LastStatus());break;}
         case AcceptCall:call_.Accept();status_=Wide(call_.LastStatus());break;
         case RejectCall:call_.Reject();status_=Wide(call_.LastStatus());break;
@@ -273,6 +278,9 @@ class StudioWindow {
             if(shownPeers_!=call_.Participants()){std::wstring selected;wchar_t name[256]{};GetWindowTextW(Control(Peers),name,256);selected=name;shownPeers_=call_.Participants();SendMessageW(Control(Peers),CB_RESETCONTENT,0,0);int selectedIndex=0;for(size_t i=0;i<shownPeers_.size();++i){auto name=Wide(shownPeers_[i]);SendMessageW(Control(Peers),CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name.c_str()));if(name==selected)selectedIndex=static_cast<int>(i);}SendMessageW(Control(Peers),CB_SETCURSEL,selectedIndex,0);}
             const auto cs=call_.State();if(cs!=shownCallState_){if(cs==CallState::Ready||cs==CallState::Offline){remoteVideo_.Clear();remoteAudio_.Close();remotePeak_=0;remoteVideos_=0;remoteAudios_=0;}shownCallState_=cs;InvalidateRect(window_,nullptr,FALSE);}
             EnableWindow(Control(Dial),cs==CallState::Ready&&!shownPeers_.empty());EnableWindow(Control(Peers),cs==CallState::Ready);EnableWindow(Control(AcceptCall),cs==CallState::Incoming);EnableWindow(Control(RejectCall),cs==CallState::Incoming);EnableWindow(Control(EndCall),cs==CallState::Outgoing||cs==CallState::Connecting||cs==CallState::Connected);SetWindowTextW(Control(EndCall),cs==CallState::Outgoing?L"取消呼叫":L"结束通话");
+            EnableWindow(Control(Reconnect),cs==CallState::Connected);
+            if(call_.RemoteVideoSource()=="off")remoteVideo_.Clear();
+            const auto screenError=screen_.LastError();if(!screen_.IsCapturing()&&!screenError.empty()&&screenError!=reportedScreenError_){reportedScreenError_=screenError;call_.SetVideoSource("off");video_.Clear();SetWindowTextW(Control(ShareScreen),L"共享主屏幕");status_=Wide(screenError);}
             EnableWindow(Control(Identity),!call_.Active());EnableWindow(Control(Host),!call_.Active());EnableWindow(Control(Room),!call_.Active());SetWindowTextW(Control(Join),call_.Active()?L"离开房间":L"加入 / 重新连接");
             if(playback_){auto error=playback_->error.exchange(S_OK);if(FAILED(error))status_=L"播放失败："+Hr(error)+L"。请检查文件或 Windows 媒体解码支持。";else if(playback_->ended.exchange(false)){status_=L"播放结束："+fileName_;SetWindowTextW(Control(Pause),L"重新播放");}}
             if(audioFailed_.exchange(false))status_=L"音频输出暂不可用或过载 · 请检查输出设备";
@@ -297,7 +305,7 @@ public:
         remoteSurface_=CreateWindowExW(0,L"LumaVideoSurface",L"远端视频",WS_CHILD|WS_VISIBLE,0,0,1,1,window_,nullptr,instance,this);
         Button(Open,L"打开媒体文件");Button(CameraMode,L"摄像头");Button(FileMode,L"媒体文件");Button(Camera,L"开启摄像头");Button(Refresh,L"刷新设备");Button(Microphone,L"开启麦克风");Button(Monitor,L"监听：关闭");Button(TestSound,L"测试扬声器");Button(Pause,L"暂停");Button(Stop,L"停止播放");Button(FullScreen,L"全屏预览");
         Button(RemoteMode,L"实时连线");Button(Join,L"加入房间");Make(Host,L"EDIT",L"127.0.0.1:9000",WS_BORDER|ES_AUTOHSCROLL);Make(Room,L"EDIT",L"luma-demo",WS_BORDER|ES_AUTOHSCROLL);
-        Make(Identity,L"EDIT",(L"studio-"+std::to_wstring(GetCurrentProcessId())).c_str(),WS_BORDER|ES_AUTOHSCROLL);Make(Peers,L"COMBOBOX",L"通话对象",CBS_DROPDOWNLIST|WS_VSCROLL);Button(ShareScreen,L"共享主屏幕");Button(Dial,L"发起视频通话");Button(AcceptCall,L"接听");Button(RejectCall,L"拒绝");Button(EndCall,L"结束通话");for(int id:{Dial,AcceptCall,RejectCall,EndCall})EnableWindow(Control(id),FALSE);
+        Make(Identity,L"EDIT",(L"studio-"+std::to_wstring(GetCurrentProcessId())).c_str(),WS_BORDER|ES_AUTOHSCROLL);Make(Peers,L"COMBOBOX",L"通话对象",CBS_DROPDOWNLIST|WS_VSCROLL);Button(ShareScreen,L"共享主屏幕");Button(Dial,L"发起视频通话");Button(AcceptCall,L"接听");Button(RejectCall,L"拒绝");Button(EndCall,L"结束通话");Button(Reconnect,L"重新连接");for(int id:{Dial,AcceptCall,RejectCall,EndCall,Reconnect})EnableWindow(Control(id),FALSE);
         Make(CameraList,L"COMBOBOX",L"摄像头",CBS_DROPDOWNLIST|WS_VSCROLL);Make(MicList,L"COMBOBOX",L"麦克风",CBS_DROPDOWNLIST|WS_VSCROLL);Make(Volume,TRACKBAR_CLASSW,L"输出音量",TBS_HORZ|TBS_NOTICKS);SendMessageW(Control(Volume),TBM_SETRANGE,TRUE,MAKELPARAM(0,100));SendMessageW(Control(Volume),TBM_SETPOS,TRUE,volume_);EnableWindow(Control(Monitor),FALSE);
         audio_.SetVolume(volume_/100.f);remoteAudio_.SetVolume(volume_/100.f);
         capture_=media::CreateDeviceCaptureService();auto result=capture_->Start();if(!result.IsOk())status_=L"设备初始化失败："+Wide(result.Message());Enumerate();Layout();

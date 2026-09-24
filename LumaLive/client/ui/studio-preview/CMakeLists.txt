@@ -44,3 +44,13 @@ set_tests_properties(luma_preview_call_tests PROPERTIES TIMEOUT 35)
 add_executable(luma_file_playback_tests tests/FilePlaybackTests.cpp)
 target_compile_options(luma_file_playback_tests PRIVATE /utf-8)
 target_link_libraries(luma_file_playback_tests PRIVATE mfplay mfplat mfuuid ole32 user32)
+
+add_executable(luma_signaling_shutdown_tests tests/SignalingShutdownTests.cpp)
+target_link_libraries(luma_signaling_shutdown_tests PRIVATE luma_signaling ws2_32)
+add_test(NAME luma_signaling_shutdown_tests COMMAND luma_signaling_shutdown_tests)
+set_tests_properties(luma_signaling_shutdown_tests PROPERTIES TIMEOUT 10)
+
+add_executable(luma_screen_capture_tests tests/ScreenCaptureTests.cpp)
+target_link_libraries(luma_screen_capture_tests PRIVATE luma_client_media_pipeline)
+add_test(NAME luma_screen_capture_tests COMMAND luma_screen_capture_tests)
+set_tests_properties(luma_screen_capture_tests PROPERTIES TIMEOUT 10 SKIP_RETURN_CODE 77)
