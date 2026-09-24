@@ -127,11 +127,34 @@ int main() {
     const auto mfa=alice->EnableMfa();
     assert(mfa.success);
     const auto recovery_code=ExtractAfter(
-        mfa.message,"MFA enabled; recovery code=");
+        mfa.message,"MFA enabled; recovery code=","; TOTP secret=");
+    const auto totp_secret=ExtractAfter(
+        mfa.message,"TOTP secret=","; otpauth=");
+    const auto otpauth=ExtractAfter(mfa.message,"otpauth=");
     assert(recovery_code.size()==32);
+    assert(totp_secret.size()>=16);
+    assert(otpauth.rfind("otpauth://totp/",0)==0);
     assert(alice->Security().mfa_enabled);
 
     assert(alice->Logout().success);
+    assert(alice->Login(
+        "alice.test","correct horse","alice-totp","Alice TOTP",
+        luma::contracts::auth::crypto::make_totp_code(
+            totp_secret,
+            std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count())).success);
+    const auto token_before_refresh=alice->Session().token;
+    const auto refresh_before=alice->Session().refresh_token;
+    const auto session_id_before=alice->Session().session_id;
+    assert(!token_before_refresh.empty()&&!refresh_before.empty());
+    assert(alice->RefreshSession().success);
+    assert(alice->Session().token!=token_before_refresh);
+    assert(alice->Session().refresh_token!=refresh_before);
+    assert(alice->Session().session_id==session_id_before);
+    const auto refresh_after=alice->Session().refresh_token;
+    assert(alice->ValidateSession().success);
+    assert(alice->Session().refresh_token==refresh_after);
+
 
     auto alicePhone=luma::client::account::CreateAccountService();
     assert(alicePhone->Connect("127.0.0.1",19121).success);
