@@ -57,6 +57,8 @@ public:
         running_=false;session_={};return{true,"stopped"};
     }
 
+    bool IsRunning() const override{return running_.load();}
+
     OperationResult Register(std::string u,std::string e,std::string d,std::string p)override{
         if(!valid_register(u,e,d,p))return{false,"invalid registration data"};
         std::lock_guard lock(mutex_);
