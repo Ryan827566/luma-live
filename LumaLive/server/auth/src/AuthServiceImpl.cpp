@@ -632,6 +632,11 @@ private:
             }
 
             const auto&u=users_.at(user_id);
+            if(IsLocked(normalize(u.username),now_epoch())||
+               IsLocked(normalize(u.email),now_epoch())){
+                bad("temporarily_locked","too many failed login attempts; try again later");
+                return;
+            }
             c.device_id=p.fields[1];
             c.device_name=p.fields[2];
             c.pending=Pending{Pending::Kind::Login,"","","",u.id,u.salt_hex,hex(random_bytes(32)),""};
@@ -715,11 +720,12 @@ private:
             if(p.fields.size()!=1||c.token.empty()||p.fields[0]!=c.token){
                 bad("invalid_session","invalid session");return;
             }
+            const auto user_id=require_session();
             {
                 std::lock_guard sl(session_mutex_);
                 sessions_.erase(c.token);
             }
-            AppendAudit(require_session(),"logout","current session signed out");
+            AppendAudit(user_id,"logout","current session signed out");
             c.token.clear();
             send(Type::LogoutOk);
             return;
