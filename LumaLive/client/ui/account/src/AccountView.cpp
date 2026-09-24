@@ -375,7 +375,11 @@ private:
         if(r.success) {
             const auto prefix=std::string("password reset token=");
             const auto pos=r.message.find(prefix);
-            if(pos!=std::string::npos)SetText(window_,ID_RESET_TOKEN,r.message.substr(pos+prefix.size()));
+            if(pos!=std::string::npos){
+                const auto begin=pos+prefix.size();
+                const auto end=r.message.find(" expires=",begin);
+                SetText(window_,ID_RESET_TOKEN,r.message.substr(begin,end==std::string::npos?r.message.size()-begin:end-begin));
+            }
         }
     }
 
