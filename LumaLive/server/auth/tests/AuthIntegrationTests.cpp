@@ -166,7 +166,8 @@ int main() {
 
     auto locked=luma::client::account::CreateAccountService();
     assert(locked->Connect("127.0.0.1",19121).success);
-    for(int i=0;i<5;++i)assert(!locked->Login("bob.test","bad password","lock-test","Lock Test").success);
+    for(int i=0;i<4;++i)assert(!locked->Login("bob.test","bad password","lock-test","Lock Test").success);
+    assert(!locked->Login("bob@example.com","bad password","lock-test","Lock Test").success);
     assert(!locked->Login("bob.test","reset correct horse","lock-test","Lock Test").success);
 
     assert(bobLogin->GetSecuritySummary().success);
@@ -202,6 +203,6 @@ int main() {
         std::filesystem::remove(store+suffix,ec);
     }
 
-    std::cout<<"PASS: email verification, MFA recovery-code login, non-enumerating login challenge, source-scoped rate limiting, password change, password reset, session management, security audit events and persistence\n";
+    std::cout<<"PASS: email verification, MFA recovery-code login, non-enumerating login challenge, source-scoped account rate limiting, password change, password reset, session management, security audit events and persistence\n";
     return 0;
 }
