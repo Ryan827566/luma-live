@@ -34,7 +34,12 @@ public:
  OperationResult Connect(std::string host,std::uint16_t port)override{
   Stop();if(host.empty()||!port||!init_sockets())return{false,"invalid account server address"};host_=std::move(host);port_=port;
   Socket s=::socket(AF_INET,SOCK_STREAM,0);if(s==kInvalidSocket)return{false,"socket creation failed"};
-  sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(port_);if(::InetPtonA(AF_INET,host_.c_str(),&a.sin_addr)!=1){close_socket(s);return{false,"host must be an IPv4 address"};}
+  sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(port_);
+#ifdef _WIN32
+  if(::InetPtonA(AF_INET,host_.c_str(),&a.sin_addr)!=1){close_socket(s);return{false,"host must be an IPv4 address"};}
+#else
+  if(::inet_pton(AF_INET,host_.c_str(),&a.sin_addr)!=1){close_socket(s);return{false,"host must be an IPv4 address"};}
+#endif
   if(::connect(s,reinterpret_cast<sockaddr*>(&a),sizeof(a))!=0){close_socket(s);return{false,"unable to connect to auth server"};}
   socket_=s;running_=true;return{true,"connected"};
  }
