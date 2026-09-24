@@ -3,7 +3,6 @@
 #include "contracts/auth/AuthWire.hpp"
 #include <atomic>
 #include <chrono>
-#include <iostream>
 #include <mutex>
 
 #ifdef _WIN32
@@ -80,7 +79,6 @@ private:
  static bool valid_register(const std::string&u,const std::string&e,const std::string&d,const std::string&p){if(u.size()<3||u.size()>32||e.size()<3||e.size()>254||d.empty()||d.size()>64||p.size()<8||p.size()>128)return false;for(char c:u)if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='.'||c=='_'||c=='-'))return false;return e.find('@')!=std::string::npos&&e.find('|')==std::string::npos&&d.find('|')==std::string::npos;}
  bool Send(const Packet&p){
   auto msg=luma::contracts::auth::wire::encode(p);
-  std::cerr << "account tx fd=" << socket_ << " size=" << msg.size() << " first=" << (msg.empty()?0:int(static_cast<unsigned char>(msg[0]))) << " text=[" << msg << "]\n";
   std::size_t off=0;while(off<msg.size()){int n=::send(socket_,msg.data()+off,static_cast<int>(msg.size()-off),0);if(n<=0)return false;off+=static_cast<std::size_t>(n);}return true;}
  bool Recv(Packet&out){std::string line;char c=0;while(true){int n=::recv(socket_,&c,1,0);if(n<=0)return false;if(c=='\n')break;if(line.size()>64*1024)return false;}try{out=luma::contracts::auth::wire::decode_line(line);return true;}catch(...){return false;}}
  OperationResult Error(const Packet&p){return p.fields.size()>=2?OperationResult{false,p.fields[1]}:OperationResult{false,"authentication server error"};}
