@@ -72,6 +72,7 @@ int main() {
     auto alice=luma::client::account::CreateAccountService();
     assert(alice->Connect("127.0.0.1",19121).success);
     assert(alice->Register("alice.test","alice@example.com","Alice Test","correct horse").success);
+    assert(alice->Login("unknown-user-should-not-enumerate","correct horse").success==false);
     assert(alice->Login("alice.test","wrong pass").success==false);
     assert(alice->Login("alice@example.com","correct horse","alice-pc","Alice PC").success);
     assert(alice->IsAuthenticated());
@@ -127,6 +128,8 @@ int main() {
 
     assert(alice->Logout().success);
     assert(!alice->Login("alice.test","correct horse","alice-pc","Alice PC").success);
+    assert(alice->Login("alice.test","correct horse","alice-pc","Alice PC",recovery_code).success);
+    assert(alice->Logout().success);
     assert(alice->Login("alice.test","correct horse","alice-pc","Alice PC",recovery_code).success);
     assert(alice->DisableMfa(recovery_code).success);
     assert(!alice->Security().mfa_enabled);
@@ -199,6 +202,6 @@ int main() {
         std::filesystem::remove(store+suffix,ec);
     }
 
-    std::cout<<"PASS: email verification, MFA recovery-code login, password change, password reset, rate limiting, session management, security audit events and persistence\n";
+    std::cout<<"PASS: email verification, MFA recovery-code login, non-enumerating login challenge, source-scoped rate limiting, password change, password reset, session management, security audit events and persistence\n";
     return 0;
 }
