@@ -841,9 +841,9 @@ private:
             AppendAudit(user_id,"login_success","login succeeded");
             if(new_network)AppendAudit(user_id,"new_network","login from an unseen network address");
             send(Type::LoginOk,{
-                token,session_id,c.device_id,c.device_name,it->second.id,
+                token,refresh_token,session_id,c.device_id,c.device_name,it->second.id,
                 it->second.username,it->second.email,it->second.display_name,
-                std::to_string(expires),refresh_token,std::to_string(refresh_expires)});
+                std::to_string(expires),std::to_string(refresh_expires)});
             return;
         }
 
@@ -939,9 +939,9 @@ private:
                 // the current connection, so the client keeps its token from the login/refresh response.
                 // ValidateSession therefore does not re-issue a refresh token.
                 send(Type::LoginOk,{
-                    c.token,sit->second.session_id,sit->second.device_id,sit->second.device_name,
+                    c.token,std::string(),sit->second.session_id,sit->second.device_id,sit->second.device_name,
                     it->second.id,it->second.username,it->second.email,it->second.display_name,
-                    std::to_string(sit->second.expires),std::string(),std::to_string(sit->second.refresh_expires)});
+                    std::to_string(sit->second.expires),std::to_string(sit->second.refresh_expires)});
             }
             return;
         }
@@ -1362,9 +1362,9 @@ private:
             AppendAudit(user_id,"phone_login_success","SMS login succeeded");
             if(new_network)AppendAudit(user_id,"new_network","login from an unseen network address");
             send(Type::LoginOk,{
-                token,session_id,c.device_id,c.device_name,it->second.id,
+                token,refresh_token,session_id,c.device_id,c.device_name,it->second.id,
                 it->second.username,it->second.email,it->second.display_name,
-                std::to_string(expires),refresh_token,std::to_string(refresh_expires)});
+                std::to_string(expires),std::to_string(refresh_expires)});
             return;
         }
 
