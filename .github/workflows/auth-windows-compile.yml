@@ -9,7 +9,7 @@ on:
       - main
 
 jobs:
-  compile:
+  auth:
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -18,24 +18,31 @@ jobs:
       - name: Configure MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Compile auth client and UI
+      - name: Compile and run authentication integration test
         shell: cmd
         run: |
-          cl /nologo /std:c++20 /W4 /EHsc /c ^
-            /I LumaLive\shared ^
-            /I LumaLive\client\account\include ^
-            /I LumaLive\client\ui\account\include ^
+          cl /nologo /std:c++20 /W4 /EHsc /I LumaLive\shared /I LumaLive\client\account\include /I LumaLive\server\auth\include ^
+            LumaLive\server\auth\src\AuthServiceImpl.cpp ^
             LumaLive\client\account\src\AccountService.cpp ^
-            LumaLive\client\ui\account\src\AccountView.cpp
+            LumaLive\server\auth\tests\AuthIntegrationTests.cpp ^
+            /Fe:auth_integration_test.exe /link ws2_32.lib
+          if errorlevel 1 exit /b 1
+          auth_integration_test.exe
+          if errorlevel 1 exit /b 1
 
-      - name: Compile Studio entry point
+      - name: Compile account UI object files
         shell: cmd
         run: |
-          cl /nologo /std:c++20 /W4 /EHsc /c ^
-            /I LumaLive\shared ^
-            /I LumaLive\client\application\studio\include ^
-            /I LumaLive\client\ui\account\include ^
-            /I LumaLive\client\ui\scene-editor\include ^
-            /I LumaLive\client\ui\studio-shell\include ^
-            /I LumaLive\client\ui\studio-preview\include ^
-            LumaLive\apps\luma-studio\src\main.cpp
+          cl /nologo /std:c++20 /W4 /EHsc /I LumaLive\shared /I LumaLive\client\account\include /I LumaLive\client\ui\account\include ^
+            /c LumaLive\client\account\src\AccountService.cpp ^
+               LumaLive\client\ui\account\src\AccountView.cpp
+          if errorlevel 1 exit /b 1
+
+      - name: Compile auth server executable
+        shell: cmd
+        run: |
+          cl /nologo /std:c++20 /W4 /EHsc /I LumaLive\shared /I LumaLive\server\auth\include ^
+            LumaLive\server\auth\src\AuthServiceImpl.cpp ^
+            LumaLive\apps\luma-auth-server\src\main.cpp ^
+            /Fe:luma_auth_server.exe /link ws2_32.lib
+          if errorlevel 1 exit /b 1
