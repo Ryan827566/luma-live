@@ -26,8 +26,20 @@ using luma::contracts::auth::crypto::from_hex;
 using luma::contracts::auth::crypto::hex;
 using luma::contracts::auth::crypto::hmac_sha256;
 using luma::contracts::auth::crypto::pbkdf2_hmac_sha256;
+using luma::contracts::auth::crypto::sha256;
 using luma::contracts::auth::wire::Packet;
 using luma::contracts::auth::wire::Type;
+
+namespace {
+std::string token_hash(const std::string& token){
+    const auto bytes=std::span<const std::uint8_t>(
+        reinterpret_cast<const std::uint8_t*>(token.data()),token.size());
+    return hex(sha256(bytes));
+}
+std::string get_field(const Packet& p,std::size_t index){
+    return index<p.fields.size()?p.fields[index]:std::string{};
+}
+}
 
 class AccountService final:public IAccountService{
 public:
@@ -54,7 +66,12 @@ public:
     OperationResult Stop()override{
         std::lock_guard lock(mutex_);
         if(socket_!=kInvalidSocket){close_socket(socket_);socket_=kInvalidSocket;}
-        running_=false;session_={};return{true,"stopped"};
+        running_=false;
+        session_={};
+        security_={};
+        sessions_.clear();
+        events_.clear();
+        return{true,"stopped"};
     }
 
     bool IsRunning() const override{return running_.load();}
@@ -68,36 +85,49 @@ public:
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
         if(q.type!=Type::RegisterChallenge||q.fields.size()!=2)return{false,"invalid registration challenge"};
-        auto verifier=pbkdf2_hmac_sha256(p,from_hex(q.fields[0]));
-        if(!Send({Type::RegisterFinish,{hex(verifier)}}))return{false,"send failed"};
+        const auto verifier=pbkdf2_hmac_sha256(p,from_hex(q.fields[0]));
+        if(!Send({Type::RegisterFinish,{hex(verifier)} }))return{false,"send failed"};
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
         if(q.type!=Type::RegisterOk||q.fields.size()!=4)return{false,"invalid registration response"};
         return{true,"registered user_id="+q.fields[0]};
     }
 
-    OperationResult Login(std::string id,std::string p)override{
+    OperationResult Login(
+        std::string id,std::string p,std::string device_id,std::string device_name,std::string mfa_code)override{
         if(id.empty()||id.size()>254||p.size()<8||p.size()>128)return{false,"invalid login data"};
         std::lock_guard lock(mutex_);
         if(!running_)return{false,"account service is not connected"};
-        if(!Send({Type::LoginBegin,{id}}))return{false,"send failed"};
+        if(device_id.empty())device_id="default-device";
+        if(device_name.empty())device_name="LumaLive Client";
+        if(!valid_text(device_id,128)||!valid_text(device_name,128))return{false,"invalid device information"};
+
+        if(!Send({Type::LoginBegin,{id,device_id,device_name}}))return{false,"send failed"};
         Packet q;
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
-        if(q.type!=Type::LoginChallenge||q.fields.size()!=5)return{false,"invalid login challenge"};
-        auto verifier=pbkdf2_hmac_sha256(p,from_hex(q.fields[3]));
-        auto proof=hmac_sha256(verifier,from_hex(q.fields[4]));
-        if(!Send({Type::LoginProof,{hex(proof)}}))return{false,"send failed"};
+        if(q.type!=Type::LoginChallenge||q.fields.size()!=6)return{false,"invalid login challenge"};
+
+        const auto verifier=pbkdf2_hmac_sha256(p,from_hex(q.fields[3]));
+        const auto proof=hmac_sha256(verifier,from_hex(q.fields[4]));
+        const bool mfa_required=q.fields[5]=="1";
+        if(mfa_required&&!valid_text(mfa_code,128))return{false,"multi-factor code required"};
+
+        if(!Send({Type::LoginProof,{hex(proof),mfa_code}}))return{false,"send failed"};
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
-        if(q.type!=Type::LoginOk||q.fields.size()!=6)return{false,"invalid login response"};
+        if(q.type!=Type::LoginOk||q.fields.size()!=9)return{false,"invalid login response"};
+
         session_.token=q.fields[0];
-        session_.user.user_id=q.fields[1];
-        session_.user.username=q.fields[2];
-        session_.user.email=q.fields[3];
-        session_.user.display_name=q.fields[4];
+        session_.session_id=q.fields[1];
+        session_.device_id=q.fields[2];
+        session_.device_name=q.fields[3];
+        session_.user.user_id=q.fields[4];
+        session_.user.username=q.fields[5];
+        session_.user.email=q.fields[6];
+        session_.user.display_name=q.fields[7];
         session_.user.avatar_url.clear();
-        session_.expires_at_epoch_seconds=std::stoll(q.fields[5]);
+        session_.expires_at_epoch_seconds=std::stoll(q.fields[8]);
         return{true,"login successful"};
     }
 
@@ -110,7 +140,8 @@ public:
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
         if(q.type!=Type::LogoutOk)return{false,"invalid logout response"};
-        session_={};return{true,"logout successful"};
+        session_={};
+        return{true,"logout successful"};
     }
 
     OperationResult ValidateSession()override{
@@ -120,12 +151,16 @@ public:
         Packet q;
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
-        if(q.type!=Type::LoginOk||q.fields.size()!=6)return{false,"invalid session response"};
-        session_.user.user_id=q.fields[1];
-        session_.user.username=q.fields[2];
-        session_.user.email=q.fields[3];
-        session_.user.display_name=q.fields[4];
-        session_.expires_at_epoch_seconds=std::stoll(q.fields[5]);
+        if(q.type!=Type::LoginOk||q.fields.size()!=9)return{false,"invalid session response"};
+        session_.token=q.fields[0];
+        session_.session_id=q.fields[1];
+        session_.device_id=q.fields[2];
+        session_.device_name=q.fields[3];
+        session_.user.user_id=q.fields[4];
+        session_.user.username=q.fields[5];
+        session_.user.email=q.fields[6];
+        session_.user.display_name=q.fields[7];
+        session_.expires_at_epoch_seconds=std::stoll(q.fields[8]);
         return{true,"session valid"};
     }
 
@@ -170,14 +205,191 @@ public:
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
         if(q.type!=Type::DeleteAccountOk)return{false,"invalid account deletion response"};
-        session_={};
+        session_={};security_={};sessions_.clear();events_.clear();
         return{true,"account deleted"};
     }
 
+    OperationResult RequestEmailVerification()override{
+        std::lock_guard lock(mutex_);
+        if(!AuthenticatedLocked())return{false,"not authenticated"};
+        if(!Send({Type::RequestEmailVerification,{session_.token}}))return{false,"send failed"};
+        Packet q;if(!Recv(q))return{false,"receive failed"};
+        if(q.type==Type::Error)return Error(q);
+        if(q.type!=Type::EmailVerificationIssued||q.fields.size()!=2)return{false,"invalid email verification response"};
+        return{true,"email verification token="+q.fields[0]+" expires="+q.fields[1]};
+    }
+
+    OperationResult VerifyEmail(std::string verification_token)override{
+        if(verification_token.empty())return{false,"verification token is empty"};
+        std::lock_guard lock(mutex_);
+        if(!AuthenticatedLocked())return{false,"not authenticated"};
+        if(!Send({Type::VerifyEmail,{session_.token,verification_token}}))return{false,"send failed"};
+        Packet q;if(!Recv(q))return{false,"receive failed"};
+        if(q.type==Type::Error)return Error(q);
+        if(q.type!=Type::EmailVerified)return{false,"invalid email verification response"};
+        return{true,"email verified"};
+    }
+
+    OperationResult ChangePassword(std::string current_password,std::string new_password)override{
+        if(current_password.size()<8||current_password.size()>128||new_password.size()<8||new_password.size()>128)
+            return{false,"invalid password data"};
+        std::lock_guard lock(mutex_);
+        if(!AuthenticatedLocked())return{false,"not authenticated"};
+        if(!Send({Type::ChangePasswordBegin,{session_.token}}))return{false,"send failed"};
+        Packet q;if(!Recv(q))return{false,"receive failed"};
+        if(q.type==Type::Error)return Error(q);
+        if(q.type!=Type::ChangePasswordChallenge||q.fields.size()!=3)return{false,"invalid password change challenge"};
+
+        const auto current_verifier=pbkdf2_hmac_sha256(current_password,from_hex(q.fields[0]));
+        const auto current_proof=hmac_sha256(current_verifier,from_hex(q.fields[1]));
+        const auto new_verifier=pbkdf2_hmac_sha256(new_password,from_hex(q.fields[2]));
+        if(!Send({Type::ChangePasswordFinish,{session_.token,hex(current_proof),hex(new_verifier)}}))return{false,"send failed"};
+        if(!Recv(q))return{false,"receive failed"};
+        if(q.type==Type::Error)return Error(q);
+        if(q.type!=Type::PasswordChanged)return{false,"invalid password change response"};
+        session_={};security_={};sessions_.clear();events_.clear();
+        return{true,"password changed; all sessions signed out"};
+    }
+
+    OperationResult RequestPasswordReset(std::string identifier)override{
+        if(identifier.empty()||identifier.size()>254)return{false,"invalid reset identifier"};
+        std::lock_guard lock(mutex_);
+        if(!running_)return{false,"account service is not connected"};
+        if(!Send({Type::RequestPasswordReset,{identifier}}))return{false,"send failed"};
+        Packet q;if(!Recv(q))return{false,"receive failed"};
+        if(q.type==Type::Error)return Error(q);
+        if(q.type!=Type::PasswordResetIssued||q.fields.size()!=3)return{false,"invalid password reset response"};
+        return{true,"password reset token="+q.fields[0]+" salt="+q.fields[1]+" expires="+q.fields[2]};
+    }
+
+    OperationResult ResetPassword(std::string reset_token,std::string new_password)override{
+        if(reset_token.empty()||new_password.size()<8||new_password.size()>128)return{false,"invalid password reset data"};
+        std::lock_guard lock(mutex_);
+        if(!running_)return{false,"account service is not connected"};
+        if(!Send({Type::RequestPasswordReset,{reset_token}}))return{false,"send failed"};
+        Packet q;if(!Recv(q))return{false,"receive failed"};
+        if(q.type==Type::Error)return Error(q);
+        return{false,"reset flow requires a reset token issued by the server"};
+    }
+
+    OperationResult GetSecuritySummary()override{
+        std::lock_guard lock(mutex_);
+        if(!AuthenticatedLocked())return{false,"not authenticated"};
+        if(!Send({Type::GetSecuritySummary,{session_.token}}))return{false,"send failed"};
+        Packet q;if(!Recv(q))return{false,"receive failed"};
+        if(q.type==Type::Error)return Error(q);
+        if(q.type!=Type::SecuritySummaryOk||q.fields.size()!=4)return{false,"invalid security summary"};
+        security_.email_verified=q.fields[0]=="1";
+        security_.mfa_enabled=q.fields[1]=="1";
+        security_.failed_login_attempts=static_cast<std::uint32_t>(std::stoul(q.fields[2]));
+        security_.active_session_count=static_cast<std::uint32_t>(std::stoul(q.fields[3]));
+        return{true,"security summary loaded"};
+    }
+
+    contracts::auth::SecuritySummary Security()const override{
+        std::lock_guard lock(mutex_);return security_;
+    }
+
+    OperationResult EnableMfa()override{
+        std::lock_guard lock(mutex_);
+        if(!AuthenticatedLocked())return{false,"not authenticated"};
+        if(!Send({Type::EnableMfa,{session_.token}}))return{false,"send failed"};
+        Packet q;if(!Recv(q))return{false,"receive failed"};
+        if(q.type==Type::Error)return Error(q);
+        if(q.type!=Type::MfaEnabled||q.fields.size()!=1)return{false,"invalid MFA enable response"};
+        security_.mfa_enabled=true;
+        return{true,"MFA enabled; recovery code="+q.fields[0]};
+    }
+
+    OperationResult DisableMfa(std::string recovery_code)override{
+        if(recovery_code.empty())return{false,"recovery code is empty"};
+        std::lock_guard lock(mutex_);
+        if(!AuthenticatedLocked())return{false,"not authenticated"};
+        if(!Send({Type::DisableMfa,{session_.token,recovery_code}}))return{false,"send failed"};
+        Packet q;if(!Recv(q))return{false,"receive failed"};
+        if(q.type==Type::Error)return Error(q);
+        if(q.type!=Type::MfaDisabled)return{false,"invalid MFA disable response"};
+        security_.mfa_enabled=false;
+        return{true,"MFA disabled"};
+    }
+
+    OperationResult GetSessions()override{
+        std::lock_guard lock(mutex_);
+        if(!AuthenticatedLocked())return{false,"not authenticated"};
+        if(!Send({Type::GetSessions,{session_.token}}))return{false,"send failed"};
+        Packet q;if(!Recv(q))return{false,"receive failed"};
+        if(q.type==Type::Error)return Error(q);
+        if(q.type!=Type::SessionsOk||q.fields.empty())return{false,"invalid session list"};
+        const auto count=static_cast<std::size_t>(std::stoul(q.fields[0]));
+        if(q.fields.size()!=1+count*7)return{false,"invalid session list size"};
+        sessions_.clear();
+        for(std::size_t i=0;i<count;++i){
+            const auto base=1+i*7;
+            contracts::auth::DeviceSession s;
+            s.session_id=q.fields[base];
+            s.device_id=q.fields[base+1];
+            s.device_name=q.fields[base+2];
+            s.remote_address=q.fields[base+3];
+            s.created_at_epoch_seconds=std::stoll(q.fields[base+4]);
+            s.last_seen_epoch_seconds=std::stoll(q.fields[base+5]);
+            s.current=q.fields[base+6]=="1";
+            sessions_.push_back(std::move(s));
+        }
+        return{true,"sessions loaded"};
+    }
+
+    const std::vector<contracts::auth::DeviceSession>& Sessions()const override{return sessions_;}
+
+    OperationResult RevokeSession(std::string session_id)override{
+        if(session_id.empty())return{false,"session id is empty"};
+        std::lock_guard lock(mutex_);
+        if(!AuthenticatedLocked())return{false,"not authenticated"};
+        if(!Send({Type::RevokeSession,{session_.token,session_id}}))return{false,"send failed"};
+        Packet q;if(!Recv(q))return{false,"receive failed"};
+        if(q.type==Type::Error)return Error(q);
+        if(q.type!=Type::SessionRevoked)return{false,"invalid session revoke response"};
+        if(session_id==session_.session_id){session_={};security_={};}
+        return{true,"session revoked"};
+    }
+
+    OperationResult RevokeOtherSessions()override{
+        std::lock_guard lock(mutex_);
+        if(!AuthenticatedLocked())return{false,"not authenticated"};
+        if(!Send({Type::RevokeOtherSessions,{session_.token}}))return{false,"send failed"};
+        Packet q;if(!Recv(q))return{false,"receive failed"};
+        if(q.type==Type::Error)return Error(q);
+        if(q.type!=Type::SessionsRevoked)return{false,"invalid session revoke response"};
+        sessions_.clear();
+        return{true,"other sessions revoked"};
+    }
+
+    OperationResult GetSecurityEvents()override{
+        std::lock_guard lock(mutex_);
+        if(!AuthenticatedLocked())return{false,"not authenticated"};
+        if(!Send({Type::GetSecurityEvents,{session_.token}}))return{false,"send failed"};
+        Packet q;if(!Recv(q))return{false,"receive failed"};
+        if(q.type==Type::Error)return Error(q);
+        if(q.type!=Type::SecurityEventsOk||q.fields.empty())return{false,"invalid security event list"};
+        const auto count=static_cast<std::size_t>(std::stoul(q.fields[0]));
+        if(q.fields.size()!=1+count*4)return{false,"invalid security event list size"};
+        events_.clear();
+        for(std::size_t i=0;i<count;++i){
+            const auto base=1+i*4;
+            contracts::auth::SecurityEvent e;
+            e.event_id=q.fields[base];
+            e.type=q.fields[base+1];
+            e.detail=q.fields[base+2];
+            e.created_at_epoch_seconds=std::stoll(q.fields[base+3]);
+            events_.push_back(std::move(e));
+        }
+        return{true,"security events loaded"};
+    }
+
+    const std::vector<contracts::auth::SecurityEvent>& SecurityEvents()const override{return events_;}
+
     bool IsAuthenticated()const override{
         std::lock_guard lock(mutex_);
-        return !session_.token.empty()&&session_.expires_at_epoch_seconds>
-            std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        return AuthenticatedLocked();
     }
 
     contracts::auth::AuthSession Session()const override{
@@ -215,6 +427,11 @@ private:
         return valid_username(u)&&valid_email(e)&&valid_text(d,64)&&p.size()>=8&&p.size()<=128;
     }
 
+    bool AuthenticatedLocked()const{
+        return running_.load()&&!session_.token.empty()&&session_.expires_at_epoch_seconds>
+            std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    }
+
     bool Send(const Packet&p){
         auto msg=luma::contracts::auth::wire::encode(p);
         std::size_t off=0;
@@ -227,8 +444,7 @@ private:
     }
 
     bool Recv(Packet&out){
-        std::string line;
-        char c=0;
+        std::string line;char c=0;
         while(true){
             const int n=::recv(socket_,&c,1,0);
             if(n<=0)return false;
@@ -236,8 +452,7 @@ private:
             line.push_back(c);
             if(line.size()>64*1024)return false;
         }
-        try{out=luma::contracts::auth::wire::decode_line(line);return true;}
-        catch(...){return false;}
+        try{out=luma::contracts::auth::wire::decode_line(line);return true;}catch(...){return false;}
     }
 
     OperationResult Error(const Packet&p){
@@ -250,6 +465,9 @@ private:
     Socket socket_{kInvalidSocket};
     mutable std::mutex mutex_;
     contracts::auth::AuthSession session_;
+    contracts::auth::SecuritySummary security_;
+    std::vector<contracts::auth::DeviceSession> sessions_;
+    std::vector<contracts::auth::SecurityEvent> events_;
 };
 
 std::unique_ptr<IAccountService>CreateAccountService(){return std::make_unique<AccountService>();}
