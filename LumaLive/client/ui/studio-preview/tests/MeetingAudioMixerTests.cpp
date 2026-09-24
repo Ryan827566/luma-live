@@ -1,0 +1,8 @@
+#include "MeetingAudioMixer.hpp"
+#include <iostream>
+#include <stdexcept>
+using Mixer=luma::client::ui::preview::MeetingAudioMixer;
+void require(bool value,const char* reason){if(!value)throw std::runtime_error(reason);}
+Mixer::Audio block(int16_t value){Mixer::Audio out;out.format=luma::client::media::pipeline::AudioSampleFormat::S16;out.sample_rate=48000;out.channels=1;out.data.resize(960);for(int i=0;i<480;++i)std::memcpy(out.data.data()+2*i,&value,2);return out;}
+void equal(const Mixer::Audio& frame,int16_t expected){require(frame.data.size()==960&&frame.sample_rate==48000&&frame.channels==1,"playout format");for(int i=0;i<480;++i){int16_t value;std::memcpy(&value,frame.data.data()+2*i,2);require(value==expected,"mixed sample mismatch");}}
+int main(){try{Mixer mixer;require(mixer.Push("a",block(1000))&&mixer.Push("b",block(2000)),"input");equal(mixer.Pull(),3000);equal(mixer.Pull(),0);mixer.Push("a",block(20000));mixer.Push("b",block(20000));equal(mixer.Pull(),32767);mixer.Push("a",block(1200));mixer.Remove("a");equal(mixer.Pull(),0);auto stereo=block(1000);stereo.channels=2;stereo.data.resize(1920);for(int i=0;i<480;++i){int16_t left=1000,right=3000;std::memcpy(stereo.data.data()+4*i,&left,2);std::memcpy(stereo.data.data()+4*i+2,&right,2);}require(mixer.Push("s",stereo),"stereo");equal(mixer.Pull(),2000);auto wrong=block(100);wrong.sample_rate=44100;require(!mixer.Push("s",wrong),"unsupported rate accepted");mixer.Clear();for(int i=1;i<=20;++i)mixer.Push("a",block(static_cast<int16_t>(i)));equal(mixer.Pull(),11);mixer.Clear();equal(mixer.Pull(),0);std::cout<<"PASS: simultaneous mixing, clipping, silence, removal, stereo, rate validation and bounded queue\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

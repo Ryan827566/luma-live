@@ -12,7 +12,7 @@ namespace luma::client::ui::preview {
 class MeetingSession {
 public:
     enum class State { Offline, Joining, Joined, Ended, Removed, Failed };
-    struct Member { std::string id; bool host{false}; std::string video{"off"}; bool microphone{false}; };
+    struct Member { std::string id; bool host{false}; std::string video{"off"}; bool microphone{false}; std::uint64_t instance{0}; };
     using Message=contracts::SignalingMessage;
     using Type=contracts::SignalingMessageType;
     ~MeetingSession(){Leave();}
@@ -33,8 +33,8 @@ public:
     void Leave(){if(state_==State::Joined)Send(Type::MeetingLeave);Finish(State::Offline,"Left meeting");}
     bool End(){return IsHost()&&Send(Type::MeetingEnd);}
     bool Remove(const std::string& member){return IsHost()&&member!=self_&&members_.count(member)&&Send(Type::MeetingKick,member);}
-    bool SetVideo(const std::string& source){if(state_!=State::Joined||(source!="off"&&source!="camera"&&source!="screen"))return false;if(!Send(Type::MeetingMediaState,"","video:"+source))return false;members_.at(self_).video=source;return true;}
-    bool SetMicrophone(bool enabled){if(state_!=State::Joined||!Send(Type::MeetingMediaState,"",enabled?"audio:on":"audio:off"))return false;members_.at(self_).microphone=enabled;return true;}
+    bool SetVideo(const std::string& source){if(state_!=State::Joined||(source!="off"&&source!="camera"&&source!="screen"))return false;if(members_.at(self_).video==source)return true;if(!Send(Type::MeetingMediaState,"","video:"+source))return false;members_.at(self_).video=source;return true;}
+    bool SetMicrophone(bool enabled){if(state_!=State::Joined)return false;if(members_.at(self_).microphone==enabled)return true;if(!Send(Type::MeetingMediaState,"",enabled?"audio:on":"audio:off"))return false;members_.at(self_).microphone=enabled;return true;}
     // The media controller owns SDP/ICE negotiation; never forward call messages.
     bool SendMedia(Message message){if(state_!=State::Joined||message.target_peer_id==self_||!members_.count(message.target_peer_id)||!IsMedia(message.type))return false;message.room_id=meeting_;message.peer_id=self_;message.sequence=epoch_;return transport_.Send(message);}
     void Poll(const std::function<void(const Message&)>& onMedia={}){
@@ -45,14 +45,14 @@ public:
             if(state_==State::Joining){
                 if(m.type==Type::Error&&m.target_peer_id==self_){Finish(State::Failed,m.value);return;}
                 if(m.type==Type::MeetingJoined&&m.peer_id==self_&&m.sequence>0&&!m.value.empty()){
-                    epoch_=m.sequence;host_=m.value;members_[self_]=Member{self_,self_==host_};state_=State::Joined;status_="Joined meeting";
+                    epoch_=m.sequence;host_=m.value;members_[self_]=Member{self_,self_==host_};members_[self_].instance=++nextInstance_;state_=State::Joined;status_="Joined meeting";
                 }
                 continue;
             }
             if(state_!=State::Joined||m.sequence!=epoch_)continue;
             if(m.type==Type::MeetingEnded){Finish(State::Ended,m.value);return;}
             if(m.type==Type::MeetingRemoved&&m.peer_id==self_){Finish(State::Removed,m.value);return;}
-            if(m.type==Type::MeetingMemberJoined&&!m.peer_id.empty()){members_.try_emplace(m.peer_id,Member{m.peer_id,m.peer_id==host_});continue;}
+            if(m.type==Type::MeetingMemberJoined&&!m.peer_id.empty()){auto [it,added]=members_.try_emplace(m.peer_id,Member{m.peer_id,m.peer_id==host_});if(added)it->second.instance=++nextInstance_;continue;}
             if(m.type==Type::MeetingMemberLeft){members_.erase(m.peer_id);continue;}
             if(m.type==Type::Error&&m.target_peer_id==self_){status_=m.value;continue;}
             auto member=members_.find(m.peer_id);if(member==members_.end())continue;
@@ -71,5 +71,6 @@ private:
     std::mutex mutex_;std::deque<Message> events_;std::atomic<bool> overflow_{false};
     std::string meeting_,self_,host_,status_;std::int64_t epoch_{0};State state_{State::Offline};Clock::time_point deadline_{};
     std::map<std::string,Member> members_;
+    std::uint64_t nextInstance_{0};
 };
 }

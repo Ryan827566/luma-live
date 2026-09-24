@@ -32,3 +32,13 @@ User authorized spending the remaining quota for this turn only; future turns re
 Added MeetingSession with UI-thread lifecycle/state, queued transport events, registration timeout, bounded event queue, epoch filtering, participant roster and host identity, host-only local removal/end controls, source/microphone state propagation, membership-gated SDP/ICE handoff, and cleanup on leave/end/removal/failure. This is a control layer, not a multiparty media implementation or meeting UI.
 
 Release build and three-client MeetingSessionTests passed: synchronized roster/roles, media-state updates, ordinary-member permission denial, host removal, rejoin using the same client object, leave, end, and missing-meeting failure. Next integrate per-peer WebRTC media and clocked audio mixing, then the meeting UI and three-way decoded-media acceptance.
+
+## Three-client decoded media and meeting preview checkpoint
+
+Implemented per-member native WebRTC mesh connections, membership-instance cleanup, bounded signaling/ICE queues, explicit local source controls and remote media-state gates. Added a common 10 ms playout mixer with bounded per-peer queues, stereo downmix, clipping and removal cleanup. WebRTC handles incoming network jitter; the mixer consumes decoded PCM on a shared output clock.
+
+Verified in Release: MeetingSessionTests, MeetingAudioMixerTests and MeetingMediaTests passed. Three local clients exchanged synthetic video and distinct audio tones over six directed native WebRTC receive paths; every client decoded remote video, received audible PCM and produced non-silent mixed output. Host removal and meeting end stopped the relevant media. This verifies actual codecs/transports using synthetic sources, not physical cameras, microphones or speakers.
+
+Added a separate native meeting preview window, accessible through the Studio meeting button or --meeting. It includes create/join/leave, roster/grid, camera/microphone/screen controls, mixed speaker output and host remove/end controls. Studio and signaling server Release builds passed; the application's offscreen empty-window render exited successfully. Interactive UI flows and device output are not yet accepted. The offscreen diagnostic does not fully render native edit controls and is not a product-design acceptance screenshot.
+
+Remaining: end-to-end UI acceptance, device selection, peer failure/recovery, pin/speaker/fullscreen interaction, product-quality Figma styling and physical-device/TURN validation. Meeting work remains partial on the development branch; do not merge this checkpoint as a completed module or start broadcasting.

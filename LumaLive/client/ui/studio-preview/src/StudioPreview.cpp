@@ -23,7 +23,7 @@ namespace luma::client::ui::preview {
 namespace {
 using Microsoft::WRL::ComPtr;
 constexpr COLORREF Bg=RGB(8,10,13), Panel=RGB(16,19,24), Border=RGB(39,45,55), Ink=RGB(232,237,245), Muted=RGB(145,155,171), Mint=RGB(0,145,245);
-enum Id {Open=100,Camera,Microphone,Monitor,Volume,TestSound,Refresh,CameraList,MicList,Pause,Stop,FileMode,CameraMode,FullScreen,Join,Host,Room,RemoteMode,Identity,Peers,Dial,AcceptCall,RejectCall,EndCall,ShareScreen,Reconnect};
+enum Id {Open=100,Camera,Microphone,Monitor,Volume,TestSound,Refresh,CameraList,MicList,Pause,Stop,FileMode,CameraMode,FullScreen,Join,Host,Room,RemoteMode,Identity,Peers,Dial,AcceptCall,RejectCall,EndCall,ShareScreen,Reconnect,Meeting};
 std::wstring Wide(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),nullptr,0);std::wstring out(n,L' ');MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),out.data(),n);return out;}
 void Fill(HDC dc,RECT r,COLORREF c){auto b=CreateSolidBrush(c);FillRect(dc,&r,b);DeleteObject(b);}
 void Text(HDC dc,const std::wstring& s,RECT r,HFONT font,COLORREF color=Ink,UINT flags=DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS){auto old=SelectObject(dc,font);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,color);DrawTextW(dc,s.c_str(),-1,&r,flags);SelectObject(dc,old);}
@@ -144,7 +144,7 @@ class StudioWindow {
         MoveWindow(remoteSurface_,remotePreview_.left,remotePreview_.top,remotePreview_.right-remotePreview_.left,remotePreview_.bottom-remotePreview_.top,TRUE);
         lower_=130+deckHeight+66;
         const int sourceWidth=(total-16)/2,mx=x+sourceWidth+16,rx=width_-right_+16;
-        Place(Open,width_-right_-174,52,158,32);Place(CameraMode,x,130+deckHeight+10,94,32);Place(FileMode,x+102,130+deckHeight+10,94,32);
+        Place(Meeting,width_-right_-348,52,158,32);Place(Open,width_-right_-174,52,158,32);Place(CameraMode,x,130+deckHeight+10,94,32);Place(FileMode,x+102,130+deckHeight+10,94,32);
         Place(Pause,x+206,130+deckHeight+10,74,32);Place(Stop,x+288,130+deckHeight+10,74,32);Place(FullScreen,end-112,130+deckHeight+10,112,32);
         Place(CameraList,x+12,lower_+66,sourceWidth-24,160);Place(Camera,x+12,lower_+104,sourceWidth-128,34);Place(Refresh,x+sourceWidth-108,lower_+104,96,34);
         Place(MicList,x+12,lower_+182,sourceWidth-24,160);Place(Microphone,x+12,lower_+220,sourceWidth-24,34);Place(ShareScreen,x+12,lower_+262,sourceWidth-24,28);
@@ -228,6 +228,7 @@ class StudioWindow {
     }
     void Command(int id){
         switch(id){
+        case Meeting:{wchar_t executable[32768]{};GetModuleFileNameW(nullptr,executable,32768);std::wstring command=L"\""+std::wstring(executable)+L"\" --meeting";STARTUPINFOW startup{sizeof(startup)};PROCESS_INFORMATION process{};if(CreateProcessW(executable,command.data(),nullptr,nullptr,FALSE,0,nullptr,nullptr,&startup,&process)){CloseHandle(process.hThread);CloseHandle(process.hProcess);}else status_=L"Unable to open meeting preview";break;}
         case Open:OpenFile();break;
         case Camera:ToggleCamera();break;
         case ShareScreen:if(screen_.IsCapturing()){screen_.Stop();call_.SetVideoSource("off");video_.Clear();SetWindowTextW(Control(ShareScreen),L"共享主屏幕");status_=L"屏幕共享已停止";}else{expectCamera_=false;capture_->StopCamera();SetWindowTextW(Control(Camera),L"开启摄像头");EnableWindow(Control(CameraList),!cameras_.devices.empty());CloseFile();cameraView_=true;videoCount_=0;reportedScreenError_.clear();call_.SetVideoSource("off");if(screen_.Start([this](VideoFrame f){video_.Put(f);call_.Video(f);++videoCount_;})){call_.SetVideoSource("screen");SetWindowTextW(Control(ShareScreen),L"停止共享主屏幕");status_=L"正在共享主屏幕 · 通话接通后对方可见";}else status_=Wide(screen_.LastError());}break;
@@ -308,7 +309,7 @@ public:
         dpi_=GetDpiForWindow(window_);Fonts();BOOL dark=TRUE;DwmSetWindowAttribute(window_,20,&dark,sizeof(dark));
         surface_=CreateWindowExW(0,L"LumaVideoSurface",L"视频预览",WS_CHILD|WS_VISIBLE,0,0,1,1,window_,nullptr,instance,this);
         remoteSurface_=CreateWindowExW(0,L"LumaVideoSurface",L"远端视频",WS_CHILD|WS_VISIBLE,0,0,1,1,window_,nullptr,instance,this);
-        Button(Open,L"打开媒体文件");Button(CameraMode,L"摄像头");Button(FileMode,L"媒体文件");Button(Camera,L"开启摄像头");Button(Refresh,L"刷新设备");Button(Microphone,L"开启麦克风");Button(Monitor,L"监听：关闭");Button(TestSound,L"测试扬声器");Button(Pause,L"暂停");Button(Stop,L"停止播放");Button(FullScreen,L"全屏预览");
+        Button(Meeting,L"视频会议（预览）");Button(Open,L"打开媒体文件");Button(CameraMode,L"摄像头");Button(FileMode,L"媒体文件");Button(Camera,L"开启摄像头");Button(Refresh,L"刷新设备");Button(Microphone,L"开启麦克风");Button(Monitor,L"监听：关闭");Button(TestSound,L"测试扬声器");Button(Pause,L"暂停");Button(Stop,L"停止播放");Button(FullScreen,L"全屏预览");
         Button(RemoteMode,L"实时连线");Button(Join,L"加入房间");Make(Host,L"EDIT",L"127.0.0.1:9000",WS_BORDER|ES_AUTOHSCROLL);Make(Room,L"EDIT",L"luma-demo",WS_BORDER|ES_AUTOHSCROLL);
         Make(Identity,L"EDIT",(L"studio-"+std::to_wstring(GetCurrentProcessId())).c_str(),WS_BORDER|ES_AUTOHSCROLL);Make(Peers,L"COMBOBOX",L"通话对象",CBS_DROPDOWNLIST|WS_VSCROLL);Button(ShareScreen,L"共享主屏幕");Button(Dial,L"发起视频通话");Button(AcceptCall,L"接听");Button(RejectCall,L"拒绝");Button(EndCall,L"结束通话");Button(Reconnect,L"重新连接");for(int id:{Dial,AcceptCall,RejectCall,EndCall,Reconnect})EnableWindow(Control(id),FALSE);
         Make(CameraList,L"COMBOBOX",L"摄像头",CBS_DROPDOWNLIST|WS_VSCROLL);Make(MicList,L"COMBOBOX",L"麦克风",CBS_DROPDOWNLIST|WS_VSCROLL);Make(Volume,TRACKBAR_CLASSW,L"输出音量",TBS_HORZ|TBS_NOTICKS);SendMessageW(Control(Volume),TBM_SETRANGE,TRUE,MAKELPARAM(0,100));SendMessageW(Control(Volume),TBM_SETPOS,TRUE,volume_);EnableWindow(Control(Monitor),FALSE);
@@ -323,6 +324,7 @@ public:
 };
 }
 int RunStudioPreview(HINSTANCE instance,int show){
+    if(std::wstring(GetCommandLineW()).find(L"--meeting")!=std::wstring::npos)return RunMeetingPreview(instance,show);
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const auto com=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);if(FAILED(com))return 1;
     INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_BAR_CLASSES|ICC_STANDARD_CLASSES};InitCommonControlsEx(&controls);

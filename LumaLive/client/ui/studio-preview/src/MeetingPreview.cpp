@@ -1,0 +1,75 @@
+#include "StudioPreview.hpp"
+#include "MeetingMedia.hpp"
+#include "PreviewMedia.hpp"
+#include "AudioOutput.hpp"
+#include "DeviceCaptureFactory.hpp"
+#include "ScreenCaptureService.hpp"
+#include <commctrl.h>
+#include <objbase.h>
+#include <fstream>
+#include <filesystem>
+#include <dwmapi.h>
+#include <array>
+#include <thread>
+namespace luma::client::ui::preview {
+namespace {
+std::wstring wide(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),nullptr,0);std::wstring out(n,L' ');MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),out.data(),n);return out;}
+std::string utf8(const std::wstring& s){int n=WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),nullptr,0,nullptr,nullptr);std::string out(n,' ');WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),out.data(),n,nullptr,nullptr);return out;}
+class MeetingWindow {
+ enum{Server=200,Room,Identity,Create,Join,Leave,Camera,Microphone,Screen,Speaker,Peers,Remove,End};
+ HWND window_{};std::array<HWND,13> controls_{};HFONT font_{};HBRUSH background_=CreateSolidBrush(RGB(10,13,18));
+ MeetingMedia meeting_;std::unique_ptr<media::IDeviceCaptureService> capture_;media::ScreenCaptureService screen_;AudioOutput output_;
+ std::mutex frameMutex_;std::map<std::string,std::shared_ptr<VideoFrame>> frames_;std::string self_;std::wstring status_=L"Create or join a meeting to begin";
+ std::atomic<bool> running_{true},playing_{false},audioError_{false};std::thread audioThread_;bool closed_=false,muted_=false;std::vector<std::string> roster_;
+ HWND control(int id){return controls_[id-Server];}
+ std::wstring value(int id){wchar_t text[256]{};GetWindowTextW(control(id),text,256);return text;}
+ void add(int id,const wchar_t* cls,const wchar_t* label,DWORD style=0){auto h=CreateWindowExW(0,cls,label,WS_CHILD|WS_VISIBLE|WS_TABSTOP|style,0,0,1,1,window_,reinterpret_cast<HMENU>(INT_PTR(id)),nullptr,nullptr);controls_[id-Server]=h;SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(font_),TRUE);}
+ void layout(){RECT r;GetClientRect(window_,&r);int x=20;for(auto [id,w]:{std::pair<int,int>{Server,220},{Room,190},{Identity,180},{Create,130},{Join,100},{Leave,100}}){MoveWindow(control(id),x,65,w,30,TRUE);x+=w+10;}
+  x=20;for(int id:{Camera,Microphone,Screen,Speaker}){MoveWindow(control(id),x,r.bottom-95,150,32,TRUE);x+=160;}MoveWindow(control(Peers),x,r.bottom-95,160,150,TRUE);x+=170;MoveWindow(control(Remove),x,r.bottom-95,130,32,TRUE);MoveWindow(control(End),r.right-155,r.bottom-48,135,30,TRUE);}
+ void frame(const std::string& id,VideoFrame f){auto converted=ToBgra(f);if(converted){std::lock_guard lock(frameMutex_);frames_[id]=std::move(converted);}}
+ void stopInputs(){screen_.Stop();if(capture_){capture_->StopCamera();capture_->StopMicrophone();}meeting_.SetVideo("off");meeting_.SetMicrophone(false);}
+ void shutdown(){if(closed_)return;closed_=true;KillTimer(window_,1);stopInputs();playing_=false;running_=false;if(audioThread_.joinable())audioThread_.join();meeting_.Leave();if(capture_)capture_->Stop();}
+ void command(int id){
+  if(id==Create||id==Join){stopInputs();meeting_.Leave();{std::lock_guard lock(frameMutex_);frames_.clear();}auto host=utf8(value(Server));auto at=host.rfind(':');int port=9000;if(at!=std::string::npos){try{size_t used=0;auto text=host.substr(at+1);port=std::stoi(text,&used);if(used!=text.size())port=0;}catch(...){port=0;}host.resize(at);}if(port<1||port>65535){status_=L"Invalid server port";return;}
+   self_=utf8(value(Identity));MeetingMedia::Callbacks cb;cb.video=[this](const std::string& peer,VideoFrame f){frame(peer,std::move(f));};
+   if(!meeting_.Start(host,static_cast<std::uint16_t>(port),utf8(value(Room)),self_,id==Create,std::move(cb)))status_=wide(meeting_.Session().Status());else status_=L"Joining meeting...";
+  }else if(id==Leave){stopInputs();meeting_.Leave();status_=L"Left meeting";}
+  else if(id==End){meeting_.Session().End();}
+  else if(id==Remove){auto selected=SendMessageW(control(Peers),CB_GETCURSEL,0,0);if(selected>=0&&size_t(selected)<roster_.size())meeting_.Session().Remove(roster_[selected]);}
+  else if(id==Speaker){muted_=!muted_;output_.SetVolume(muted_?0.f:.65f);}
+  else if(id==Camera){if(capture_->IsCameraCapturing()){capture_->StopCamera();meeting_.SetVideo("off");}else{screen_.Stop();meeting_.SetVideo("off");auto devices=capture_->EnumerateDevices(media::CaptureDeviceType::Camera);if(devices.devices.empty()){status_=L"No camera available";return;}media::CameraCaptureConfig cfg;cfg.device_id=devices.devices.front().id;cfg.width=640;cfg.height=480;auto result=capture_->StartCamera(cfg,[this](VideoFrame f){frame(self_,f);meeting_.VideoFrame(f);});if(result.IsOk())meeting_.SetVideo("camera");else status_=wide(result.Message());}}
+  else if(id==Screen){if(screen_.IsCapturing()){screen_.Stop();meeting_.SetVideo("off");}else{capture_->StopCamera();meeting_.SetVideo("off");if(screen_.Start([this](VideoFrame f){frame(self_,f);meeting_.VideoFrame(f);}))meeting_.SetVideo("screen");else status_=wide(screen_.LastError());}}
+  else if(id==Microphone){if(capture_->IsMicrophoneCapturing()){capture_->StopMicrophone();meeting_.SetMicrophone(false);}else{auto devices=capture_->EnumerateDevices(media::CaptureDeviceType::Microphone);if(devices.devices.empty()){status_=L"No microphone available";return;}media::AudioCaptureConfig cfg;cfg.device_id=devices.devices.front().id;cfg.channels=1;auto result=capture_->StartMicrophone(cfg,[this](AudioFrame f){meeting_.AudioFrame(f);});if(result.IsOk())meeting_.SetMicrophone(true);else status_=wide(result.Message());}}
+ }
+ void poll(){meeting_.Poll();const auto state=meeting_.Session().GetState();const bool joined=state==MeetingSession::State::Joined;playing_=joined;
+  if(!joined&&(capture_->IsCameraCapturing()||capture_->IsMicrophoneCapturing()||screen_.IsCapturing()))stopInputs();
+  if(joined){const auto& self=meeting_.Session().Members().at(self_);if(self.video=="camera"&&!capture_->IsCameraCapturing()){meeting_.SetVideo("off");status_=L"Camera capture interrupted";}if(self.video=="screen"&&!screen_.IsCapturing()){meeting_.SetVideo("off");status_=wide(screen_.LastError());}if(self.microphone&&!capture_->IsMicrophoneCapturing()){meeting_.SetMicrophone(false);status_=L"Microphone capture interrupted";}}
+  if(state==MeetingSession::State::Failed||state==MeetingSession::State::Ended||state==MeetingSession::State::Removed)status_=wide(meeting_.Session().Status());if(!meeting_.Error().empty())status_=wide(meeting_.Error());if(audioError_.exchange(false))status_=L"Speaker output unavailable or overloaded";
+  for(int id:{Camera,Microphone,Screen,Leave})EnableWindow(control(id),joined);for(int id:{Server,Room,Identity,Create,Join})EnableWindow(control(id),!joined&&state!=MeetingSession::State::Joining);EnableWindow(control(End),meeting_.Session().IsHost());EnableWindow(control(Remove),meeting_.Session().IsHost());
+  SetWindowTextW(control(Camera),capture_->IsCameraCapturing()?L"Camera: ON":L"Camera: OFF");SetWindowTextW(control(Microphone),capture_->IsMicrophoneCapturing()?L"Microphone: ON":L"Microphone: OFF");SetWindowTextW(control(Screen),screen_.IsCapturing()?L"Stop sharing":L"Share screen");SetWindowTextW(control(Speaker),muted_?L"Speaker: muted":L"Speaker: ON");
+  if(joined&&status_==L"Joining meeting...")status_=L"Meeting connected - enable your camera or microphone";
+  std::vector<std::string> roster;for(const auto& [id,member]:meeting_.Session().Members())roster.push_back(id);if(roster!=roster_){roster_=roster;SendMessageW(control(Peers),CB_RESETCONTENT,0,0);for(const auto& id:roster_){auto label=wide(id);SendMessageW(control(Peers),CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label.c_str()));}SendMessageW(control(Peers),CB_SETCURSEL,0,0);}
+  {std::lock_guard lock(frameMutex_);for(auto it=frames_.begin();it!=frames_.end();){auto member=meeting_.Session().Members().find(it->first);if(member==meeting_.Session().Members().end()||member->second.video=="off")it=frames_.erase(it);else ++it;}}
+  InvalidateRect(window_,nullptr,FALSE);
+ }
+ void paint(HDC dc){RECT r;GetClientRect(window_,&r);FillRect(dc,&r,background_);SelectObject(dc,font_);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(228,236,248));auto label=[&](std::wstring s,RECT area){DrawTextW(dc,s.c_str(),-1,&area,DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);};label(L"LUMALIVE  /  MEETING PREVIEW",{20,12,r.right-20,42});label(L"Server                             Meeting ID                         Participant ID",{20,40,800,63});
+  const auto count=meeting_.Session().Members().size();int columns=count>4?3:count>1?2:1;int rows=std::max(1,int((count+columns-1)/columns));int w=(r.right-40-(columns-1)*12)/columns,h=(r.bottom-240-(rows-1)*12)/rows;int i=0;
+  for(const auto& [id,member]:meeting_.Session().Members()){RECT tile{20+(i%columns)*(w+12),115+(i/columns)*(h+12),20+(i%columns)*(w+12)+w,115+(i/columns)*(h+12)+h};auto brush=CreateSolidBrush(RGB(24,31,42));FillRect(dc,&tile,brush);DeleteObject(brush);std::shared_ptr<VideoFrame> f;{std::lock_guard lock(frameMutex_);auto it=frames_.find(id);if(it!=frames_.end())f=it->second;}
+   if(f&&member.video!="off"){double ratio=std::min(double(w)/f->width,double(h-32)/f->height);int fw=int(f->width*ratio),fh=int(f->height*ratio);BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=f->width;info.bmiHeader.biHeight=-LONG(f->height);info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;StretchDIBits(dc,tile.left+(w-fw)/2,tile.top+(h-32-fh)/2,fw,fh,0,0,f->width,f->height,f->data.data(),&info,DIB_RGB_COLORS,SRCCOPY);}else label(L"Video off / waiting for frames",{tile.left+16,tile.top+30,tile.right-10,tile.bottom-32});label(wide(id)+(member.host?L"  HOST":L"")+(member.microphone?L"  MIC ON":L"  MUTED"),{tile.left+10,tile.bottom-30,tile.right-10,tile.bottom});++i;}
+  if(!count)label(L"Create a meeting, or join an existing meeting with its ID.",{25,160,r.right-25,200});label(status_,{20,r.bottom-50,r.right-170,r.bottom-15});
+ }
+ static LRESULT CALLBACK proc(HWND h,UINT m,WPARAM w,LPARAM l){auto self=reinterpret_cast<MeetingWindow*>(GetWindowLongPtrW(h,GWLP_USERDATA));if(m==WM_NCCREATE){self=static_cast<MeetingWindow*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);self->window_=h;SetWindowLongPtrW(h,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));}if(!self)return DefWindowProcW(h,m,w,l);
+  switch(m){case WM_SIZE:self->layout();return 0;case WM_GETMINMAXINFO:reinterpret_cast<MINMAXINFO*>(l)->ptMinTrackSize={1200,720};return 0;case WM_TIMER:self->poll();return 0;case WM_COMMAND:if(HIWORD(w)==BN_CLICKED)self->command(LOWORD(w));return 0;case WM_ERASEBKGND:return 1;case WM_PAINT:{PAINTSTRUCT ps;auto dc=BeginPaint(h,&ps);RECT r;GetClientRect(h,&r);auto mem=CreateCompatibleDC(dc);auto bitmap=CreateCompatibleBitmap(dc,r.right,r.bottom);auto previous=SelectObject(mem,bitmap);self->paint(mem);BitBlt(dc,0,0,r.right,r.bottom,mem,0,0,SRCCOPY);SelectObject(mem,previous);DeleteObject(bitmap);DeleteDC(mem);EndPaint(h,&ps);return 0;}case WM_CLOSE:self->shutdown();DestroyWindow(h);return 0;case WM_DESTROY:PostQuitMessage(0);return 0;}return DefWindowProcW(h,m,w,l);
+ }
+bool render(const wchar_t* path){RECT r;GetClientRect(window_,&r);auto dc=GetDC(window_);auto mem=CreateCompatibleDC(dc);auto bitmap=CreateCompatibleBitmap(dc,r.right,r.bottom);ReleaseDC(window_,dc);if(!mem||!bitmap)return false;auto previous=SelectObject(mem,bitmap);paint(mem);for(auto control:controls_){RECT area;GetWindowRect(control,&area);MapWindowPoints(nullptr,window_,reinterpret_cast<POINT*>(&area),2);int saved=SaveDC(mem);SetViewportOrgEx(mem,area.left,area.top,nullptr);SendMessageW(control,WM_PRINT,reinterpret_cast<WPARAM>(mem),PRF_CLIENT|PRF_NONCLIENT);RestoreDC(mem,saved);}SelectObject(mem,previous);BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=r.right;info.bmiHeader.biHeight=-r.bottom;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;std::vector<unsigned char> pixels(size_t(r.right)*r.bottom*4);bool ok=GetDIBits(mem,bitmap,0,r.bottom,pixels.data(),&info,DIB_RGB_COLORS)==r.bottom;DeleteObject(bitmap);DeleteDC(mem);if(!ok)return false;BITMAPFILEHEADER file{};file.bfType=0x4d42;file.bfOffBits=sizeof(file)+sizeof(info.bmiHeader);file.bfSize=file.bfOffBits+DWORD(pixels.size());std::ofstream output(std::filesystem::path(path),std::ios::binary);output.write(reinterpret_cast<const char*>(&file),sizeof(file));output.write(reinterpret_cast<const char*>(&info.bmiHeader),sizeof(info.bmiHeader));output.write(reinterpret_cast<const char*>(pixels.data()),pixels.size());return bool(output);}
+public:
+ ~MeetingWindow(){shutdown();if(font_)DeleteObject(font_);DeleteObject(background_);}
+ int Run(HINSTANCE instance,int show){WNDCLASSW wc{};wc.hInstance=instance;wc.lpfnWndProc=proc;wc.lpszClassName=L"LumaMeetingPreview";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&wc);window_=CreateWindowExW(0,wc.lpszClassName,L"LumaLive - Meeting Preview",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,1280,850,nullptr,nullptr,instance,this);if(!window_)return 1;font_=CreateFontW(-16,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,0,0,L"Segoe UI");BOOL dark=TRUE;DwmSetWindowAttribute(window_,20,&dark,sizeof(dark));
+  add(Server,L"EDIT",L"127.0.0.1:9000",WS_BORDER|ES_AUTOHSCROLL);add(Room,L"EDIT",L"luma-meeting",WS_BORDER|ES_AUTOHSCROLL);add(Identity,L"EDIT",(L"member-"+std::to_wstring(GetCurrentProcessId())).c_str(),WS_BORDER|ES_AUTOHSCROLL);
+  for(auto [id,label]:{std::pair<int,const wchar_t*>{Create,L"Create meeting"},{Join,L"Join"},{Leave,L"Leave"},{Camera,L"Camera: OFF"},{Microphone,L"Microphone: OFF"},{Screen,L"Share screen"},{Speaker,L"Speaker: ON"},{Remove,L"Remove member"},{End,L"End meeting"}})add(id,L"BUTTON",label);
+  add(Peers,L"COMBOBOX",L"Members",CBS_DROPDOWNLIST|WS_VSCROLL);capture_=media::CreateDeviceCaptureService();auto started=capture_->Start();if(!started.IsOk())status_=wide(started.Message());layout();poll();wchar_t renderPath[32768]{};if(GetEnvironmentVariableW(L"LUMALIVE_MEETING_RENDER_PATH",renderPath,32768)){bool ok=std::filesystem::path(renderPath).is_absolute()&&render(renderPath);shutdown();DestroyWindow(window_);return ok?0:2;}audioThread_=std::thread([this]{auto next=std::chrono::steady_clock::now();while(running_){if(playing_){if(!output_.Push(meeting_.MixAudio()))audioError_=true;}else output_.Close();next+=std::chrono::milliseconds(10);if(next<std::chrono::steady_clock::now()-std::chrono::milliseconds(30))next=std::chrono::steady_clock::now();std::this_thread::sleep_until(next);}output_.Close();});SetTimer(window_,1,33,nullptr);ShowWindow(window_,show);MSG message{};while(GetMessageW(&message,nullptr,0,0)>0){if(!IsDialogMessageW(window_,&message)){TranslateMessage(&message);DispatchMessageW(&message);}}return int(message.wParam);
+ }
+};
+}
+int RunMeetingPreview(HINSTANCE instance,int show){SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);auto com=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);if(FAILED(com))return 1;int result;{MeetingWindow window;result=window.Run(instance,show);}CoUninitialize();return result;}
+}
