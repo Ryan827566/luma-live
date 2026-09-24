@@ -58,6 +58,7 @@ class StudioWindow {
     std::vector<std::string> shownPeers_;
     CallState shownCallState_{CallState::Offline};
     std::string reportedScreenError_;
+    bool expectCamera_{false},expectMicrophone_{false};
     std::atomic<uint64_t> remoteVideos_{0},remoteAudios_{0};
     std::atomic<float> remotePeak_{0};
     std::atomic<float> peak_{0};std::atomic<bool> monitor_{false};std::atomic<uint64_t> videoCount_{0},audioCount_{0};
@@ -85,6 +86,7 @@ class StudioWindow {
         EnableWindow(Control(Camera),!cameras_.devices.empty());EnableWindow(Control(Microphone),!microphones_.devices.empty());
     }
     void ToggleCamera(){
+        expectCamera_=false;
         if(screen_.IsCapturing()){screen_.Stop();call_.SetVideoSource("off");SetWindowTextW(Control(ShareScreen),L"共享主屏幕");}
         if(capture_->IsCameraCapturing()){capture_->StopCamera();call_.SetVideoSource("off");video_.Clear();SetWindowTextW(Control(Camera),L"开启摄像头");status_=L"摄像头已关闭";}
         else {
@@ -93,19 +95,20 @@ class StudioWindow {
             auto callback=[this](VideoFrame frame){video_.Put(frame);call_.Video(frame);++videoCount_;};
             auto result=capture_->StartCamera(config,callback);
             if(!result.IsOk()){config.width=640;config.height=480;result=capture_->StartCamera(config,callback);}
-            if(result.IsOk()){call_.SetVideoSource("camera");SetWindowTextW(Control(Camera),L"关闭摄像头");status_=L"摄像头已开启 · 等待第一帧";}
+            if(result.IsOk()){expectCamera_=true;call_.SetVideoSource("camera");SetWindowTextW(Control(Camera),L"关闭摄像头");status_=L"摄像头已开启 · 等待第一帧";}
             else status_=L"摄像头无法开启："+Wide(result.Message())+L"。请检查系统隐私权限或关闭占用它的程序。";
         }
         EnableWindow(Control(CameraList),!capture_->IsCameraCapturing()&&!cameras_.devices.empty());
         InvalidateRect(surface_,nullptr,FALSE);InvalidateRect(window_,nullptr,FALSE);
     }
     void ToggleMicrophone(){
+        expectMicrophone_=false;
         if(capture_->IsMicrophoneCapturing()){monitor_=false;capture_->StopMicrophone();audio_.Close();peak_=0;SetWindowTextW(Control(Microphone),L"开启麦克风");SetWindowTextW(Control(Monitor),L"监听：关闭");status_=L"麦克风已关闭";}
         else {
             auto index=SendMessageW(Control(MicList),CB_GETCURSEL,0,0);if(index<0||size_t(index)>=microphones_.devices.size())return;
             media::AudioCaptureConfig config;config.device_id=microphones_.devices[index].id;config.channels=1;audioCount_=0;audioFailed_=false;
             auto result=capture_->StartMicrophone(config,[this](AudioFrame f){peak_=Peak(f);call_.Audio(f);++audioCount_;if(monitor_&&!audio_.Push(f))audioFailed_=true;});
-            if(result.IsOk()){SetWindowTextW(Control(Microphone),L"关闭麦克风");status_=L"麦克风已开启 · 戴上耳机后可开启监听";}else status_=L"麦克风无法开启："+Wide(result.Message());
+            if(result.IsOk()){expectMicrophone_=true;SetWindowTextW(Control(Microphone),L"关闭麦克风");status_=L"麦克风已开启 · 戴上耳机后可开启监听";}else status_=L"麦克风无法开启："+Wide(result.Message());
         }
         EnableWindow(Control(MicList),!capture_->IsMicrophoneCapturing()&&!microphones_.devices.empty());EnableWindow(Control(Monitor),capture_->IsMicrophoneCapturing());InvalidateRect(window_,nullptr,FALSE);
     }
@@ -116,7 +119,7 @@ class StudioWindow {
     }
     void OpenMedia(const wchar_t* path){
         screen_.Stop();call_.SetVideoSource("off");SetWindowTextW(Control(ShareScreen),L"共享主屏幕");
-        capture_->StopCamera();SetWindowTextW(Control(Camera),L"开启摄像头");
+        expectCamera_=false;capture_->StopCamera();SetWindowTextW(Control(Camera),L"开启摄像头");
         EnableWindow(Control(CameraList),!cameras_.devices.empty());video_.Clear();
         CloseFile();cameraView_=false;fileName_=std::filesystem::path(path).filename().wstring();playback_=std::make_shared<PlaybackState>();
         auto* cb=new PlayerEvents(playback_);auto hr=MFPCreateMediaPlayer(nullptr,FALSE,0,cb,surface_,&player_);cb->Release();
@@ -227,7 +230,7 @@ class StudioWindow {
         switch(id){
         case Open:OpenFile();break;
         case Camera:ToggleCamera();break;
-        case ShareScreen:if(screen_.IsCapturing()){screen_.Stop();call_.SetVideoSource("off");video_.Clear();SetWindowTextW(Control(ShareScreen),L"共享主屏幕");status_=L"屏幕共享已停止";}else{capture_->StopCamera();SetWindowTextW(Control(Camera),L"开启摄像头");EnableWindow(Control(CameraList),!cameras_.devices.empty());CloseFile();cameraView_=true;videoCount_=0;reportedScreenError_.clear();call_.SetVideoSource("off");if(screen_.Start([this](VideoFrame f){video_.Put(f);call_.Video(f);++videoCount_;})){call_.SetVideoSource("screen");SetWindowTextW(Control(ShareScreen),L"停止共享主屏幕");status_=L"正在共享主屏幕 · 通话接通后对方可见";}else status_=Wide(screen_.LastError());}break;
+        case ShareScreen:if(screen_.IsCapturing()){screen_.Stop();call_.SetVideoSource("off");video_.Clear();SetWindowTextW(Control(ShareScreen),L"共享主屏幕");status_=L"屏幕共享已停止";}else{expectCamera_=false;capture_->StopCamera();SetWindowTextW(Control(Camera),L"开启摄像头");EnableWindow(Control(CameraList),!cameras_.devices.empty());CloseFile();cameraView_=true;videoCount_=0;reportedScreenError_.clear();call_.SetVideoSource("off");if(screen_.Start([this](VideoFrame f){video_.Put(f);call_.Video(f);++videoCount_;})){call_.SetVideoSource("screen");SetWindowTextW(Control(ShareScreen),L"停止共享主屏幕");status_=L"正在共享主屏幕 · 通话接通后对方可见";}else status_=Wide(screen_.LastError());}break;
         case Microphone:ToggleMicrophone();break;
         case Monitor:monitor_=!monitor_;if(!monitor_)audio_.Close();SetWindowTextW(Control(Monitor),monitor_?L"监听：开启":L"监听：关闭");break;
         case TestSound:TestAudio();break;
@@ -273,6 +276,8 @@ class StudioWindow {
         case WM_COMMAND:if(HIWORD(wp)==BN_CLICKED)Command(LOWORD(wp));return 0;
         case WM_HSCROLL:if(reinterpret_cast<HWND>(lp)==Control(Volume)){volume_=static_cast<int>(SendMessageW(Control(Volume),TBM_GETPOS,0,0));audio_.SetVolume(volume_/100.f);remoteAudio_.SetVolume(volume_/100.f);if(player_)player_->SetVolume(volume_/100.f);InvalidateRect(window_,nullptr,FALSE);}return 0;
         case WM_TIMER:{
+            if(expectCamera_&&!capture_->IsCameraCapturing()){expectCamera_=false;capture_->StopCamera();call_.SetVideoSource("off");video_.Clear();SetWindowTextW(Control(Camera),L"开启摄像头");EnableWindow(Control(CameraList),!cameras_.devices.empty());status_=L"摄像头采集意外停止，请检查设备后重新开启";}
+            if(expectMicrophone_&&!capture_->IsMicrophoneCapturing()){expectMicrophone_=false;capture_->StopMicrophone();monitor_=false;audio_.Close();peak_=0;SetWindowTextW(Control(Microphone),L"开启麦克风");SetWindowTextW(Control(Monitor),L"监听：关闭");EnableWindow(Control(Monitor),FALSE);EnableWindow(Control(MicList),!microphones_.devices.empty());status_=L"麦克风采集意外停止，请检查设备后重新开启";}
             remotePeak_.store(remotePeak_.load()*0.9f);
             if(call_.Active()){auto state=call_.Poll();if(!state.empty())status_=L"连线状态："+Wide(state);}
             if(shownPeers_!=call_.Participants()){std::wstring selected;wchar_t name[256]{};GetWindowTextW(Control(Peers),name,256);selected=name;shownPeers_=call_.Participants();SendMessageW(Control(Peers),CB_RESETCONTENT,0,0);int selectedIndex=0;for(size_t i=0;i<shownPeers_.size();++i){auto name=Wide(shownPeers_[i]);SendMessageW(Control(Peers),CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name.c_str()));if(name==selected)selectedIndex=static_cast<int>(i);}SendMessageW(Control(Peers),CB_SETCURSEL,selectedIndex,0);}

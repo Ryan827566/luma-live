@@ -204,6 +204,10 @@ public:
 private:
 #ifdef _WIN32
     shared::contracts::Result StartStream(CaptureDeviceType type, const CameraCaptureConfig& camera, const AudioCaptureConfig& audio, VideoFrameCallback video_cb, AudioFrameCallback audio_cb) {
+        // A device can disappear and end its worker without an explicit Stop.
+        // Reap that completed thread before assigning the replacement.
+        auto& previous_worker = type == CaptureDeviceType::Camera ? camera_thread_ : microphone_thread_;
+        if (previous_worker.joinable()) previous_worker.join();
         IMFActivate* activate = nullptr;
         HRESULT hr = FindDevice(type == CaptureDeviceType::Camera ? camera.device_id : audio.device_id, type, &activate);
         if (FAILED(hr)) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidArgument, "capture device not found");
@@ -299,13 +303,18 @@ private:
         if (!active && !worker.joinable()) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidState, "capture stream is not running");
         active = false;
 #ifdef _WIN32
+        IMFSourceReader* reader = nullptr;
         {
             std::lock_guard reader_lock(reader_mutex_);
-            IMFSourceReader* reader = (&worker == &camera_thread_) ? camera_reader_ : microphone_reader_;
-            if (reader) {
-                const DWORD stream = (&worker == &camera_thread_) ? MF_SOURCE_READER_FIRST_VIDEO_STREAM : MF_SOURCE_READER_FIRST_AUDIO_STREAM;
-                reader->Flush(stream);
-            }
+            reader = (&worker == &camera_thread_) ? camera_reader_ : microphone_reader_;
+            if (reader) reader->AddRef();
+        }
+        // Do not hold the slot lock while Media Foundation drains the stream;
+        // the capture worker needs it to release its reader and exit.
+        if (reader) {
+            const DWORD stream = (&worker == &camera_thread_) ? MF_SOURCE_READER_FIRST_VIDEO_STREAM : MF_SOURCE_READER_FIRST_AUDIO_STREAM;
+            reader->Flush(stream);
+            reader->Release();
         }
 #endif
         if (worker.joinable()) worker.join();

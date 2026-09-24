@@ -34,3 +34,5 @@ Shutdown regression passed again. Actual display capture remains SKIPPED (77) be
 UI reconnect remains enabled for an established call that has moved into recovery. Full module acceptance remains pending physical-device/manual UI checks and contact/user integration noted above. No broadcast development was started.
 
 Local runnable preview is prepared in outputs/LumaLive-call-preview (outside the source repository). Launch signaling server, then two Studio instances; join the same room with distinct participant IDs; select a participant and call, then accept in the other window. Use headphones for two clients on one computer. The automated call test uses synthetic sources, while actual devices require the interactive desktop.
+
+Device interruption follow-up: completed capture workers are joined before a restart, and Media Foundation Flush no longer runs under the reader-slot mutex. UI detects unexpected camera/microphone termination, clears stale local video and remote source state, resets controls and shows an error. Release build and full call regression passed after this change. Actual device unplug/replug is still pending interactive hardware acceptance.
