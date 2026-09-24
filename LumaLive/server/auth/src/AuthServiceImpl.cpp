@@ -77,7 +77,10 @@ Result Stop()override{
  ::shutdown(c.socket,SHUT_RDWR);
 #endif
  }}
- for(auto&t:client_threads_)if(t.joinable())t.join();client_threads_.clear();
+ for(auto& t:client_threads_){
+     if(t.joinable()) t.join();
+ }
+ client_threads_.clear();
  {std::lock_guard cl(clients_mutex_);clients_.clear();}{std::lock_guard sl(session_mutex_);sessions_.clear();}return Result::Ok();
 }
 bool IsRunning()const override{return running_.load();}
