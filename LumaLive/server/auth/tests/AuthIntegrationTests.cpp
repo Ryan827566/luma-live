@@ -4,9 +4,11 @@
 #include "contracts/auth/AuthCrypto.hpp"
 #include <cassert>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <span>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -40,8 +42,14 @@ int main() {
         1);
     assert(luma::contracts::auth::crypto::hex(dk)=="120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b");
 
-    auto server=luma::server::auth::CreateAuthService(
-        luma::server::auth::CreateInMemoryAuthStore());
+    const char* database_url=std::getenv("LUMALIVE_AUTH_DATABASE_URL");
+    const bool use_database=database_url&&*database_url;
+
+    auto auth_store=use_database
+        ? luma::server::auth::CreatePostgresAuthStore(database_url)
+        : luma::server::auth::CreateInMemoryAuthStore();
+
+    auto server=luma::server::auth::CreateAuthService(std::move(auth_store));
     assert(server->StartOnPort(19121).IsOk());
 
     auto alice=luma::client::account::CreateAccountService();
@@ -226,6 +234,22 @@ int main() {
     alice2->Stop();
     alice->Stop();
     assert(server->Stop().IsOk());
+
+    if(use_database){
+        auto server2=luma::server::auth::CreateAuthService(
+            luma::server::auth::CreatePostgresAuthStore(database_url));
+        assert(server2->StartOnPort(19121).IsOk());
+
+        auto persistence=luma::client::account::CreateAccountService();
+        assert(persistence->Connect("127.0.0.1",19121).success);
+        assert(persistence->Login(
+            "bob.test","reset correct horse").success);
+        assert(persistence->GetProfile().success);
+        assert(persistence->Session().user.user_id.size()>0);
+        persistence->Stop();
+
+        server2->Stop();
+    }
 
     std::cout
         <<"PASS: server-side auth store, email verification, MFA recovery-code login, "
