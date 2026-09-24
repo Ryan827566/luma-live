@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <mutex>
 #include <sstream>
+#include <span>
 #include <thread>
 #include <unordered_map>
 #include <vector>
