@@ -100,7 +100,21 @@ void AcceptLoop(){
 #endif
  Socket listen=listen_socket_.load();if(listen==kInvalidSocket)break;Socket s=::accept(listen,reinterpret_cast<sockaddr*>(&a),&n);if(s==kInvalidSocket){if(running_)continue;break;}{std::lock_guard lock(clients_mutex_);clients_.emplace(s,ClientState{s,{},{}});}client_threads_.emplace_back(&AuthServiceImpl::ClientLoop,this,s);}
 }
-void ClientLoop(Socket s){while(running_){std::string line;if(!RecvLine(s,line))break;try{Handle(s,luma::contracts::auth::wire::decode_line(line));}catch(const std::exception&e){Send(s,{Type::Error,{"invalid_packet",e.what()}});break;}}{std::lock_guard lock(clients_mutex_);clients_.erase(s);}close_socket(s);}
+void ClientLoop(Socket s){
+ while(running_){
+  std::string line;
+  if(!RecvLine(s,line)) break;
+  try{
+   auto packet=luma::contracts::auth::wire::decode_line(line);
+   Handle(s,packet);
+  }catch(const std::exception& e){
+   Send(s,{Type::Error,{"invalid_packet",e.what()}});
+   break;
+  }
+ }
+ {std::lock_guard lock(clients_mutex_);clients_.erase(s);}
+ close_socket(s);
+}
 ClientState& Client(Socket s){auto it=clients_.find(s);if(it==clients_.end())throw std::runtime_error("unknown client");return it->second;}
 void Handle(Socket s,const Packet&p){
  auto send=[&](Type t,std::vector<std::string>f={}){return Send(s,{t,std::move(f)});};auto bad=[&](const char*c,const char*m){send(Type::Error,{c,m});};
