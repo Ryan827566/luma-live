@@ -1,5 +1,6 @@
 #pragma once
 #include "SignalingRoom.hpp"
+#include "MeetingService.hpp"
 #include "runtime-contracts/SignalingWire.hpp"
 #include <atomic>
 #include <cstdint>
@@ -33,13 +34,17 @@ public:
     std::size_t PeerCount(const std::string& room_id) const;
 private:
     struct SendState { std::mutex mutex; bool open{true}; };
-    struct Client { luma_socket_t socket{kLumaInvalidSocket}; std::string room; std::string peer; std::shared_ptr<SendState> send{std::make_shared<SendState>()}; };
+    struct Client { luma_socket_t socket{kLumaInvalidSocket}; std::string room; std::string peer; std::shared_ptr<SendState> send{std::make_shared<SendState>()}; MeetingService::Connection connection_id{0}; };
     void AcceptLoop();
     void ClientLoop(luma_socket_t socket);
     void HandleMessage(Client& client, const luma::contracts::SignalingMessage& message);
     void Broadcast(const luma::contracts::SignalingMessage& message, const std::string& room, const std::string& exclude_peer = {});
     bool Send(const Client& client, const luma::contracts::SignalingMessage& message);
     void RemoveClient(luma_socket_t socket);
+    void DeliverMeeting(const std::vector<MeetingService::Delivery>& deliveries);
+    MeetingService meetings_;
+    std::mutex meeting_dispatch_mutex_;
+    std::uint64_t next_connection_id_{0};
     luma_socket_t listen_socket_{kLumaInvalidSocket};
     std::atomic<bool> running_{false};
     mutable std::mutex lifecycle_mutex_;

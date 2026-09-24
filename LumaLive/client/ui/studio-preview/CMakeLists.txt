@@ -54,3 +54,8 @@ add_executable(luma_screen_capture_tests tests/ScreenCaptureTests.cpp)
 target_link_libraries(luma_screen_capture_tests PRIVATE luma_client_media_pipeline)
 add_test(NAME luma_screen_capture_tests COMMAND luma_screen_capture_tests)
 set_tests_properties(luma_screen_capture_tests PROPERTIES TIMEOUT 10 SKIP_RETURN_CODE 77)
+
+add_executable(luma_meeting_signaling_tests tests/MeetingSignalingTests.cpp)
+target_link_libraries(luma_meeting_signaling_tests PRIVATE luma_signaling luma_client_signaling)
+add_test(NAME luma_meeting_signaling_tests COMMAND luma_meeting_signaling_tests)
+set_tests_properties(luma_meeting_signaling_tests PROPERTIES TIMEOUT 20)

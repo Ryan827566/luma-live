@@ -1,4 +1,4 @@
-add_library(luma_signaling STATIC src/SignalingService.cpp src/TcpSignalingServer.cpp)
+add_library(luma_signaling STATIC src/SignalingService.cpp src/TcpSignalingServer.cpp src/MeetingService.cpp)
 target_include_directories(luma_signaling PUBLIC include)
 target_link_libraries(luma_signaling PUBLIC luma_shared)
 if(WIN32)

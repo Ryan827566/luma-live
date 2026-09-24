@@ -98,13 +98,16 @@ const DWORD send_timeout=1500;
 const timeval send_timeout{1,500000};
 #endif
 if(!set_blocking(s,true)||setsockopt(s,SOL_SOCKET,SO_SNDTIMEO,reinterpret_cast<const char*>(&send_timeout),sizeof(send_timeout))!=0){close_socket(s);continue;}
-clients_.emplace(s,Client{s,{},{}});client_threads_.emplace_back(&TcpSignalingServer::ClientLoop,this,s);}}
+Client client{s,{},{}};client.connection_id=++next_connection_id_;clients_.emplace(s,std::move(client));client_threads_.emplace_back(&TcpSignalingServer::ClientLoop,this,s);}}
 // Each connection owns its write lock and lifetime token. A slow recipient must
 // not hold up unrelated rooms, and a recycled socket must not receive old SDP.
 bool TcpSignalingServer::Send(const Client& client,const luma::contracts::SignalingMessage&m){std::lock_guard lock(client.send->mutex);if(!client.send->open)return false;const auto socket=client.socket;auto b=luma::contracts::wire::encode(m);if(b.size()>256*1024)return false;std::uint32_t n=htonl(static_cast<std::uint32_t>(b.size()));const bool sent=send_all(socket,reinterpret_cast<std::uint8_t*>(&n),4)&&send_all(socket,b.data(),b.size());if(!sent)shutdown(socket,2);return sent;}
 void TcpSignalingServer::Broadcast(const luma::contracts::SignalingMessage&m,const std::string&r,const std::string&exclude){std::vector<Client>targets;{std::lock_guard lock(mutex_);for(auto&[s,c]:clients_)if(c.room==r&&!c.peer.empty()&&c.peer!=exclude)targets.push_back(c);}for(auto s:targets)Send(s,m);}
-void TcpSignalingServer::RemoveClient(luma_socket_t s){Client c;{std::lock_guard lock(mutex_);auto it=clients_.find(s);if(it==clients_.end())return;c=it->second;clients_.erase(it);if(!c.room.empty()&&!c.peer.empty()){auto rit=rooms_.find(c.room);if(rit!=rooms_.end()){rit->second.erase(c.peer);if(rit->second.empty())rooms_.erase(rit);}}}if(!c.room.empty()&&!c.peer.empty()){luma::contracts::SignalingMessage m;m.type=luma::contracts::SignalingMessageType::PeerLeft;m.room_id=c.room;m.peer_id=c.peer;Broadcast(m,c.room,c.peer);}}
+void TcpSignalingServer::RemoveClient(luma_socket_t s){MeetingService::Connection id=0;{std::lock_guard lock(mutex_);auto it=clients_.find(s);if(it!=clients_.end())id=it->second.connection_id;}if(id){std::lock_guard order(meeting_dispatch_mutex_);DeliverMeeting(meetings_.Disconnect(id));}Client c;{std::lock_guard lock(mutex_);auto it=clients_.find(s);if(it==clients_.end())return;c=it->second;clients_.erase(it);if(!c.room.empty()&&!c.peer.empty()){auto rit=rooms_.find(c.room);if(rit!=rooms_.end()){rit->second.erase(c.peer);if(rit->second.empty())rooms_.erase(rit);}}}if(!c.room.empty()&&!c.peer.empty()){luma::contracts::SignalingMessage m;m.type=luma::contracts::SignalingMessageType::PeerLeft;m.room_id=c.room;m.peer_id=c.peer;Broadcast(m,c.room,c.peer);}}
 void TcpSignalingServer::ClientLoop(luma_socket_t s){Client connection;{std::lock_guard lock(mutex_);auto it=clients_.find(s);if(it==clients_.end())return;connection=it->second;}while(running_){std::uint32_t n=0;if(!recv_all(s,reinterpret_cast<std::uint8_t*>(&n),4,running_))break;n=ntohl(n);if(n==0||n>256*1024)break;std::vector<std::uint8_t>b(n);if(!recv_all(s,b.data(),n,running_))break;luma::contracts::SignalingMessage m;if(!luma::contracts::wire::decode(b,m))break;Client c;{std::lock_guard lock(mutex_);auto it=clients_.find(s);if(it==clients_.end())break;c=it->second;}HandleMessage(c,m);{std::lock_guard lock(mutex_);if(clients_.find(s)==clients_.end())break;}}RemoveClient(s);{std::lock_guard lock(connection.send->mutex);connection.send->open=false;close_socket(s);}}
+void TcpSignalingServer::DeliverMeeting(const std::vector<MeetingService::Delivery>& deliveries){
+    for(const auto& delivery:deliveries){Client client;bool found=false;{std::lock_guard lock(mutex_);for(const auto& [socket,candidate]:clients_){(void)socket;if(candidate.connection_id==delivery.connection){client=candidate;found=true;break;}}}if(found)Send(client,delivery.message);}
+}
 void TcpSignalingServer::HandleMessage(Client& c, const luma::contracts::SignalingMessage& m) {
     using T = luma::contracts::SignalingMessageType;
     auto error = [&](const std::string& reason) {
@@ -115,6 +118,12 @@ void TcpSignalingServer::HandleMessage(Client& c, const luma::contracts::Signali
         response.sequence = m.sequence; response.value = reason;
         Send(c, response);
     };
+    if(MeetingService::IsMeetingMessage(m.type)){
+        if(!c.room.empty()){error("Leave the call room before joining a meeting");return;}
+        std::lock_guard order(meeting_dispatch_mutex_);
+        DeliverMeeting(meetings_.Handle(c.connection_id,m));return;
+    }
+    if(meetings_.Contains(c.connection_id)&&m.type!=T::Ping){error("Leave the meeting before joining a call room");return;}
     if (m.type == T::Ping) {
         luma::contracts::SignalingMessage pong; pong.type = T::Pong;
         Send(c, pong); return;
