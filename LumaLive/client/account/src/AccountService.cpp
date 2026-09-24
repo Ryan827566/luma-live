@@ -39,13 +39,23 @@ public:
  OperationResult Stop()override{std::lock_guard lock(mutex_);if(socket_!=kInvalidSocket){close_socket(socket_);socket_=kInvalidSocket;}running_=false;session_={};return{true,"stopped"};}
  bool IsRunning()const override{return running_.load();}
  OperationResult Register(std::string u,std::string e,std::string d,std::string p)override{
-  if(!valid_register(u,e,d,p))return{false,"invalid registration data"};std::lock_guard lock(mutex_);if(!running_)return{false,"account service is not connected"};
-  if(!Send({Type::RegisterBegin,{u,e,d}}))return{false,"send failed"};Packet q;if(!Recv(q)||q.type==Type::Error)return Error(q);if(q.type!=Type::RegisterChallenge||q.fields.size()!=2)return{false,"invalid registration challenge"};
+  if(!valid_register(u,e,d,p)) return {false,"invalid registration data"};
+  std::lock_guard lock(mutex_);
+  if(!running_) return {false,"account service is not connected"};
+  if(!Send({Type::RegisterBegin,{u,e,d}})) return {false,"send failed"};
+  Packet q;
+  if(!Recv(q) || q.type==Type::Error) return Error(q);
+  if(q.type!=Type::RegisterChallenge || q.fields.size()!=2) return {false,"invalid registration challenge"};
   auto verifier=pbkdf2_hmac_sha256(p,from_hex(q.fields[0]));if(!Send({Type::RegisterFinish,{hex(verifier)}}))return{false,"send failed"};if(!Recv(q)||q.type==Type::Error)return Error(q);if(q.type!=Type::RegisterOk||q.fields.size()!=4)return{false,"invalid registration response"};return{true,"registered user_id="+q.fields[0]};
  }
  OperationResult Login(std::string id,std::string p)override{
-  if(id.empty()||id.size()>254||p.size()<8||p.size()>128)return{false,"invalid login data"};std::lock_guard lock(mutex_);if(!running_)return{false,"account service is not connected"};
-  if(!Send({Type::LoginBegin,{id}}))return{false,"send failed"};Packet q;if(!Recv(q)||q.type==Type::Error)return Error(q);if(q.type!=Type::LoginChallenge||q.fields.size()!=5)return{false,"invalid login challenge"};
+  if(id.empty() || id.size()>254 || p.size()<8 || p.size()>128) return {false,"invalid login data"};
+  std::lock_guard lock(mutex_);
+  if(!running_) return {false,"account service is not connected"};
+  if(!Send({Type::LoginBegin,{id}})) return {false,"send failed"};
+  Packet q;
+  if(!Recv(q) || q.type==Type::Error) return Error(q);
+  if(q.type!=Type::LoginChallenge || q.fields.size()!=5) return {false,"invalid login challenge"};
   auto verifier=pbkdf2_hmac_sha256(p,from_hex(q.fields[3]));auto proof=hmac_sha256(verifier,from_hex(q.fields[4]));if(!Send({Type::LoginProof,{hex(proof)}}))return{false,"send failed"};if(!Recv(q)||q.type==Type::Error)return Error(q);if(q.type!=Type::LoginOk||q.fields.size()!=6)return{false,"invalid login response"};
   session_.token=q.fields[0];session_.user.user_id=q.fields[1];session_.user.username=q.fields[2];session_.user.email=q.fields[3];session_.user.display_name=q.fields[4];session_.expires_at_epoch_seconds=std::stoll(q.fields[5]);return{true,"login successful"};
  }
