@@ -2,6 +2,8 @@
 #include "runtime-contracts/SignalingWireCodec.hpp"
 #include <utility>
 #include <vector>
+#include <chrono>
+#include <cerrno>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -11,6 +13,7 @@ using socket_len_t = int;
 #else
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #ifndef MSG_NOSIGNAL
@@ -47,6 +50,57 @@ constexpr int kLumaLiveSendFlags = 0;
 #else
 constexpr int kLumaLiveSendFlags = MSG_NOSIGNAL;
 #endif
+
+// Bound TCP connection establishment across all resolved addresses. Name
+// resolution is still synchronous and follows the operating system DNS policy.
+bool connect_until(luma_client_socket_t socket, const sockaddr* address,
+                   socket_len_t length, std::chrono::steady_clock::time_point deadline) {
+#ifdef _WIN32
+    u_long nonblocking = 1;
+    if (ioctlsocket(socket, FIONBIO, &nonblocking) != 0) return false;
+#else
+    const int old_flags = fcntl(socket, F_GETFL, 0);
+    if (old_flags < 0 || fcntl(socket, F_SETFL, old_flags | O_NONBLOCK) != 0) return false;
+#endif
+    bool connected = ::connect(socket, address, length) == 0;
+    if (!connected) {
+#ifdef _WIN32
+        if (WSAGetLastError() != WSAEWOULDBLOCK) return false;
+#else
+        if (errno != EINPROGRESS) return false;
+#endif
+        const auto remaining = std::chrono::duration_cast<std::chrono::microseconds>(
+            deadline - std::chrono::steady_clock::now()).count();
+        if (remaining <= 0) return false;
+        timeval wait{};
+        wait.tv_sec = static_cast<long>(remaining / 1000000);
+        wait.tv_usec = static_cast<long>(remaining % 1000000);
+        fd_set writable, failed;
+        FD_ZERO(&writable); FD_ZERO(&failed);
+        FD_SET(socket, &writable); FD_SET(socket, &failed);
+#ifdef _WIN32
+        const int ready = select(0, nullptr, &writable, &failed, &wait);
+#else
+        const int ready = select(socket + 1, nullptr, &writable, &failed, &wait);
+#endif
+        int error = 0; socket_len_t error_length = sizeof(error);
+        connected = ready > 0 && getsockopt(socket, SOL_SOCKET, SO_ERROR,
+            reinterpret_cast<char*>(&error), &error_length) == 0 && error == 0;
+    }
+    if (!connected) return false;
+#ifdef _WIN32
+    nonblocking = 0;
+    if (ioctlsocket(socket, FIONBIO, &nonblocking) != 0) return false;
+    const DWORD send_timeout = 3000;
+    setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO,
+        reinterpret_cast<const char*>(&send_timeout), sizeof(send_timeout));
+#else
+    if (fcntl(socket, F_SETFL, old_flags) != 0) return false;
+    const timeval send_timeout{3, 0};
+    setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, &send_timeout, sizeof(send_timeout));
+#endif
+    return true;
+}
 
 bool send_all(luma_client_socket_t s, const std::uint8_t* p, std::size_t n) {
     while (n) {
@@ -113,10 +167,11 @@ bool TcpSignalingClient::Connect(
     if (getaddrinfo(host.c_str(), ps.c_str(), &hints, &res) != 0) return false;
 
     luma_client_socket_t connected_socket = kLumaClientInvalidSocket;
-    for (auto* p = res; p; p = p->ai_next) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    for (auto* p = res; p && std::chrono::steady_clock::now() < deadline; p = p->ai_next) {
         luma_client_socket_t s = ::socket(p->ai_family, p->ai_socktype, p->ai_protocol);
         if (!valid_socket(s)) continue;
-        if (::connect(s, p->ai_addr, static_cast<socket_len_t>(p->ai_addrlen)) == 0) {
+        if (connect_until(s, p->ai_addr, static_cast<socket_len_t>(p->ai_addrlen), deadline)) {
             connected_socket = s;
             break;
         }
@@ -151,8 +206,13 @@ bool TcpSignalingClient::Send(const luma::contracts::SignalingMessage& message) 
     }
     if (!valid_socket(socket)) return false;
 
-    return send_all(socket, reinterpret_cast<std::uint8_t*>(&n), 4) &&
-           send_all(socket, payload.data(), payload.size());
+    const bool sent = send_all(socket, reinterpret_cast<std::uint8_t*>(&n), 4) &&
+                      send_all(socket, payload.data(), payload.size());
+    if (!sent) {
+        connected_.store(false);
+        shutdown(socket, 2);
+    }
+    return sent;
 }
 
 void TcpSignalingClient::ReceiveLoop() {
@@ -210,6 +270,8 @@ void TcpSignalingClient::Close() {
 
     JoinReceiveThreadIfNeeded();
 
+    // Let an in-flight bounded Send finish before releasing its socket handle.
+    std::lock_guard send_lock(send_mutex_);
     std::lock_guard socket_lock(socket_mutex_);
     CloseSocketLocked();
 }

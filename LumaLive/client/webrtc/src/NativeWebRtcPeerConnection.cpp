@@ -8,6 +8,7 @@
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "rtc_base/ssl_adapter.h"
+#include "rtc_base/win32_socket_init.h"
 #include "api/media_stream_interface.h"
 #include "api/notifier.h"
 #include "api/scoped_refptr.h"
@@ -162,6 +163,8 @@ private:
 }
 
 struct NativeWebRtcPeerConnection::Impl {
+    // Own Winsock until all transport threads and connections are destroyed.
+    ::rtc::WinsockInitializer winsock;
     WebRtcCallbacks cb;
     std::unique_ptr<::rtc::Thread> network_thread;
     std::unique_ptr<::rtc::Thread> worker_thread;
@@ -178,6 +181,7 @@ std::shared_ptr<NativeWebRtcPeerConnection> NativeWebRtcPeerConnection::Create()
 NativeWebRtcPeerConnection::NativeWebRtcPeerConnection():impl_(std::make_unique<Impl>()){}
 NativeWebRtcPeerConnection::~NativeWebRtcPeerConnection(){Close();}
 bool NativeWebRtcPeerConnection::Initialize(const luma::contracts::PeerConnectionConfig& config, WebRtcCallbacks callbacks){
+    if(impl_->winsock.error()!=0)return false;
     static const bool ssl_ready=::rtc::InitializeSSL();if(!ssl_ready)return false;
     if(impl_->pc) return false; impl_->cb=std::move(callbacks); impl_->observer=std::make_unique<PcObserver>(impl_->cb);
     impl_->network_thread=::rtc::Thread::CreateWithSocketServer();
