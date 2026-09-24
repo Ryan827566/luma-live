@@ -232,7 +232,7 @@ public:
         static constexpr const char* sql=
             "SELECT user_id,username,email,display_name,avatar_url,phone,"
             "password_salt,password_verifier,email_verified,phone_verified,mfa_enabled,"
-            "mfa_recovery_hash,email_verify_hash,email_verify_expires,"
+            "mfa_recovery_hash,mfa_totp_secret_hex,email_verify_hash,email_verify_expires,"
             "reset_token_hash,reset_token_expires "
             "FROM luma_auth_users ORDER BY user_id";
 
@@ -241,7 +241,7 @@ public:
         ResultGuard guard{api_,result};
         if(api_.PQresultStatus(result)!=PGRES_TUPLES_OK)return ResultErrorLocked(result);
 
-        if(api_.PQnfields(result)!=16)return shared::contracts::Result::Failure(
+        if(api_.PQnfields(result)!=17)return shared::contracts::Result::Failure(
             shared::contracts::ErrorCode::Internal,"unexpected auth user schema");
 
         users.clear();
@@ -261,10 +261,11 @@ public:
             u.phone_verified=BoolValue(result,row,9);
             u.mfa_enabled=BoolValue(result,row,10);
             u.mfa_recovery_hash=Value(result,row,11);
-            u.email_verify_hash=Value(result,row,12);
-            u.email_verify_expires=Int64Value(result,row,13);
-            u.reset_token_hash=Value(result,row,14);
-            u.reset_token_expires=Int64Value(result,row,15);
+            u.mfa_totp_secret_hex=Value(result,row,12);
+            u.email_verify_hash=Value(result,row,13);
+            u.email_verify_expires=Int64Value(result,row,14);
+            u.reset_token_hash=Value(result,row,15);
+            u.reset_token_expires=Int64Value(result,row,16);
             users.push_back(std::move(u));
         }
         return shared::contracts::Result::Ok();
@@ -285,9 +286,9 @@ public:
         static constexpr const char* sql=
             "INSERT INTO luma_auth_users("
             "user_id,username,email,display_name,avatar_url,phone,password_salt,password_verifier,"
-            "email_verified,phone_verified,mfa_enabled,mfa_recovery_hash,email_verify_hash,"
+            "email_verified,phone_verified,mfa_enabled,mfa_recovery_hash,mfa_totp_secret_hex,email_verify_hash,"
             "email_verify_expires,reset_token_hash,reset_token_expires)"
-            " VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)";
+            " VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)";
 
         for(const auto& u:users) {
             const std::string email_verified=u.email_verified?"true":"false";
@@ -298,7 +299,7 @@ public:
             const std::string* params[]={
                 &u.id,&u.username,&u.email,&u.display_name,&u.avatar_url,&u.phone,
                 &u.salt_hex,&u.verifier_hex,&email_verified,&phone_verified,&mfa_enabled,
-                &u.mfa_recovery_hash,&u.email_verify_hash,&email_expiry,
+                &u.mfa_recovery_hash,&u.mfa_totp_secret_hex,&u.email_verify_hash,&email_expiry,
                 &u.reset_token_hash,&reset_expiry};
 
             if(auto r=ExecParamsLocked(sql,params,16);!r.IsOk()) {
@@ -443,11 +444,13 @@ private:
             "phone_verified BOOLEAN NOT NULL DEFAULT FALSE,"
             "mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE,"
             "mfa_recovery_hash TEXT NOT NULL DEFAULT '',"
+            "mfa_totp_secret_hex TEXT NOT NULL DEFAULT '',"
             "email_verify_hash TEXT NOT NULL DEFAULT '',"
             "email_verify_expires BIGINT NOT NULL DEFAULT 0,"
             "reset_token_hash TEXT NOT NULL DEFAULT '',"
             "reset_token_expires BIGINT NOT NULL DEFAULT 0"
             ");"
+            "ALTER TABLE luma_auth_users ADD COLUMN IF NOT EXISTS mfa_totp_secret_hex TEXT NOT NULL DEFAULT '';"
             "CREATE UNIQUE INDEX IF NOT EXISTS luma_auth_users_username_idx "
             "ON luma_auth_users(lower(username));"
             "CREATE UNIQUE INDEX IF NOT EXISTS luma_auth_users_email_idx "
