@@ -15,6 +15,20 @@ namespace luma::server::auth {
 
 namespace {
 
+std::string EnvironmentValue(const char* name) {
+#ifdef _WIN32
+    char* value=nullptr;
+    std::size_t length=0;
+    if(_dupenv_s(&value,&length,name)!=0||!value)return {};
+    std::string result(value);
+    std::free(value);
+    return result;
+#else
+    const char* value=std::getenv(name);
+    return value?std::string(value):std::string{};
+#endif
+}
+
 class InMemoryAuthStore final : public IAuthStore {
 public:
     shared::contracts::Result Open() override {
@@ -476,8 +490,8 @@ std::unique_ptr<IAuthStore> CreatePostgresAuthStore(std::string connection_strin
 }
 
 std::unique_ptr<IAuthStore> CreateAuthStoreFromEnvironment() {
-    const char* raw=std::getenv("LUMALIVE_AUTH_DATABASE_URL");
-    if(raw&&*raw)return CreatePostgresAuthStore(raw);
+    const auto connection_string=EnvironmentValue("LUMALIVE_AUTH_DATABASE_URL");
+    if(!connection_string.empty())return CreatePostgresAuthStore(connection_string);
     return CreateInMemoryAuthStore();
 }
 
