@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <mutex>
+#include <unordered_map>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -259,17 +260,36 @@ public:
         Packet q;if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
         if(q.type!=Type::PasswordResetIssued||q.fields.size()!=3)return{false,"invalid password reset response"};
-        return{true,"password reset token="+q.fields[0]+" salt="+q.fields[1]+" expires="+q.fields[2]};
+        pending_reset_challenges_[q.fields[0]]=PendingReset{q.fields[1],std::stoll(q.fields[2])};
+        return{true,"password reset token="+q.fields[0]+" expires="+q.fields[2]};
     }
 
     OperationResult ResetPassword(std::string reset_token,std::string new_password)override{
         if(reset_token.empty()||new_password.size()<8||new_password.size()>128)return{false,"invalid password reset data"};
         std::lock_guard lock(mutex_);
         if(!running_)return{false,"account service is not connected"};
-        if(!Send({Type::RequestPasswordReset,{reset_token}}))return{false,"send failed"};
-        Packet q;if(!Recv(q))return{false,"receive failed"};
+
+        auto it=pending_reset_challenges_.find(reset_token);
+        if(it==pending_reset_challenges_.end())return{false,"reset token must be requested through this account service instance"};
+        if(it->second.expires_at<=std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())){
+            pending_reset_challenges_.erase(it);
+            return{false,"reset token expired"};
+        }
+
+        const auto new_verifier=pbkdf2_hmac_sha256(new_password,from_hex(it->second.salt_hex));
+        if(!Send({Type::ResetPassword,{reset_token,it->second.salt_hex,hex(new_verifier)}}))return{false,"send failed"};
+
+        Packet q;
+        if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
-        return{false,"reset flow requires a reset token issued by the server"};
+        if(q.type!=Type::PasswordResetOk)return{false,"invalid password reset response"};
+
+        pending_reset_challenges_.erase(it);
+        session_={};
+        security_={};
+        sessions_.clear();
+        events_.clear();
+        return{true,"password reset successful; all sessions signed out"};
     }
 
     OperationResult GetSecuritySummary()override{
@@ -466,8 +486,13 @@ private:
     mutable std::mutex mutex_;
     contracts::auth::AuthSession session_;
     contracts::auth::SecuritySummary security_;
+    struct PendingReset{
+        std::string salt_hex;
+        std::int64_t expires_at{0};
+    };
     std::vector<contracts::auth::DeviceSession> sessions_;
     std::vector<contracts::auth::SecurityEvent> events_;
+    std::unordered_map<std::string,PendingReset> pending_reset_challenges_;
 };
 
 std::unique_ptr<IAccountService>CreateAccountService(){return std::make_unique<AccountService>();}
