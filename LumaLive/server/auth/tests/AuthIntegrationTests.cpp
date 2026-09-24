@@ -189,7 +189,7 @@ int main() {
 
     auto persistence=luma::client::account::CreateAccountService();
     assert(persistence->Connect("127.0.0.1",19121).success);
-    assert(persistence->Login("bob.test","reset correct horse").success==false);
+    assert(persistence->Login("bob.test","reset correct horse").success);
     assert(persistence->Login("legacy.test","legacy pass").success);
 
     persistence->Stop();
