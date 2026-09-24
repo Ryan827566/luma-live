@@ -1,4 +1,5 @@
 #include "IAuthService.hpp"
+#include "ISmsProvider.hpp"
 #include "contracts/auth/AuthCrypto.hpp"
 #include <cassert>
 #include <cstdint>
@@ -11,5 +12,7 @@ int main() {
     assert(luma::contracts::auth::crypto::hex(digest)=="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     auto service=luma::server::auth::CreateAuthService();
     assert(service && !service->IsRunning());
+    assert(service->ConfigureSmsProvider(
+        luma::server::auth::CreateDevelopmentSmsProvider()).IsOk());
     return 0;
 }
