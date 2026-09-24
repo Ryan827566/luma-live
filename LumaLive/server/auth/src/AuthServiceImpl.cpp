@@ -105,6 +105,7 @@ void ClientLoop(Socket s){
  while(running_){
   std::string line;
   if(!RecvLine(s,line)) break;
+  if(line.empty()) continue;
   try{
    std::cerr << "auth rx fd=" << s << " line=[" << line << "] size=" << line.size() << "\n";
    auto packet=luma::contracts::auth::wire::decode_line(line);
