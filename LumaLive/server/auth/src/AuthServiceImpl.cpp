@@ -1225,7 +1225,7 @@ private:
                 bad("invalid_credentials","invalid phone login code");return;
             }
 
-            const std::string mfa_code=p.size()==5?p.fields[4]:"";
+            const std::string mfa_code=p.fields.size()==5?p.fields[4]:"";
             if(it->second.mfa_enabled){
                 bool mfa_ok=false;
                 try{
