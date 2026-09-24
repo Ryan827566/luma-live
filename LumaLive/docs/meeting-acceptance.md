@@ -42,3 +42,7 @@ Verified in Release: MeetingSessionTests, MeetingAudioMixerTests and MeetingMedi
 Added a separate native meeting preview window, accessible through the Studio meeting button or --meeting. It includes create/join/leave, roster/grid, camera/microphone/screen controls, mixed speaker output and host remove/end controls. Studio and signaling server Release builds passed; the application's offscreen empty-window render exited successfully. Interactive UI flows and device output are not yet accepted. The offscreen diagnostic does not fully render native edit controls and is not a product-design acceptance screenshot.
 
 Remaining: end-to-end UI acceptance, device selection, peer failure/recovery, pin/speaker/fullscreen interaction, product-quality Figma styling and physical-device/TURN validation. Meeting work remains partial on the development branch; do not merge this checkpoint as a completed module or start broadcasting.
+
+## Meeting preview input rendering follow-up
+
+Fixed label alignment to actual input coordinates and added explicit dark edit/list control colors. The diagnostic render now shows the window without activation before asking native controls to paint; hidden edit controls previously omitted their contents. Render resource allocation failure now releases partial GDI allocations. Release Studio build and render both returned 0. Visual inspection confirms server, meeting ID and participant ID fields are visible with their default values. This resolves the earlier empty-window diagnostic limitation, not full meeting UI/device acceptance.
