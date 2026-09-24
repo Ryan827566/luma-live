@@ -25,6 +25,7 @@ jobs:
             LumaLive\server\auth\src\AuthServiceImpl.cpp ^
             LumaLive\server\auth\src\AuthStore.cpp ^
             LumaLive\server\auth\src\SmsProvider.cpp ^
+            LumaLive\server\auth\src\EmailProvider.cpp ^
             LumaLive\client\account\src\AccountService.cpp ^
             LumaLive\server\auth\tests\AuthIntegrationTests.cpp ^
             /Fe:auth_integration_test.exe /link ws2_32.lib
@@ -47,6 +48,7 @@ jobs:
             LumaLive\server\auth\src\AuthServiceImpl.cpp ^
             LumaLive\server\auth\src\AuthStore.cpp ^
             LumaLive\server\auth\src\SmsProvider.cpp ^
+            LumaLive\server\auth\src\EmailProvider.cpp ^
             LumaLive\apps\luma-auth-server\src\main.cpp ^
             /Fe:luma_auth_server.exe /link ws2_32.lib
           if errorlevel 1 exit /b 1
