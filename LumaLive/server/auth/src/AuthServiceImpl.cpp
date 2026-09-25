@@ -1605,7 +1605,15 @@ private:
                 if(ei!=by_email_.end())user_id=ei->second;
             }
             if(user_id.empty()){
-                bad("reset_unavailable","if the account exists, a reset message will be available through the configured delivery channel");
+                // Always return the same successful protocol shape for unknown identifiers.
+                // The client receives no usable token, while the server does not reveal
+                // whether the account exists through a success/error distinction.
+                send(Type::PasswordResetIssued,{
+                    "",
+                    "",
+                    std::to_string(now_epoch()+30*60),
+                    std::to_string(luma::contracts::auth::crypto::kPasswordPbkdf2Iterations)
+                });
                 return;
             }
 
