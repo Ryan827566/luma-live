@@ -1631,7 +1631,14 @@ private:
                 u.reset_token_hash.clear();
                 u.reset_token_expires=0;
                 AppendAudit(user_id,"password_reset_delivery_failed","email provider rejected password reset message");
-                bad("reset_unavailable","if the account exists, a reset message will be available through the configured delivery channel");
+                // Do not reveal provider failure for a valid account through a different
+                // response type. Production providers must not expose the token in debug_token.
+                send(Type::PasswordResetIssued,{
+                    "",
+                    "",
+                    std::to_string(now_epoch()+30*60),
+                    std::to_string(luma::contracts::auth::crypto::kPasswordPbkdf2Iterations)
+                });
                 return;
             }
 
