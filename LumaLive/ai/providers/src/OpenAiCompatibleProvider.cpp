@@ -1,14 +1,149 @@
 #include "OpenAiCompatibleProvider.hpp"
-#include <algorithm>
-#include <sstream>
+
+#include <cstdlib>
+#include <string>
+
 namespace luma::ai::providers {
 namespace {
-std::string JsonEscape(const std::string& s){std::string o;for(char c:s){switch(c){case '\\':o+="\\\\";break;case '"':o+="\\\"";break;case '\n':o+="\\n";break;case '\r':o+="\\r";break;case '\t':o+="\\t";break;default:o+=c;}}return o;}
-std::string ExtractJsonString(const std::string& body,const std::string& key){auto p=body.find("\"" + key + "\"");if(p==std::string::npos)return {};p=body.find(':',p);if(p==std::string::npos)return {};p=body.find('"',p);if(p==std::string::npos)return {};std::string o;bool esc=false;for(++p;p<body.size();++p){char c=body[p];if(esc){o+=c;esc=false;continue;}if(c=='\\'){esc=true;continue;}if(c=='"')break;o+=c;}return o;}
-core::ProviderConfig Make(std::string name,std::string endpoint,std::string env,std::string model){core::ProviderConfig c;c.name=std::move(name);c.endpoint=std::move(endpoint);c.api_key_env=std::move(env);if(!model.empty())c.models.push_back(std::move(model));c.capabilities={core::Capability::Chat};c.priority=100;return c;}
+
+std::string JsonEscape(const std::string& value) {
+    std::string output;
+    for (const char c : value) {
+        switch (c) {
+        case '\': output += "\\"; break;
+        case '"': output += "\""; break;
+        case '
+': output += "\n"; break;
+        case '': output += "\r"; break;
+        case '	': output += "\t"; break;
+        default: output += c; break;
+        }
+    }
+    return output;
 }
-OpenAiCompatibleProvider::OpenAiCompatibleProvider(core::ProviderConfig c,std::shared_ptr<IAiHttpClient> h):config_(std::move(c)),client_(std::move(h)){}
-core::AiResponse OpenAiCompatibleProvider::Execute(const core::AiRequest& r){core::AiResponse o;o.request_id=r.request_id;o.provider=config_.name;o.model=r.model.empty()&&!config_.models.empty()?config_.models.front():r.model;if(!config_.enabled){o.error="provider is disabled";return o;}if(!client_){o.error="HTTP client is not configured";return o;}if(r.input.empty()){o.error="input is empty";return o;}std::string url=config_.endpoint;if(!url.empty()&&url.back()!='/')url+='/';url+="chat/completions";std::string body="{\"model\":\""+JsonEscape(o.model)+"\",\"messages\":[{\"role\":\"user\",\"content\":\""+JsonEscape(r.input)+"\"}]}";auto h=client_->Post(url,{},body);if(h.status<200||h.status>=300){o.error=h.error.empty()?"HTTP "+std::to_string(h.status):h.error;return o;}o.success=true;o.text=ExtractJsonString(h.body,"content");if(o.text.empty())o.text=h.body;return o;}
-core::ProviderConfig MakeOpenAiConfig(std::string e,std::string k,std::string m){return Make("openai",std::move(e),std::move(k),std::move(m));}
-core::ProviderConfig MakeDeepSeekConfig(std::string e,std::string k,std::string m){return Make("deepseek",std::move(e),std::move(k),std::move(m));}
+
+std::string ExtractJsonString(const std::string& body, const std::string& key) {
+    const auto key_pos = body.find("\"" + key + "\"");
+    if (key_pos == std::string::npos) return {};
+    auto colon_pos = body.find(':', key_pos);
+    if (colon_pos == std::string::npos) return {};
+    auto quote_pos = body.find('"', colon_pos);
+    if (quote_pos == std::string::npos) return {};
+
+    std::string output;
+    bool escaped = false;
+    for (std::size_t i = quote_pos + 1; i < body.size(); ++i) {
+        const char c = body[i];
+        if (escaped) {
+            switch (c) {
+            case 'n': output += '
+'; break;
+            case 'r': output += ''; break;
+            case 't': output += '	'; break;
+            default: output += c; break;
+            }
+            escaped = false;
+            continue;
+        }
+        if (c == '\\') {
+            escaped = true;
+        } else if (c == '"') {
+            break;
+        } else {
+            output += c;
+        }
+    }
+    return output;
 }
+
+core::ProviderConfig Make(std::string name, std::string endpoint,
+                          std::string env, std::string model) {
+    core::ProviderConfig config;
+    config.name = std::move(name);
+    config.endpoint = std::move(endpoint);
+    config.api_key_env = std::move(env);
+    if (!model.empty()) config.models.push_back(std::move(model));
+    config.capabilities = {core::Capability::Chat};
+    config.priority = 100;
+    return config;
+}
+
+} // namespace
+
+OpenAiCompatibleProvider::OpenAiCompatibleProvider(
+    core::ProviderConfig config, std::shared_ptr<IAiHttpClient> client)
+    : config_(std::move(config)), client_(std::move(client)) {}
+
+core::AiResponse OpenAiCompatibleProvider::Execute(const core::AiRequest& request) {
+    core::AiResponse response;
+    response.request_id = request.request_id;
+    response.provider = config_.name;
+    response.model = request.model.empty() && !config_.models.empty()
+        ? config_.models.front() : request.model;
+
+    if (!config_.enabled) {
+        response.error = "provider is disabled";
+        return response;
+    }
+    if (!client_) {
+        response.error = "HTTP client is not configured";
+        return response;
+    }
+    if (request.input.empty()) {
+        response.error = "input is empty";
+        return response;
+    }
+
+    const char* api_key = config_.api_key_env.empty()
+        ? nullptr : std::getenv(config_.api_key_env.c_str());
+    if (!api_key || *api_key == '\0') {
+        response.error = "API key environment variable is missing: " + config_.api_key_env;
+        return response;
+    }
+
+    std::string url = config_.endpoint;
+    if (!url.empty() && url.back() != '/') url += '/';
+    url += "chat/completions";
+
+    std::string messages = "[";
+    if (!request.system_prompt.empty()) {
+        messages += "{\"role\":\"system\",\"content\":\"" +
+                    JsonEscape(request.system_prompt) + "\"},";
+    }
+    messages += "{\"role\":\"user\",\"content\":\"" +
+                JsonEscape(request.input) + "\"}]";
+
+    const std::string body = "{\"model\":\"" + JsonEscape(response.model) +
+                             "\",\"messages\":" + messages + "}";
+    const std::unordered_map<std::string, std::string> headers{
+        {"Authorization", std::string("Bearer ") + api_key},
+        {"Content-Type", "application/json"}
+    };
+
+    const auto http = client_->Post(url, headers, body);
+    if (http.status < 200 || http.status >= 300) {
+        response.error = http.error.empty()
+            ? "HTTP " + std::to_string(http.status) : http.error;
+        return response;
+    }
+
+    response.text = ExtractJsonString(http.body, "content");
+    if (response.text.empty()) {
+        response.error = "provider response did not contain message content";
+        return response;
+    }
+    response.success = true;
+    return response;
+}
+
+core::ProviderConfig MakeOpenAiConfig(
+    std::string endpoint, std::string apiKeyEnv, std::string model) {
+    return Make("openai", std::move(endpoint), std::move(apiKeyEnv), std::move(model));
+}
+
+core::ProviderConfig MakeDeepSeekConfig(
+    std::string endpoint, std::string apiKeyEnv, std::string model) {
+    return Make("deepseek", std::move(endpoint), std::move(apiKeyEnv), std::move(model));
+}
+
+} // namespace luma::ai::providers
