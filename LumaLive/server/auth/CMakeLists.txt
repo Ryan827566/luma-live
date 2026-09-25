@@ -27,3 +27,8 @@ add_executable(luma_email_provider_tests tests/EmailProviderTests.cpp)
 target_link_libraries(luma_email_provider_tests PRIVATE luma_auth)
 target_compile_features(luma_email_provider_tests PRIVATE cxx_std_20)
 add_test(NAME luma_email_provider_tests COMMAND luma_email_provider_tests)
+
+add_executable(luma_auth_store_row_mutation_tests tests/AuthStoreRowMutationTests.cpp)
+target_link_libraries(luma_auth_store_row_mutation_tests PRIVATE luma_auth)
+target_compile_features(luma_auth_store_row_mutation_tests PRIVATE cxx_std_20)
+add_test(NAME luma_auth_store_row_mutation_tests COMMAND luma_auth_store_row_mutation_tests)
