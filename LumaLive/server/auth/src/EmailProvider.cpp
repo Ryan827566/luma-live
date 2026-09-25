@@ -57,8 +57,12 @@ std::unique_ptr<IEmailProvider> CreateDevelopmentEmailProvider() {
 
 std::unique_ptr<IEmailProvider> CreateEmailProviderFromEnvironment() {
     const auto provider=EnvironmentValue("LUMALIVE_EMAIL_PROVIDER");
-    if(provider.empty()||provider=="mock"||provider=="development")
-        return CreateDevelopmentEmailProvider();
+    if(provider=="mock"||provider=="development"){
+        const auto auth_env=EnvironmentValue("LUMALIVE_AUTH_ENV");
+        if(auth_env=="development"||auth_env=="test")return CreateDevelopmentEmailProvider();
+        return std::make_unique<UnavailableEmailProvider>("development");
+    }
+    if(provider.empty())return std::make_unique<UnavailableEmailProvider>("unset");
     return std::make_unique<UnavailableEmailProvider>(provider);
 }
 

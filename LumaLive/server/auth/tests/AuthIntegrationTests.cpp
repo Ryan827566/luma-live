@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -29,6 +30,15 @@ std::string ExtractAfter(
 }
 
 int main() {
+#ifdef _WIN32
+    _putenv_s("LUMALIVE_AUTH_ENV","test");
+    _putenv_s("LUMALIVE_EMAIL_PROVIDER","development");
+    _putenv_s("LUMALIVE_SMS_PROVIDER","development");
+#else
+    setenv("LUMALIVE_AUTH_ENV","test",1);
+    setenv("LUMALIVE_EMAIL_PROVIDER","development",1);
+    setenv("LUMALIVE_SMS_PROVIDER","development",1);
+#endif
     const std::string abc="abc";
     const auto sha=luma::contracts::auth::crypto::sha256(
         std::span<const std::uint8_t>(
@@ -81,6 +91,8 @@ int main() {
     const std::string phone="+14155552673";
     const auto phoneVerification=alice->RequestPhoneVerification(phone);
     assert(phoneVerification.success);
+    const auto throttledPhoneVerification=alice->RequestPhoneVerification(phone);
+    assert(!throttledPhoneVerification.success);
     const auto phoneVerificationChallenge=ExtractAfter(
         phoneVerification.message,"challenge="," expires=");
     const auto phoneVerificationCode=ExtractAfter(
@@ -127,12 +139,30 @@ int main() {
 
     const auto mfa=alice->EnableMfa();
     assert(mfa.success);
-    const auto recovery_code=ExtractAfter(
-        mfa.message,"MFA enabled; recovery code=","; TOTP secret=");
+    const auto recovery_codes_text=ExtractAfter(
+        mfa.message,"MFA enabled; recovery codes=","; TOTP secret=");
+    std::vector<std::string> recovery_codes;
+    {
+        std::size_t start=0;
+        while(start<=recovery_codes_text.size()){
+            const auto end=recovery_codes_text.find(',',start);
+            const auto value=recovery_codes_text.substr(
+                start,end==std::string::npos?std::string::npos:end-start);
+            if(!value.empty())recovery_codes.push_back(value);
+            if(end==std::string::npos)break;
+            start=end+1;
+        }
+    }
+    assert(recovery_codes.size()==10);
+    const auto recovery_code=recovery_codes[0];
+    const auto recovery_code_2=recovery_codes[1];
+    const auto recovery_code_3=recovery_codes[2];
+    const auto recovery_code_4=recovery_codes[3];
     const auto totp_secret=ExtractAfter(
         mfa.message,"TOTP secret=","; otpauth=");
     const auto otpauth=ExtractAfter(mfa.message,"otpauth=");
     assert(recovery_code.size()==32);
+    assert(recovery_code_2.size()==32&&recovery_code_3.size()==32&&recovery_code_4.size()==32);
     assert(totp_secret.size()>=16);
     assert(otpauth.rfind("otpauth://totp/",0)==0);
     assert(alice->Security().mfa_enabled);
@@ -155,7 +185,7 @@ int main() {
     const auto refresh_after=alice->Session().refresh_token;
     assert(alice->ValidateSession().success);
     assert(alice->Session().refresh_token==refresh_after);
-
+    assert(alice->Logout().success);
 
     auto alicePhone=luma::client::account::CreateAccountService();
     assert(alicePhone->Connect("127.0.0.1",19121).success);
@@ -176,19 +206,30 @@ int main() {
     assert(alicePhone->Logout().success);
     assert(alicePhone->LoginWithPhoneCode(
         phoneLoginChallenge,phoneLoginCode,
-        "alice-phone","Alice Phone",recovery_code).success==false);
+        "alice-phone","Alice Phone",
+        luma::contracts::auth::crypto::make_totp_code(
+            totp_secret,
+            std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count())).success==false);
     alicePhone->Stop();
 
     assert(!alice->Login(
         "alice.test","correct horse","alice-pc","Alice PC").success);
     assert(alice->Login(
         "alice.test","correct horse",
-        "alice-pc","Alice PC",recovery_code).success);
+        "alice-pc","Alice PC",recovery_code).success==false);
+    assert(alice->Login(
+        "alice.test","correct horse",
+        "alice-pc","Alice PC",recovery_code_2).success);
     assert(alice->Logout().success);
     assert(alice->Login(
         "alice.test","correct horse",
-        "alice-pc","Alice PC",recovery_code).success);
-    assert(alice->DisableMfa(recovery_code).success);
+        "alice-pc","Alice PC",recovery_code_3).success);
+    assert(alice->Logout().success);
+    assert(alice->Login(
+        "alice.test","correct horse",
+        "alice-pc","Alice PC",recovery_code_4).success);
+    assert(alice->DisableMfa(recovery_code_4).success);
     assert(!alice->Security().mfa_enabled);
 
     assert(alice->Logout().success);

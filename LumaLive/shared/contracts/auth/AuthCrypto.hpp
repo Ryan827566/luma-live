@@ -3,7 +3,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <random>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -129,7 +128,8 @@ inline std::array<std::uint8_t,32> hmac_sha256(std::span<const std::uint8_t> key
     return sha256(outer);
 }
 
-inline std::array<std::uint8_t,32> pbkdf2_hmac_sha256(std::string_view password,std::span<const std::uint8_t> salt,std::uint32_t iterations=120000){
+inline constexpr std::uint32_t kPasswordPbkdf2Iterations=600000;
+inline std::array<std::uint8_t,32> pbkdf2_hmac_sha256(std::string_view password,std::span<const std::uint8_t> salt,std::uint32_t iterations=kPasswordPbkdf2Iterations){
     if(iterations==0) throw std::invalid_argument("iterations must be positive");
     std::vector<std::uint8_t> msg(salt.begin(),salt.end());
     msg.resize(salt.size()+4);
@@ -214,9 +214,7 @@ inline std::string make_otpauth_uri(std::string_view secret_base32,std::string_v
         "?secret="+std::string(secret_base32)+"&issuer="+uri_component(issuer)+
         "&algorithm=SHA1&digits=6&period=30";
 }
-inline std::vector<std::uint8_t> random_bytes(std::size_t n){
-    std::random_device rd;std::vector<std::uint8_t> out(n);for(auto&b:out)b=std::uint8_t(rd());return out;
-}
+std::vector<std::uint8_t> random_bytes(std::size_t n);
 inline std::string hex(std::span<const std::uint8_t> bytes){
     static constexpr char digits[]="0123456789abcdef";std::string out;out.reserve(bytes.size()*2);
     for(auto b:bytes){out.push_back(digits[b>>4]);out.push_back(digits[b&0x0f]);}return out;

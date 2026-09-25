@@ -344,8 +344,14 @@ private:
         const auto r=service_->EnableMfa();
         SetStatus(window_,utf8_to_wide(r.message));
         if(r.success) {
-            const auto code=r.message.substr(r.message.find('=')+1);
-            SetText(window_,ID_MFA,code);
+            const auto prefix=std::string("MFA enabled; recovery codes=");
+            const auto pos=r.message.find(prefix);
+            const auto end=pos==std::string::npos?std::string::npos:r.message.find("; TOTP secret=",pos+prefix.size());
+            if(pos!=std::string::npos) {
+                SetText(window_,ID_MFA,
+                    r.message.substr(pos+prefix.size(),
+                        end==std::string::npos?r.message.size()-(pos+prefix.size()):end-(pos+prefix.size())));
+            }
         }
     }
 

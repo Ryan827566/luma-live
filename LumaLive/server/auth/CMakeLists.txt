@@ -1,4 +1,4 @@
-add_library(luma_auth STATIC src/AuthServiceImpl.cpp src/AuthStore.cpp src/SmsProvider.cpp src/EmailProvider.cpp)
+add_library(luma_auth STATIC src/AuthServiceImpl.cpp src/AuthStore.cpp src/AuthCrypto.cpp src/SmsProvider.cpp src/EmailProvider.cpp)
 target_include_directories(luma_auth PUBLIC include ${CMAKE_SOURCE_DIR}/shared)
 target_link_libraries(luma_auth PUBLIC luma_shared)
 target_compile_features(luma_auth PUBLIC cxx_std_20)

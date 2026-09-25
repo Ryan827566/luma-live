@@ -79,8 +79,9 @@ public:
         Packet q;
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
-        if(q.type!=Type::RegisterChallenge||q.fields.size()!=2)return{false,"invalid registration challenge"};
-        const auto verifier=pbkdf2_hmac_sha256(p,from_hex(q.fields[0]));
+        if(q.type!=Type::RegisterChallenge||q.fields.size()!=3)return{false,"invalid registration challenge"};
+        const auto iterations=static_cast<std::uint32_t>(std::stoul(q.fields[2]));
+        const auto verifier=pbkdf2_hmac_sha256(p,from_hex(q.fields[0]),iterations);
         if(!Send({Type::RegisterFinish,{hex(verifier)} }))return{false,"send failed"};
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
@@ -101,9 +102,10 @@ public:
         Packet q;
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
-        if(q.type!=Type::LoginChallenge||q.fields.size()!=3)return{false,"invalid login challenge"};
+        if(q.type!=Type::LoginChallenge||q.fields.size()!=4)return{false,"invalid login challenge"};
 
-        const auto verifier=pbkdf2_hmac_sha256(p,from_hex(q.fields[0]));
+        const auto iterations=static_cast<std::uint32_t>(std::stoul(q.fields[3]));
+        const auto verifier=pbkdf2_hmac_sha256(p,from_hex(q.fields[0]),iterations);
         const auto proof=hmac_sha256(verifier,from_hex(q.fields[1]));
         const bool mfa_required=q.fields[2]=="1";
         (void)mfa_required;
@@ -348,11 +350,13 @@ public:
         if(!Send({Type::ChangePasswordBegin,{session_.token}}))return{false,"send failed"};
         Packet q;if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
-        if(q.type!=Type::ChangePasswordChallenge||q.fields.size()!=3)return{false,"invalid password change challenge"};
+        if(q.type!=Type::ChangePasswordChallenge||q.fields.size()!=4)return{false,"invalid password change challenge"};
 
-        const auto current_verifier=pbkdf2_hmac_sha256(current_password,from_hex(q.fields[0]));
+        const auto current_iterations=static_cast<std::uint32_t>(std::stoul(q.fields[3]));
+        const auto current_verifier=pbkdf2_hmac_sha256(current_password,from_hex(q.fields[0]),current_iterations);
         const auto current_proof=hmac_sha256(current_verifier,from_hex(q.fields[1]));
-        const auto new_verifier=pbkdf2_hmac_sha256(new_password,from_hex(q.fields[2]));
+        const auto new_verifier=pbkdf2_hmac_sha256(
+            new_password,from_hex(q.fields[2]),luma::contracts::auth::crypto::kPasswordPbkdf2Iterations);
         if(!Send({Type::ChangePasswordFinish,{session_.token,hex(current_proof),hex(new_verifier)}}))return{false,"send failed"};
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
@@ -371,8 +375,9 @@ public:
         if(!Send({Type::RequestPasswordReset,{identifier}}))return{false,"send failed"};
         Packet q;if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
-        if(q.type!=Type::PasswordResetIssued||q.fields.size()!=3)return{false,"invalid password reset response"};
-        pending_reset_challenges_[q.fields[0]]=PendingReset{q.fields[1],std::stoll(q.fields[2])};
+        if(q.type!=Type::PasswordResetIssued||q.fields.size()!=4)return{false,"invalid password reset response"};
+        pending_reset_challenges_[q.fields[0]]=PendingReset{
+            q.fields[1],std::stoll(q.fields[2]),static_cast<std::uint32_t>(std::stoul(q.fields[3]))};
         return{true,"password reset token="+q.fields[0]+" expires="+q.fields[2]};
     }
 
@@ -388,7 +393,8 @@ public:
             return{false,"reset token expired"};
         }
 
-        const auto new_verifier=pbkdf2_hmac_sha256(new_password,from_hex(it->second.salt_hex));
+        const auto new_verifier=pbkdf2_hmac_sha256(
+            new_password,from_hex(it->second.salt_hex),it->second.kdf_iterations);
         if(!Send({Type::ResetPassword,{reset_token,it->second.salt_hex,hex(new_verifier)}}))return{false,"send failed"};
 
         Packet q;
@@ -605,6 +611,7 @@ private:
     struct PendingReset{
         std::string salt_hex;
         std::int64_t expires_at{0};
+        std::uint32_t kdf_iterations{luma::contracts::auth::crypto::kPasswordPbkdf2Iterations};
     };
     struct PendingPhoneChallenge{
         std::string challenge_id;

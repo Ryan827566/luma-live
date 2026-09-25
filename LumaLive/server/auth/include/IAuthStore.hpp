@@ -17,6 +17,7 @@ struct AuthUserRecord {
     std::string phone;
     std::string salt_hex;
     std::string verifier_hex;
+    std::uint32_t password_kdf_iterations{600000};
     bool email_verified{false};
     bool phone_verified{false};
     bool mfa_enabled{false};

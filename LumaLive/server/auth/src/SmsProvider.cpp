@@ -58,9 +58,12 @@ std::unique_ptr<ISmsProvider> CreateDevelopmentSmsProvider() {
 
 std::unique_ptr<ISmsProvider> CreateSmsProviderFromEnvironment() {
     const std::string provider=EnvironmentValue("LUMALIVE_SMS_PROVIDER");
-    if (provider.empty() || provider == "mock" || provider == "development") {
-        return CreateDevelopmentSmsProvider();
+    if(provider=="mock"||provider=="development"){
+        const auto auth_env=EnvironmentValue("LUMALIVE_AUTH_ENV");
+        if(auth_env=="development"||auth_env=="test")return CreateDevelopmentSmsProvider();
+        return std::make_unique<UnavailableSmsProvider>("development");
     }
+    if(provider.empty())return std::make_unique<UnavailableSmsProvider>("unset");
     return std::make_unique<UnavailableSmsProvider>(provider);
 }
 
