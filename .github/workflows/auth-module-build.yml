@@ -48,4 +48,4 @@ jobs:
 
       - name: Compile auth server
         run: |
-          g++ -std=c++20 -Wall -Wextra -Werror -pthread             -I LumaLive/shared             -I LumaLive/server/auth/include             LumaLive/server/auth/src/AuthServiceImpl.cpp             LumaLive/server/auth/src/AuthStore.cpp             LumaLive/server/auth/src/SmsProvider.cpp             LumaLive/server/auth/src/EmailProvider.cpp             LumaLive/apps/luma-auth-server/src/main.cpp             -o luma_auth_server -ldl
+          g++ -std=c++20 -Wall -Wextra -Werror -pthread             -I LumaLive/shared             -I LumaLive/server/auth/include             LumaLive/server/auth/src/AuthServiceImpl.cpp             LumaLive/server/auth/src/AuthStore.cpp             LumaLive/shared/contracts/auth/AuthCrypto.cpp             LumaLive/server/auth/src/SmsProvider.cpp             LumaLive/server/auth/src/EmailProvider.cpp             LumaLive/apps/luma-auth-server/src/main.cpp             -o luma_auth_server -ldl
