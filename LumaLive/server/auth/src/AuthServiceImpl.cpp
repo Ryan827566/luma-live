@@ -672,6 +672,26 @@ private:
         return false;
     }
 
+    bool TooManyPhoneVerificationRequests(const std::string& phone,const std::string& remote){
+        const auto key="phone-verify|"+phone+"|"+remote;
+        const auto now=now_epoch();
+        std::lock_guard lock(rate_mutex_);
+        auto&state=failures_[key];
+        if(state.window_started==0||now-state.window_started>600){
+            state.window_started=now;
+            state.count=0;
+            state.locked_until=0;
+        }
+        if(state.locked_until>now)return true;
+        if(state.count>=3){
+            state.locked_until=now+600;
+            return true;
+        }
+        ++state.count;
+        state.locked_until=now+60;
+        return false;
+    }
+
     bool TooManyPhoneSourceRequests(const std::string& remote){
         const auto key="phone-source|"+remote;
         const auto now=now_epoch();
@@ -1201,11 +1221,11 @@ private:
             const auto phone=normalize_phone(p.fields[1]);
             if(phone.empty()){bad("invalid_phone","invalid phone number");return;}
             if(TooManyPhoneSourceRequests(c.remote_address)||
-               TooManyPhoneCodeRequests(phone,c.remote_address)){
-                bad("temporarily_locked","too many SMS code requests; try again later");return;
+               TooManyPhoneVerificationRequests(phone,c.remote_address)){
+                bad("temporarily_locked","too many SMS verification requests; try again later");return;
             }
 
-            const auto challenge_id=make_id();
+            const challenge_id=make_id();
             const auto code=make_otp_code();
             const auto expires=now_epoch()+5*60;
 
