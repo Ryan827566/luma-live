@@ -22,6 +22,8 @@ std::string EnvironmentValue(const char* name) {
 
 class DevelopmentEmailProvider final : public IEmailProvider {
 public:
+    bool IsConfigured() const override { return true; }
+
     EmailSendResult SendToken(
         std::string_view email,
         std::string_view purpose,
@@ -37,6 +39,8 @@ public:
 class UnavailableEmailProvider final : public IEmailProvider {
 public:
     explicit UnavailableEmailProvider(std::string name):name_(std::move(name)){}
+    bool IsConfigured() const override { return false; }
+
     EmailSendResult SendToken(
         std::string_view,
         std::string_view,
@@ -57,11 +61,13 @@ std::unique_ptr<IEmailProvider> CreateDevelopmentEmailProvider() {
 
 std::unique_ptr<IEmailProvider> CreateEmailProviderFromEnvironment() {
     const auto provider=EnvironmentValue("LUMALIVE_EMAIL_PROVIDER");
+    const auto auth_env=EnvironmentValue("LUMALIVE_AUTH_ENV");
     if(provider=="mock"||provider=="development"){
-        const auto auth_env=EnvironmentValue("LUMALIVE_AUTH_ENV");
         if(auth_env=="development"||auth_env=="test")return CreateDevelopmentEmailProvider();
         return std::make_unique<UnavailableEmailProvider>("development");
     }
+    if(provider.empty()&&(auth_env=="development"||auth_env=="test"))
+        return CreateDevelopmentEmailProvider();
     if(provider.empty())return std::make_unique<UnavailableEmailProvider>("unset");
     return std::make_unique<UnavailableEmailProvider>(provider);
 }
