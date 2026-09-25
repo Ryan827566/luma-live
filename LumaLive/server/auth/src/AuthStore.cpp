@@ -1,4 +1,5 @@
 #include "IAuthStore.hpp"
+#include <algorithm>
 #include <cstdlib>
 #include <mutex>
 #include <string>
@@ -51,12 +52,30 @@ public:
         return shared::contracts::Result::Ok();
     }
 
-    shared::contracts::Result ReplaceUsers(
-        const std::vector<AuthUserRecord>& users) override {
+    shared::contracts::Result UpsertUser(
+        const AuthUserRecord& user) override {
         std::lock_guard lock(mutex_);
         if(!opened_) return shared::contracts::Result::Failure(
             shared::contracts::ErrorCode::InvalidState,"auth store is not open");
-        users_=users;
+        for(auto& existing:users_) {
+            if(existing.id==user.id) {
+                existing=user;
+                return shared::contracts::Result::Ok();
+            }
+        }
+        users_.push_back(user);
+        return shared::contracts::Result::Ok();
+    }
+
+    shared::contracts::Result DeleteUser(
+        std::string_view user_id) override {
+        std::lock_guard lock(mutex_);
+        if(!opened_) return shared::contracts::Result::Failure(
+            shared::contracts::ErrorCode::InvalidState,"auth store is not open");
+        const auto it=std::remove_if(users_.begin(),users_.end(),
+            [user_id](const AuthUserRecord& user){return user.id==user_id;});
+        if(it==users_.end())return shared::contracts::Result::Ok();
+        users_.erase(it,users_.end());
         return shared::contracts::Result::Ok();
     }
 
@@ -272,49 +291,49 @@ public:
         return shared::contracts::Result::Ok();
     }
 
-    shared::contracts::Result ReplaceUsers(
-        const std::vector<AuthUserRecord>& users) override {
+    shared::contracts::Result UpsertUser(
+        const AuthUserRecord& u) override {
         std::lock_guard lock(mutex_);
         if(auto r=CheckOpenLocked();!r.IsOk())return r;
-
-        if(auto r=ExecSimpleLocked("BEGIN");!r.IsOk())return r;
-
-        if(auto r=ExecSimpleLocked("DELETE FROM luma_auth_users");!r.IsOk()) {
-            ExecSimpleLocked("ROLLBACK");
-            return r;
-        }
 
         static constexpr const char* sql=
             "INSERT INTO luma_auth_users("
             "user_id,username,email,display_name,avatar_url,phone,password_salt,password_verifier,password_kdf_iterations,"
             "email_verified,phone_verified,mfa_enabled,mfa_recovery_hash,mfa_totp_secret_hex,email_verify_hash,"
             "email_verify_expires,reset_token_hash,reset_token_expires)"
-            " VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)";
+            " VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)"
+            " ON CONFLICT(user_id) DO UPDATE SET "
+            "username=EXCLUDED.username,email=EXCLUDED.email,display_name=EXCLUDED.display_name,"
+            "avatar_url=EXCLUDED.avatar_url,phone=EXCLUDED.phone,password_salt=EXCLUDED.password_salt,"
+            "password_verifier=EXCLUDED.password_verifier,password_kdf_iterations=EXCLUDED.password_kdf_iterations,"
+            "email_verified=EXCLUDED.email_verified,phone_verified=EXCLUDED.phone_verified,"
+            "mfa_enabled=EXCLUDED.mfa_enabled,mfa_recovery_hash=EXCLUDED.mfa_recovery_hash,"
+            "mfa_totp_secret_hex=EXCLUDED.mfa_totp_secret_hex,email_verify_hash=EXCLUDED.email_verify_hash,"
+            "email_verify_expires=EXCLUDED.email_verify_expires,reset_token_hash=EXCLUDED.reset_token_hash,"
+            "reset_token_expires=EXCLUDED.reset_token_expires";
 
-        for(const auto& u:users) {
-            const std::string password_kdf_iterations=std::to_string(u.password_kdf_iterations);
-            const std::string email_verified=u.email_verified?"true":"false";
-            const std::string phone_verified=u.phone_verified?"true":"false";
-            const std::string mfa_enabled=u.mfa_enabled?"true":"false";
-            const std::string email_expiry=std::to_string(u.email_verify_expires);
-            const std::string reset_expiry=std::to_string(u.reset_token_expires);
-            const std::string* params[]={
-                &u.id,&u.username,&u.email,&u.display_name,&u.avatar_url,&u.phone,
-                &u.salt_hex,&u.verifier_hex,&password_kdf_iterations,&email_verified,&phone_verified,&mfa_enabled,
-                &u.mfa_recovery_hash,&u.mfa_totp_secret_hex,&u.email_verify_hash,&email_expiry,
-                &u.reset_token_hash,&reset_expiry};
+        const std::string password_kdf_iterations=std::to_string(u.password_kdf_iterations);
+        const std::string email_verified=u.email_verified?"true":"false";
+        const std::string phone_verified=u.phone_verified?"true":"false";
+        const std::string mfa_enabled=u.mfa_enabled?"true":"false";
+        const std::string email_expiry=std::to_string(u.email_verify_expires);
+        const std::string reset_expiry=std::to_string(u.reset_token_expires);
+        const std::string* params[]={
+            &u.id,&u.username,&u.email,&u.display_name,&u.avatar_url,&u.phone,
+            &u.salt_hex,&u.verifier_hex,&password_kdf_iterations,&email_verified,&phone_verified,&mfa_enabled,
+            &u.mfa_recovery_hash,&u.mfa_totp_secret_hex,&u.email_verify_hash,&email_expiry,
+            &u.reset_token_hash,&reset_expiry};
+        return ExecParamsLocked(sql,params,18);
+    }
 
-            if(auto r=ExecParamsLocked(sql,params,18);!r.IsOk()) {
-                ExecSimpleLocked("ROLLBACK");
-                return r;
-            }
-        }
-
-        if(auto r=ExecSimpleLocked("COMMIT");!r.IsOk()) {
-            ExecSimpleLocked("ROLLBACK");
-            return r;
-        }
-        return shared::contracts::Result::Ok();
+    shared::contracts::Result DeleteUser(
+        std::string_view user_id) override {
+        std::lock_guard lock(mutex_);
+        if(auto r=CheckOpenLocked();!r.IsOk())return r;
+        static constexpr const char* sql="DELETE FROM luma_auth_users WHERE user_id=$1";
+        const std::string id(user_id);
+        const std::string* params[]={&id};
+        return ExecParamsLocked(sql,params,1);
     }
 
     shared::contracts::Result LoadSecurityEvents(
@@ -442,7 +461,7 @@ private:
             "phone TEXT NOT NULL DEFAULT '',"
             "password_salt TEXT NOT NULL,"
             "password_verifier TEXT NOT NULL,"
-            "password_kdf_iterations INTEGER NOT NULL DEFAULT 120000,"
+            "password_kdf_iterations INTEGER NOT NULL DEFAULT 600000,"
             "email_verified BOOLEAN NOT NULL DEFAULT FALSE,"
             "phone_verified BOOLEAN NOT NULL DEFAULT FALSE,"
             "mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE,"
@@ -453,7 +472,7 @@ private:
             "reset_token_hash TEXT NOT NULL DEFAULT '',"
             "reset_token_expires BIGINT NOT NULL DEFAULT 0"
             ");"
-            "ALTER TABLE luma_auth_users ADD COLUMN IF NOT EXISTS password_kdf_iterations INTEGER NOT NULL DEFAULT 120000;"
+            "ALTER TABLE luma_auth_users ADD COLUMN IF NOT EXISTS password_kdf_iterations INTEGER NOT NULL DEFAULT 600000;"
             "ALTER TABLE luma_auth_users ADD COLUMN IF NOT EXISTS mfa_totp_secret_hex TEXT NOT NULL DEFAULT '';"
             "CREATE UNIQUE INDEX IF NOT EXISTS luma_auth_users_username_idx "
             "ON luma_auth_users(lower(username));"
