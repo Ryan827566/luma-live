@@ -1,6 +1,0 @@
-add_library(luma_adapters_vision STATIC src/VisionProviderAdapterService.cpp)
-target_include_directories(luma_adapters_vision PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_features(luma_adapters_vision PUBLIC cxx_std_20)
-add_executable(luma_adapters_vision_tests tests/VisionProviderAdapterServiceTests.cpp)
-target_link_libraries(luma_adapters_vision_tests PRIVATE luma_adapters_vision)
-add_test(NAME luma_adapters_vision_tests COMMAND luma_adapters_vision_tests)

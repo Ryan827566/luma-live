@@ -1,8 +1,0 @@
-add_library(luma_ui STATIC src/UiServiceImpl.cpp)
-target_include_directories(luma_ui PUBLIC include)
-target_link_libraries(luma_ui PUBLIC luma_shared)
-target_compile_features(luma_ui PUBLIC cxx_std_20)
-add_subdirectory(scene-editor)
-add_subdirectory(studio-shell)
-
-add_subdirectory(studio-preview)

@@ -1,6 +1,0 @@
-add_library(luma_adapters_sfu STATIC src/SfuAdapterService.cpp)
-target_include_directories(luma_adapters_sfu PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_features(luma_adapters_sfu PUBLIC cxx_std_20)
-add_executable(luma_adapters_sfu_tests tests/SfuAdapterServiceTests.cpp)
-target_link_libraries(luma_adapters_sfu_tests PRIVATE luma_adapters_sfu)
-add_test(NAME luma_adapters_sfu_tests COMMAND luma_adapters_sfu_tests)

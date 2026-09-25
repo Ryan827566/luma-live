@@ -1,0 +1,6 @@
+#include "OpenAiCompatibleProvider.hpp"
+#include "AnthropicProvider.hpp"
+#include <cassert>
+using namespace luma::ai;
+class FakeHttp final: public providers::IAiHttpClient { public: std::string url,body; providers::HttpResponse response{200,R"({"choices":[{"message":{"content":"ok"}}]})",""}; providers::HttpResponse Post(const std::string&u,const std::unordered_map<std::string,std::string>&,const std::string&b) override{url=u;body=b;return response;} };
+int main(){auto h=std::make_shared<FakeHttp>();auto c=providers::MakeOpenAiConfig("https://api.openai.com/v1","OPENAI_API_KEY","gpt-5");providers::OpenAiCompatibleProvider p(c,h);core::AiRequest r;r.request_id="1";r.input="hello";auto o=p.Execute(r);assert(o.success&&o.text=="ok");assert(h->url=="https://api.openai.com/v1/chat/completions");auto a=providers::MakeAnthropicConfig("https://api.anthropic.com","ANTHROPIC_API_KEY","claude-sonnet");providers::AnthropicProvider ap(a,h);auto ao=ap.Execute(r);assert(ao.success);assert(h->url=="https://api.anthropic.com/v1/messages");}

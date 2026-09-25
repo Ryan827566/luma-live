@@ -1,6 +1,0 @@
-add_library(luma_ai_effect_agent STATIC src/EffectAgentService.cpp)
-target_include_directories(luma_ai_effect_agent PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_features(luma_ai_effect_agent PUBLIC cxx_std_20)
-add_executable(luma_ai_effect_agent_tests tests/EffectAgentServiceTests.cpp)
-target_link_libraries(luma_ai_effect_agent_tests PRIVATE luma_ai_effect_agent)
-add_test(NAME luma_ai_effect_agent_tests COMMAND luma_ai_effect_agent_tests)

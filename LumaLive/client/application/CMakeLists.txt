@@ -1,4 +1,0 @@
-add_library(luma_application STATIC src/ApplicationServiceImpl.cpp)
-target_include_directories(luma_application PUBLIC include)
-target_link_libraries(luma_application PUBLIC luma_shared)
-target_compile_features(luma_application PUBLIC cxx_std_20)

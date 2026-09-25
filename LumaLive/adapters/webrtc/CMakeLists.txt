@@ -1,6 +1,0 @@
-add_library(luma_adapters_webrtc STATIC src/WebRtcAdapterService.cpp)
-target_include_directories(luma_adapters_webrtc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_features(luma_adapters_webrtc PUBLIC cxx_std_20)
-add_executable(luma_adapters_webrtc_tests tests/WebRtcAdapterServiceTests.cpp)
-target_link_libraries(luma_adapters_webrtc_tests PRIVATE luma_adapters_webrtc)
-add_test(NAME luma_adapters_webrtc_tests COMMAND luma_adapters_webrtc_tests)

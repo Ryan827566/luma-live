@@ -1,6 +1,0 @@
-add_library(luma_ai_memory_rag STATIC src/AiMemoryRagService.cpp)
-target_include_directories(luma_ai_memory_rag PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_features(luma_ai_memory_rag PUBLIC cxx_std_20)
-add_executable(luma_ai_memory_rag_tests tests/AiMemoryRagServiceTests.cpp)
-target_link_libraries(luma_ai_memory_rag_tests PRIVATE luma_ai_memory_rag)
-add_test(NAME luma_ai_memory_rag_tests COMMAND luma_ai_memory_rag_tests)

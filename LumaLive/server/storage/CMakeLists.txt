@@ -1,4 +1,0 @@
-add_library(luma_server_storage STATIC src/StorageServiceImpl.cpp)
-target_include_directories(luma_server_storage PUBLIC include)
-target_link_libraries(luma_server_storage PUBLIC luma_shared)
-target_compile_features(luma_server_storage PUBLIC cxx_std_20)

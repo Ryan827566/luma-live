@@ -1,6 +1,0 @@
-add_library(luma_ai_tts STATIC src/TtsService.cpp)
-target_include_directories(luma_ai_tts PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_features(luma_ai_tts PUBLIC cxx_std_20)
-add_executable(luma_ai_tts_tests tests/TtsServiceTests.cpp)
-target_link_libraries(luma_ai_tts_tests PRIVATE luma_ai_tts)
-add_test(NAME luma_ai_tts_tests COMMAND luma_ai_tts_tests)

@@ -1,7 +1,0 @@
-add_library(luma_scene_editor_ui STATIC src/SceneEditorView.cpp)
-target_include_directories(luma_scene_editor_ui PUBLIC include)
-target_link_libraries(luma_scene_editor_ui PUBLIC luma_studio_application luma_studio_domain)
-target_compile_features(luma_scene_editor_ui PUBLIC cxx_std_20)
-if(WIN32)
-  target_link_libraries(luma_scene_editor_ui PRIVATE user32 gdi32)
-endif()

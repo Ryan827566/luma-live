@@ -1,6 +1,0 @@
-add_library(luma_ai_budget STATIC src/AiBudgetService.cpp)
-target_include_directories(luma_ai_budget PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_features(luma_ai_budget PUBLIC cxx_std_20)
-add_executable(luma_ai_budget_tests tests/AiBudgetServiceTests.cpp)
-target_link_libraries(luma_ai_budget_tests PRIVATE luma_ai_budget)
-add_test(NAME luma_ai_budget_tests COMMAND luma_ai_budget_tests)

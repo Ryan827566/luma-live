@@ -1,4 +1,0 @@
-add_library(luma_studio_application STATIC src/StudioApplication.cpp)
-target_include_directories(luma_studio_application PUBLIC include)
-target_link_libraries(luma_studio_application PUBLIC luma_studio_domain)
-target_compile_features(luma_studio_application PUBLIC cxx_std_20)
