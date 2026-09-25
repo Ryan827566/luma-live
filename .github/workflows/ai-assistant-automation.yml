@@ -1,15 +1,21 @@
-name: AI Assistant Automation
+name: LumaLive AI Automation
 
 on:
   push:
     branches:
-      - codex/ai-assistant-automation
+      - codex/ai-platform
+    paths:
+      - 'LumaLive/ai/automation/**'
+      - '.github/workflows/ai-assistant-automation.yml'
   pull_request:
     branches:
       - main
+    paths:
+      - 'LumaLive/ai/automation/**'
+      - '.github/workflows/ai-assistant-automation.yml'
 
 jobs:
-  build-test:
+  automation-build-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
