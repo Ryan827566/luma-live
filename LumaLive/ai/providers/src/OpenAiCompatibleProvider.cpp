@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <string>
+#include <unordered_map>
 
 namespace luma::ai::providers {
 namespace {
@@ -10,12 +11,11 @@ std::string JsonEscape(const std::string& value) {
     std::string output;
     for (const char c : value) {
         switch (c) {
-        case '\': output += "\\"; break;
-        case '"': output += "\""; break;
-        case '
-': output += "\n"; break;
-        case '': output += "\r"; break;
-        case '	': output += "\t"; break;
+        case '\\': output += "\\\\"; break;
+        case '"': output += "\\\""; break;
+        case '\n': output += "\\n"; break;
+        case '\r': output += "\\r"; break;
+        case '\t': output += "\\t"; break;
         default: output += c; break;
         }
     }
@@ -25,9 +25,9 @@ std::string JsonEscape(const std::string& value) {
 std::string ExtractJsonString(const std::string& body, const std::string& key) {
     const auto key_pos = body.find("\"" + key + "\"");
     if (key_pos == std::string::npos) return {};
-    auto colon_pos = body.find(':', key_pos);
+    const auto colon_pos = body.find(':', key_pos);
     if (colon_pos == std::string::npos) return {};
-    auto quote_pos = body.find('"', colon_pos);
+    const auto quote_pos = body.find('"', colon_pos);
     if (quote_pos == std::string::npos) return {};
 
     std::string output;
@@ -36,22 +36,17 @@ std::string ExtractJsonString(const std::string& body, const std::string& key) {
         const char c = body[i];
         if (escaped) {
             switch (c) {
-            case 'n': output += '
-'; break;
-            case 'r': output += ''; break;
-            case 't': output += '	'; break;
+            case 'n': output += '\n'; break;
+            case 'r': output += '\r'; break;
+            case 't': output += '\t'; break;
             default: output += c; break;
             }
             escaped = false;
             continue;
         }
-        if (c == '\\') {
-            escaped = true;
-        } else if (c == '"') {
-            break;
-        } else {
-            output += c;
-        }
+        if (c == '\\') escaped = true;
+        else if (c == '"') break;
+        else output += c;
     }
     return output;
 }
@@ -91,6 +86,14 @@ core::AiResponse OpenAiCompatibleProvider::Execute(const core::AiRequest& reques
     }
     if (request.input.empty()) {
         response.error = "input is empty";
+        return response;
+    }
+    if (response.model.empty()) {
+        response.error = "model is not configured";
+        return response;
+    }
+    if (config_.endpoint.empty()) {
+        response.error = "provider endpoint is empty";
         return response;
     }
 
