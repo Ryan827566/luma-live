@@ -259,6 +259,10 @@ int main() {
 
     auto bobReset=luma::client::account::CreateAccountService();
     assert(bobReset->Connect("127.0.0.1",19121).success);
+    const auto missingReset=bobReset->RequestPasswordReset("account-that-does-not-exist");
+    assert(missingReset.success);
+    assert(missingReset.message.find("if the account exists")!=std::string::npos);
+
     const auto resetRequest=bobReset->RequestPasswordReset("bob.test");
     assert(resetRequest.success);
     const auto reset_token=ExtractAfter(
