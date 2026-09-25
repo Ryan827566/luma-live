@@ -15,6 +15,18 @@ int main() {
     auto fail_closed=CreateEmailProviderFromEnvironment();
     const auto closed=fail_closed->SendToken("alice@example.com","password_reset","token-123",std::chrono::seconds(1800));
     assert(!closed.accepted&&closed.debug_token.empty());
+
+#ifdef _WIN32
+    _putenv_s("LUMALIVE_AUTH_ENV","production");
+    _putenv_s("LUMALIVE_EMAIL_PROVIDER","unknown-provider");
+#else
+    setenv("LUMALIVE_AUTH_ENV","production",1);
+    setenv("LUMALIVE_EMAIL_PROVIDER","unknown-provider",1);
+#endif
+    auto unknown=CreateEmailProviderFromEnvironment();
+    const auto unknown_result=unknown->SendToken("alice@example.com","password_reset","token-123",std::chrono::seconds(1800));
+    assert(!unknown_result.accepted&&unknown_result.debug_token.empty());
+
 #ifdef _WIN32
     _putenv_s("LUMALIVE_AUTH_ENV","test");
     _putenv_s("LUMALIVE_EMAIL_PROVIDER","development");
