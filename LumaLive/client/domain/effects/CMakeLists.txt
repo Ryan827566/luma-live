@@ -1,4 +1,0 @@
-add_library(luma_effects STATIC src/EffectsServiceImpl.cpp)
-target_include_directories(luma_effects PUBLIC include)
-target_link_libraries(luma_effects PUBLIC luma_shared)
-target_compile_features(luma_effects PUBLIC cxx_std_20)

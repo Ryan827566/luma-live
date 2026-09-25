@@ -1,4 +1,0 @@
-add_library(luma_agents STATIC src/AgentRegistryImpl.cpp)
-target_include_directories(luma_agents PUBLIC include)
-target_link_libraries(luma_agents PUBLIC luma_shared)
-target_compile_features(luma_agents PUBLIC cxx_std_20)

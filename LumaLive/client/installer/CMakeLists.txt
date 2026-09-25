@@ -1,6 +1,0 @@
-add_library(luma_client_installer STATIC src/InstallerService.cpp)
-target_include_directories(luma_client_installer PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_features(luma_client_installer PUBLIC cxx_std_20)
-add_executable(luma_client_installer_tests tests/InstallerServiceTests.cpp)
-target_link_libraries(luma_client_installer_tests PRIVATE luma_client_installer)
-add_test(NAME luma_client_installer_tests COMMAND luma_client_installer_tests)

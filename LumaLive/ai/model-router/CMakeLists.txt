@@ -1,7 +1,0 @@
-add_library(luma_model_router STATIC src/ModelRouterImpl.cpp)
-target_include_directories(luma_model_router PUBLIC include)
-target_link_libraries(luma_model_router PUBLIC luma_ai_core luma_ai_providers)
-target_compile_features(luma_model_router PUBLIC cxx_std_20)
-add_executable(luma_model_router_tests tests/ModelRouterTests.cpp)
-target_link_libraries(luma_model_router_tests PRIVATE luma_model_router luma_ai_providers)
-add_test(NAME luma_model_router_tests COMMAND luma_model_router_tests)

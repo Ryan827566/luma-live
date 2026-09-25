@@ -1,6 +1,0 @@
-add_library(luma_server_room STATIC src/RoomService.cpp)
-target_include_directories(luma_server_room PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_features(luma_server_room PUBLIC cxx_std_20)
-add_executable(luma_server_room_tests tests/RoomServiceTests.cpp)
-target_link_libraries(luma_server_room_tests PRIVATE luma_server_room)
-add_test(NAME luma_server_room_tests COMMAND luma_server_room_tests)

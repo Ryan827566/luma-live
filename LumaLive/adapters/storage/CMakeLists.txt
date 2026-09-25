@@ -1,4 +1,0 @@
-add_library(luma_storage STATIC src/ObjectStorageImpl.cpp)
-target_include_directories(luma_storage PUBLIC include)
-target_link_libraries(luma_storage PUBLIC luma_shared)
-target_compile_features(luma_storage PUBLIC cxx_std_20)

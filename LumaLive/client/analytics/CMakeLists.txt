@@ -1,6 +1,0 @@
-add_library(luma_client_analytics STATIC src/AnalyticsClientService.cpp)
-target_include_directories(luma_client_analytics PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_features(luma_client_analytics PUBLIC cxx_std_20)
-add_executable(luma_client_analytics_tests tests/AnalyticsClientServiceTests.cpp)
-target_link_libraries(luma_client_analytics_tests PRIVATE luma_client_analytics)
-add_test(NAME luma_client_analytics_tests COMMAND luma_client_analytics_tests)

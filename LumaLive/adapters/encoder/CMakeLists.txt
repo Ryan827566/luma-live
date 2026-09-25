@@ -1,4 +1,0 @@
-add_library(luma_encoder STATIC src/EncoderAdapterImpl.cpp)
-target_include_directories(luma_encoder PUBLIC include)
-target_link_libraries(luma_encoder PUBLIC luma_shared)
-target_compile_features(luma_encoder PUBLIC cxx_std_20)

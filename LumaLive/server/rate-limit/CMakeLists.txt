@@ -1,6 +1,0 @@
-add_library(luma_server_rate_limit STATIC src/RateLimitService.cpp)
-target_include_directories(luma_server_rate_limit PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_features(luma_server_rate_limit PUBLIC cxx_std_20)
-add_executable(luma_server_rate_limit_tests tests/RateLimitServiceTests.cpp)
-target_link_libraries(luma_server_rate_limit_tests PRIVATE luma_server_rate_limit)
-add_test(NAME luma_server_rate_limit_tests COMMAND luma_server_rate_limit_tests)

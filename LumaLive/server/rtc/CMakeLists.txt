@@ -1,6 +1,0 @@
-add_library(luma_server_rtc STATIC src/RtcServerService.cpp)
-target_include_directories(luma_server_rtc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_features(luma_server_rtc PUBLIC cxx_std_20)
-add_executable(luma_server_rtc_tests tests/RtcServerServiceTests.cpp)
-target_link_libraries(luma_server_rtc_tests PRIVATE luma_server_rtc)
-add_test(NAME luma_server_rtc_tests COMMAND luma_server_rtc_tests)

@@ -1,4 +1,0 @@
-add_library(luma_analytics STATIC src/AnalyticsServiceImpl.cpp)
-target_include_directories(luma_analytics PUBLIC include)
-target_link_libraries(luma_analytics PUBLIC luma_shared)
-target_compile_features(luma_analytics PUBLIC cxx_std_20)

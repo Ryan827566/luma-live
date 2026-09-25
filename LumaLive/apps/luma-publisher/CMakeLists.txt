@@ -1,3 +1,0 @@
-add_executable(luma_publisher src/main.cpp)
-target_compile_features(luma_publisher PRIVATE cxx_std_20)
-target_link_libraries(luma_publisher PRIVATE luma_client_live)

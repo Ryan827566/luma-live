@@ -1,6 +1,0 @@
-add_library(luma_ai_asr STATIC src/AsrService.cpp)
-target_include_directories(luma_ai_asr PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_features(luma_ai_asr PUBLIC cxx_std_20)
-add_executable(luma_ai_asr_tests tests/AsrServiceTests.cpp)
-target_link_libraries(luma_ai_asr_tests PRIVATE luma_ai_asr)
-add_test(NAME luma_ai_asr_tests COMMAND luma_ai_asr_tests)

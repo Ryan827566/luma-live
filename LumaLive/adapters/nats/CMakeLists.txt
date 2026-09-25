@@ -1,6 +1,0 @@
-add_library(luma_adapters_nats STATIC src/NatsAdapterService.cpp)
-target_include_directories(luma_adapters_nats PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_features(luma_adapters_nats PUBLIC cxx_std_20)
-add_executable(luma_adapters_nats_tests tests/NatsAdapterServiceTests.cpp)
-target_link_libraries(luma_adapters_nats_tests PRIVATE luma_adapters_nats)
-add_test(NAME luma_adapters_nats_tests COMMAND luma_adapters_nats_tests)

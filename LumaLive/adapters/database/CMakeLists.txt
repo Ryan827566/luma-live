@@ -1,4 +1,0 @@
-add_library(luma_database STATIC src/DatabaseImpl.cpp)
-target_include_directories(luma_database PUBLIC include)
-target_link_libraries(luma_database PUBLIC luma_shared)
-target_compile_features(luma_database PUBLIC cxx_std_20)

@@ -1,6 +1,0 @@
-add_library(luma_server_cache STATIC src/ServerCacheService.cpp)
-target_include_directories(luma_server_cache PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_features(luma_server_cache PUBLIC cxx_std_20)
-add_executable(luma_server_cache_tests tests/ServerCacheServiceTests.cpp)
-target_link_libraries(luma_server_cache_tests PRIVATE luma_server_cache)
-add_test(NAME luma_server_cache_tests COMMAND luma_server_cache_tests)

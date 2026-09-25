@@ -1,6 +1,0 @@
-add_library(luma_adapters_s3 STATIC src/S3AdapterService.cpp)
-target_include_directories(luma_adapters_s3 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_features(luma_adapters_s3 PUBLIC cxx_std_20)
-add_executable(luma_adapters_s3_tests tests/S3AdapterServiceTests.cpp)
-target_link_libraries(luma_adapters_s3_tests PRIVATE luma_adapters_s3)
-add_test(NAME luma_adapters_s3_tests COMMAND luma_adapters_s3_tests)

@@ -1,3 +1,0 @@
-# WebRTC binary artifacts are stored with Git LFS.
-third_party/webrtc/**/*.lib filter=lfs diff=lfs merge=lfs -text
-

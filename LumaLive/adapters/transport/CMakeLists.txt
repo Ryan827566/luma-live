@@ -1,4 +1,0 @@
-add_library(luma_transport STATIC src/TransportAdapterImpl.cpp)
-target_include_directories(luma_transport PUBLIC include)
-target_link_libraries(luma_transport PUBLIC luma_shared)
-target_compile_features(luma_transport PUBLIC cxx_std_20)
