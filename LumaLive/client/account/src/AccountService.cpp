@@ -440,7 +440,7 @@ public:
         if(q.type==Type::Error)return Error(q);
         if(q.type!=Type::MfaEnabled||q.fields.size()!=3)return{false,"invalid MFA enable response"};
         security_.mfa_enabled=true;
-        return{true,"MFA enabled; recovery code="+q.fields[0]+"; TOTP secret="+q.fields[1]+"; otpauth="+q.fields[2]};
+        return{true,"MFA enabled; recovery codes="+q.fields[0]+"; TOTP secret="+q.fields[1]+"; otpauth="+q.fields[2]};
     }
 
     OperationResult DisableMfa(std::string recovery_code)override{
