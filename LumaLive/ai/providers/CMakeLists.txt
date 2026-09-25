@@ -1,5 +1,6 @@
-add_library(luma_ai_providers STATIC src/AiProviderService.cpp)
+add_library(luma_ai_providers STATIC src/AiProviderService.cpp src/ProviderRegistry.cpp)
 target_include_directories(luma_ai_providers PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(luma_ai_providers PUBLIC luma_ai_core)
 target_compile_features(luma_ai_providers PUBLIC cxx_std_20)
 add_executable(luma_ai_providers_tests tests/AiProviderServiceTests.cpp)
 target_link_libraries(luma_ai_providers_tests PRIVATE luma_ai_providers)
