@@ -97,11 +97,17 @@ core::AiResponse OpenAiCompatibleProvider::Execute(const core::AiRequest& reques
         return response;
     }
 
-    const char* api_key = config_.api_key_env.empty()
-        ? nullptr : std::getenv(config_.api_key_env.c_str());
-    if (!api_key || *api_key == '\0') {
-        response.error = "API key environment variable is missing: " + config_.api_key_env;
-        return response;
+    std::unordered_map<std::string, std::string> headers{
+        {"Content-Type", "application/json"}
+    };
+    if (!config_.api_key_env.empty()) {
+        const char* api_key = std::getenv(config_.api_key_env.c_str());
+        if (!api_key || *api_key == '\0') {
+            response.error =
+                "API key environment variable is missing: " + config_.api_key_env;
+            return response;
+        }
+        headers["Authorization"] = std::string("Bearer ") + api_key;
     }
 
     std::string url = config_.endpoint;
@@ -118,11 +124,6 @@ core::AiResponse OpenAiCompatibleProvider::Execute(const core::AiRequest& reques
 
     const std::string body = "{\"model\":\"" + JsonEscape(response.model) +
                              "\",\"messages\":" + messages + "}";
-    const std::unordered_map<std::string, std::string> headers{
-        {"Authorization", std::string("Bearer ") + api_key},
-        {"Content-Type", "application/json"}
-    };
-
     const auto http = client_->Post(url, headers, body);
     if (http.status < 200 || http.status >= 300) {
         response.error = http.error.empty()
