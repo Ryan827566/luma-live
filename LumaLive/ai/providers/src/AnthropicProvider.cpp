@@ -97,22 +97,23 @@ core::AiResponse AnthropicProvider::Execute(const core::AiRequest& request) {
         return response;
     }
 
-    const char* api_key = config_.api_key_env.empty()
-        ? nullptr : std::getenv(config_.api_key_env.c_str());
-    if (!api_key || *api_key == '\0') {
-        response.error = "API key environment variable is missing: " + config_.api_key_env;
-        return response;
+    std::unordered_map<std::string, std::string> headers{
+        {"anthropic-version", "2023-06-01"},
+        {"Content-Type", "application/json"}
+    };
+    if (!config_.api_key_env.empty()) {
+        const char* api_key = std::getenv(config_.api_key_env.c_str());
+        if (!api_key || *api_key == '\0') {
+            response.error =
+                "API key environment variable is missing: " + config_.api_key_env;
+            return response;
+        }
+        headers["x-api-key"] = api_key;
     }
 
     std::string url = config_.endpoint;
     if (!url.empty() && url.back() != '/') url += '/';
     url += "v1/messages";
-
-    const std::unordered_map<std::string, std::string> headers{
-        {"x-api-key", api_key},
-        {"anthropic-version", "2023-06-01"},
-        {"Content-Type", "application/json"}
-    };
 
     std::string body = "{\"model\":\"" + Escape(response.model) +
                        "\",\"max_tokens\":1024";
