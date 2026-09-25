@@ -16,6 +16,18 @@ int main() {
     auto fail_closed=CreateSmsProviderFromEnvironment();
     const auto closed=fail_closed->SendOtp("+14155552673","phone_login","123456",std::chrono::seconds(300));
     assert(!closed.accepted&&closed.debug_code.empty());
+
+#ifdef _WIN32
+    _putenv_s("LUMALIVE_AUTH_ENV","production");
+    _putenv_s("LUMALIVE_SMS_PROVIDER","unknown-provider");
+#else
+    setenv("LUMALIVE_AUTH_ENV","production",1);
+    setenv("LUMALIVE_SMS_PROVIDER","unknown-provider",1);
+#endif
+    auto unknown=CreateSmsProviderFromEnvironment();
+    const auto unknown_result=unknown->SendOtp("+14155552673","phone_login","123456",std::chrono::seconds(300));
+    assert(!unknown_result.accepted&&unknown_result.debug_code.empty());
+
 #ifdef _WIN32
     _putenv_s("LUMALIVE_AUTH_ENV","test");
     _putenv_s("LUMALIVE_SMS_PROVIDER","development");
