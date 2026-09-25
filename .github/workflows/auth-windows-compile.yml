@@ -46,6 +46,21 @@ jobs:
           email_provider_test.exe
           if errorlevel 1 exit /b 1
 
+      - name: Compile and run auth service unit test
+        shell: cmd
+        run: |
+          cl /nologo /std:c++20 /W4 /EHsc /I LumaLive\shared /I LumaLive\server\auth\include ^
+            LumaLive\server\auth\src\AuthServiceImpl.cpp ^
+            LumaLive\server\auth\src\AuthStore.cpp ^
+            LumaLive\shared\contracts\auth\AuthCrypto.cpp ^
+            LumaLive\server\auth\src\SmsProvider.cpp ^
+            LumaLive\server\auth\src\EmailProvider.cpp ^
+            LumaLive\server\auth\tests\AuthServiceTests.cpp ^
+            /Fe:auth_service_test.exe /link ws2_32.lib
+          if errorlevel 1 exit /b 1
+          auth_service_test.exe
+          if errorlevel 1 exit /b 1
+
       - name: Compile and run SMS provider unit test
         shell: cmd
         run: |
