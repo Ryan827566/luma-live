@@ -44,18 +44,31 @@ public:
 
 int main() {
     auto http = std::make_shared<FakeHttp>();
-    SetEnv("OPENAI_API_KEY_TEST", "openai-secret");
 
-    const auto openai_config =
+    ClearEnv("OPENAI_API_KEY_TEST");
+    const auto missing_openai_key =
         providers::MakeOpenAiConfig(
             "https://api.openai.com/v1", "OPENAI_API_KEY_TEST", "gpt-test");
-    providers::OpenAiCompatibleProvider openai(openai_config, http);
+    providers::OpenAiCompatibleProvider openai_missing(missing_openai_key, http);
 
     core::AiRequest request;
     request.request_id = "1";
     request.input = "hello";
     request.system_prompt = "be concise";
 
+    const auto missing_response = openai_missing.Execute(request);
+    assert(!missing_response.success);
+    assert(missing_response.error.find("OPENAI_API_KEY_TEST") != std::string::npos);
+
+    SetEnv("OPENAI_API_KEY_TEST", "openai-secret");
+    const auto openai_config =
+        providers::MakeOpenAiConfig(
+            "https://api.openai.com/v1", "OPENAI_API_KEY_TEST", "gpt-test");
+    providers::OpenAiCompatibleProvider openai(openai_config, http);
+
+    http->response = {
+        200, R"({"choices":[{"message":{"content":"ok"}}]})", ""
+    };
     const auto openai_response = openai.Execute(request);
     assert(openai_response.success);
     assert(openai_response.text == "ok");
@@ -85,5 +98,18 @@ int main() {
 
     ClearEnv("OPENAI_API_KEY_TEST");
     ClearEnv("ANTHROPIC_API_KEY_TEST");
+
+    // Local OpenAI-compatible endpoints may legitimately omit API authentication.
+    const auto local_config =
+        providers::MakeOpenAiConfig("http://127.0.0.1:11434/v1", "", "local-model");
+    providers::OpenAiCompatibleProvider local(local_config, http);
+    http->response = {
+        200, R"({"choices":[{"message":{"content":"local-ok"}}]})", ""
+    };
+    const auto local_response = local.Execute(request);
+    assert(local_response.success);
+    assert(local_response.text == "local-ok");
+    assert(local_response.headers.empty());
+
     return 0;
 }
