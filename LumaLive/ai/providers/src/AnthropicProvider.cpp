@@ -1,0 +1,8 @@
+#include "AnthropicProvider.hpp"
+#include <utility>
+namespace luma::ai::providers {
+namespace { std::string Escape(const std::string&s){std::string o;for(char c:s){if(c=='\\')o+="\\\\";else if(c=='"')o+="\\\"";else if(c=='\n')o+="\\n";else o+=c;}return o;} core::ProviderConfig Make(std::string e,std::string k,std::string m){core::ProviderConfig c;c.name="anthropic";c.endpoint=std::move(e);c.api_key_env=std::move(k);c.models.push_back(std::move(m));c.capabilities={core::Capability::Chat};c.priority=100;return c;}}
+AnthropicProvider::AnthropicProvider(core::ProviderConfig c,std::shared_ptr<IAiHttpClient> h):config_(std::move(c)),client_(std::move(h)){}
+core::AiResponse AnthropicProvider::Execute(const core::AiRequest&r){core::AiResponse o;o.request_id=r.request_id;o.provider=config_.name;o.model=r.model.empty()&&!config_.models.empty()?config_.models.front():r.model;if(!client_){o.error="HTTP client is not configured";return o;}if(r.input.empty()){o.error="input is empty";return o;}std::string url=config_.endpoint;if(!url.empty()&&url.back()!='/')url+='/';url+="v1/messages";std::unordered_map<std::string,std::string> headers{{"anthropic-version","2023-06-01"}};std::string body="{\"model\":\""+Escape(o.model)+"\",\"max_tokens\":1024,\"messages\":[{\"role\":\"user\",\"content\":\""+Escape(r.input)+"\"}]}";auto h=client_->Post(url,headers,body);if(h.status<200||h.status>=300){o.error=h.error.empty()?"HTTP "+std::to_string(h.status):h.error;return o;}o.success=true;o.text=h.body;return o;}
+core::ProviderConfig MakeAnthropicConfig(std::string e,std::string k,std::string m){return Make(std::move(e),std::move(k),std::move(m));}
+}
