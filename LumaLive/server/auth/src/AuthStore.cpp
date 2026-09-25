@@ -302,7 +302,7 @@ public:
                 &u.mfa_recovery_hash,&u.mfa_totp_secret_hex,&u.email_verify_hash,&email_expiry,
                 &u.reset_token_hash,&reset_expiry};
 
-            if(auto r=ExecParamsLocked(sql,params,16);!r.IsOk()) {
+            if(auto r=ExecParamsLocked(sql,params,17);!r.IsOk()) {
                 ExecSimpleLocked("ROLLBACK");
                 return r;
             }
