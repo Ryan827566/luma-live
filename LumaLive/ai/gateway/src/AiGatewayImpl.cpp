@@ -1,4 +1,5 @@
 #include "IAiGateway.hpp"
 #include "IModelRouter.hpp"
 #include "IOrchestrator.hpp"
+#include <utility>
 namespace luma::ai::gateway { class AiGatewayImpl final:public IAiGateway{bool running_{};std::shared_ptr<providers::ProviderRegistry> registry_;std::shared_ptr<model_router::IModelRouter> router_;orchestrator::Orchestrator orchestrator_;public:AiGatewayImpl():registry_(std::make_shared<providers::ProviderRegistry>()),router_(std::make_shared<model_router::ModelRouter>(registry_)),orchestrator_(router_){}bool Start()override{running_=true;return true;}void Stop()override{running_=false;}core::AiResponse Execute(core::AiRequest r)override{if(!running_){core::AiResponse o;o.request_id=r.request_id;o.error="AI gateway is stopped";return o;}return orchestrator_.Execute(std::move(r));}bool RegisterProvider(providers::AiProviderPtr p)override{return registry_->Register(std::move(p));}std::vector<core::ProviderConfig>Providers()const override{return registry_->List();}}; std::shared_ptr<IAiGateway>CreateGateway(){return std::make_shared<AiGatewayImpl>();} }
