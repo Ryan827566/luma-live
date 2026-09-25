@@ -19,6 +19,8 @@ public:
 
     // Providers receive the already-generated OTP. The provider is responsible only
     // for delivery; authentication state remains owned by LumaLive Auth.
+    virtual bool IsConfigured() const = 0;
+
     virtual SmsSendResult SendOtp(
         std::string_view phone,
         std::string_view purpose,
