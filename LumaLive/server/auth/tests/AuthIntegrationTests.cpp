@@ -19,6 +19,9 @@ std::string ExtractAfter(
     const std::string& prefix,
     const std::string& terminator="") {
     const auto pos=text.find(prefix);
+    if(pos==std::string::npos){
+        std::cerr<<"ExtractAfter prefix missing. text=["<<text<<"] prefix=["<<prefix<<"]\n";
+    }
     assert(pos!=std::string::npos);
     const auto begin=pos+prefix.size();
     if(terminator.empty())return text.substr(begin);
