@@ -1,4 +1,7 @@
 add_library(luma_gateway STATIC src/AiGatewayImpl.cpp)
 target_include_directories(luma_gateway PUBLIC include)
-target_link_libraries(luma_gateway PUBLIC luma_shared)
+target_link_libraries(luma_gateway PUBLIC luma_ai_core luma_ai_providers luma_model_router luma_orchestrator)
 target_compile_features(luma_gateway PUBLIC cxx_std_20)
+add_executable(luma_gateway_tests tests/AiGatewayTests.cpp)
+target_link_libraries(luma_gateway_tests PRIVATE luma_gateway luma_ai_providers)
+add_test(NAME luma_gateway_tests COMMAND luma_gateway_tests)
