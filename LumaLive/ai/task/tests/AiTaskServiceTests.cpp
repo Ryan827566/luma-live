@@ -1,8 +1,12 @@
 #include "IAiTaskService.hpp"
+
 #include <cassert>
 #include <memory>
+#include <string>
+#include <utility>
 
 namespace {
+
 class NullOrchestrator final : public luma::ai::orchestrator::IOrchestrator {
 public:
     luma::ai::core::AiResponse Execute(luma::ai::core::AiRequest request) override {
@@ -13,10 +17,12 @@ public:
         return response;
     }
 };
-}
+
+} // namespace
 
 int main() {
     using namespace luma::ai;
+
     auto orchestrator = std::make_shared<NullOrchestrator>();
     task::AiTaskService service(orchestrator);
 
@@ -37,6 +43,14 @@ int main() {
     assert(completed->response.success);
     assert(completed->response.text == "ok");
     assert(!service.RunNext());
+
+    task::AiTaskService no_orchestrator(nullptr);
+    const std::string failed_id = no_orchestrator.Submit(request);
+    assert(no_orchestrator.RunNext());
+    const auto failed = no_orchestrator.Get(failed_id);
+    assert(failed);
+    assert(failed->status == task::Status::Failed);
+    assert(failed->response.error == "orchestrator is unavailable");
 
     assert(!service.Get("missing"));
     return 0;
