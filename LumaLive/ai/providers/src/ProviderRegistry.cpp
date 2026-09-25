@@ -1,5 +1,6 @@
 #include "ProviderRegistry.hpp"
 #include <algorithm>
+#include <utility>
 namespace luma::ai::providers {
 bool ProviderRegistry::Register(AiProviderPtr p){if(!p||p->Config().name.empty())return false;std::lock_guard l(mutex_);for(auto&x:providers_)if(x->Config().name==p->Config().name)return false;providers_.push_back(std::move(p));return true;}
 bool ProviderRegistry::Remove(const std::string& n){std::lock_guard l(mutex_);auto o=providers_.size();providers_.erase(std::remove_if(providers_.begin(),providers_.end(),[&](auto&p){return p->Config().name==n;}),providers_.end());return o!=providers_.size();}
