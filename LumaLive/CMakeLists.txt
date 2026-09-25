@@ -55,7 +55,7 @@ add_subdirectory(apps/luma-admin)
 add_subdirectory(client/application/studio)
 foreach(MOD
  client/platform client/domain/studio client/domain/effects client/domain/media client/domain/audio
- client/connect client/ai client/application client/ui
+ client/connect client/ai client/application client/ui client/account
  ai/gateway ai/model-router ai/orchestrator ai/tool-registry ai/memory ai/rag ai/safety ai/agents ai/content
  server/api-gateway server/auth server/live server/chat server/im server/signaling server/sfu server/ai-gateway
  server/moderation server/media server/analytics server/storage

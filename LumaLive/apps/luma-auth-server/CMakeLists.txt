@@ -1,0 +1,3 @@
+add_executable(luma_auth_server src/main.cpp)
+target_link_libraries(luma_auth_server PRIVATE luma_auth)
+target_compile_features(luma_auth_server PRIVATE cxx_std_20)
