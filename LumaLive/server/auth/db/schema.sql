@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS luma_auth_users (
     phone TEXT NOT NULL DEFAULT '',
     password_salt TEXT NOT NULL,
     password_verifier TEXT NOT NULL,
+    password_kdf_iterations INTEGER NOT NULL DEFAULT 600000,
     email_verified BOOLEAN NOT NULL DEFAULT FALSE,
     phone_verified BOOLEAN NOT NULL DEFAULT FALSE,
     mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE,
