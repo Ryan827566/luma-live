@@ -158,6 +158,7 @@ int main() {
     const auto recovery_code_2=recovery_codes[1];
     const auto recovery_code_3=recovery_codes[2];
     const auto recovery_code_4=recovery_codes[3];
+    const auto recovery_code_5=recovery_codes[4];
     const auto totp_secret=ExtractAfter(
         mfa.message,"TOTP secret=","; otpauth=");
     const auto otpauth=ExtractAfter(mfa.message,"otpauth=");
@@ -229,7 +230,7 @@ int main() {
     assert(alice->Login(
         "alice.test","correct horse",
         "alice-pc","Alice PC",recovery_code_4).success);
-    assert(alice->DisableMfa(recovery_code_4).success);
+    assert(alice->DisableMfa(recovery_code_5).success);
     assert(!alice->Security().mfa_enabled);
 
     assert(alice->Logout().success);
