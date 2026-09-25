@@ -37,6 +37,8 @@ struct WorkflowExecution {
     std::string workflow_id;
     std::string status;
     std::string error;
+    std::string failed_step_id;
+    std::vector<std::string> step_outputs;
     std::size_t completed_steps{0};
 };
 
