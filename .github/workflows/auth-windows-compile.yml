@@ -46,6 +46,28 @@ jobs:
           email_provider_test.exe
           if errorlevel 1 exit /b 1
 
+      - name: Compile and run SMS provider unit test
+        shell: cmd
+        run: |
+          cl /nologo /std:c++20 /W4 /EHsc /I LumaLive\server\auth\include ^
+            LumaLive\server\auth\src\SmsProvider.cpp ^
+            LumaLive\server\auth\tests\SmsProviderTests.cpp ^
+            /Fe:sms_provider_test.exe
+          if errorlevel 1 exit /b 1
+          sms_provider_test.exe
+          if errorlevel 1 exit /b 1
+
+      - name: Compile and run auth store row mutation test
+        shell: cmd
+        run: |
+          cl /nologo /std:c++20 /W4 /EHsc /I LumaLive\server\auth\include ^
+            LumaLive\server\auth\src\AuthStore.cpp ^
+            LumaLive\server\auth\tests\AuthStoreRowMutationTests.cpp ^
+            /Fe:auth_store_row_mutation_test.exe
+          if errorlevel 1 exit /b 1
+          auth_store_row_mutation_test.exe
+          if errorlevel 1 exit /b 1
+
       - name: Compile account UI object files
         shell: cmd
         run: |
