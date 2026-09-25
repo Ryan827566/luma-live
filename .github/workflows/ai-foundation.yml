@@ -1,12 +1,13 @@
 name: LumaLive AI Foundation
 on:
   push:
-    branches: [main, master, codex/ai-platform-foundation]
+    branches: [main, codex/ai-platform]
     paths:
       - 'LumaLive/ai/**'
       - 'LumaLive/CMakeLists.txt'
       - '.github/workflows/ai-foundation.yml'
   pull_request:
+    branches: [main]
     paths:
       - 'LumaLive/ai/**'
       - 'LumaLive/CMakeLists.txt'
