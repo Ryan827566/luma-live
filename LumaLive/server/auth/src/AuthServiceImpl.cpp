@@ -1169,6 +1169,7 @@ private:
                     users_[old.id]=old;
                     by_username_[username]=old.id;
                     by_email_[email]=old.id;
+                    if(old.phone_verified&&!old.phone.empty())by_phone_[old.phone]=old.id;
                     bad("storage_error","unable to persist account deletion");return;
                 }
 
