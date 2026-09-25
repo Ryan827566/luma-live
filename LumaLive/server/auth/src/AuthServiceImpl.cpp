@@ -253,6 +253,10 @@ public:
         if(!auth_store_){
             return Result::Failure(ErrorCode::Internal,"auth database store is not configured");
         }
+        if(!email_provider_||!email_provider_->IsConfigured())
+            return Result::Failure(ErrorCode::InvalidState,"email delivery provider is not configured");
+        if(!sms_provider_||!sms_provider_->IsConfigured())
+            return Result::Failure(ErrorCode::InvalidState,"SMS delivery provider is not configured");
         if(auto db=auth_store_->Open();!db.IsOk())return db;
         if(!Load()){
             auth_store_->Close();
