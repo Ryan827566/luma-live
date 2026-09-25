@@ -1225,7 +1225,7 @@ private:
                 bad("temporarily_locked","too many SMS verification requests; try again later");return;
             }
 
-            const challenge_id=make_id();
+            const auto challenge_id=make_id();
             const auto code=make_otp_code();
             const auto expires=now_epoch()+5*60;
 
