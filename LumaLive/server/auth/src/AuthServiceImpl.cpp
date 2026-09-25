@@ -65,6 +65,8 @@ std::string normalize(std::string s){
 
 std::string make_id(){return hex(random_bytes(16));}
 std::string make_token(){return hex(random_bytes(32));}
+std::string sha256_text(const std::string& value);
+
 
 bool recovery_hash_matches(std::string_view stored_hash,std::string_view code){
     if(stored_hash.empty()||code.empty())return false;
@@ -845,6 +847,7 @@ private:
             const auto user_id=c.pending.user_id;
             const auto login_identifier=c.pending.username;
             std::lock_guard lock(store_mutex_);
+            bool recovery_candidate=false;
             if(user_id.empty()){
                 c.pending={};
                 RecordLoginFailure(login_identifier,{},c.remote_address);
@@ -868,7 +871,6 @@ private:
 
                 bool proof_ok=constant_time_equal(expected,supplied);
                 bool mfa_ok=true;
-                bool recovery_candidate=false;
                 if(it->second.mfa_enabled){
                     mfa_ok=false;
                     if(!p.fields[1].empty()&&!it->second.mfa_recovery_hash.empty()){
@@ -1410,9 +1412,9 @@ private:
             }
 
             const std::string mfa_code=p.fields.size()==5?p.fields[4]:"";
+            bool recovery_used=false;
             if(it->second.mfa_enabled){
                 bool mfa_ok=false;
-                bool recovery_used=false;
                 if(!mfa_code.empty()&&!it->second.mfa_recovery_hash.empty()){
                     recovery_used=recovery_hash_matches_any(it->second.mfa_recovery_hash,mfa_code);
                     mfa_ok=recovery_used;
@@ -1663,10 +1665,18 @@ private:
                 }
                 const auto totp_secret_hex=hex(random_bytes(20));
                 const auto totp_secret_base32=base32_encode(from_hex(totp_secret_hex));
+                const auto old_recovery_hashes=it->second.mfa_recovery_hash;
+                const auto old_totp_secret=it->second.mfa_totp_secret_hex;
+                const auto old_mfa_enabled=it->second.mfa_enabled;
                 it->second.mfa_recovery_hash=join_recovery_hashes(recovery_hashes);
                 it->second.mfa_totp_secret_hex=totp_secret_hex;
                 it->second.mfa_enabled=true;
-                if(!SaveUnlocked()){bad("storage_error","unable to persist MFA setting");return;}
+                if(!SaveUnlocked()){
+                    it->second.mfa_recovery_hash=old_recovery_hashes;
+                    it->second.mfa_totp_secret_hex=old_totp_secret;
+                    it->second.mfa_enabled=old_mfa_enabled;
+                    bad("storage_error","unable to persist MFA setting");return;
+                }
                 const auto account=it->second.email.empty()?it->second.username:it->second.email;
                 const auto otpauth=make_otpauth_uri(totp_secret_base32,account,"LumaLive");
                 AppendAudit(user_id,"mfa_enabled","TOTP MFA enabled with a recovery code");
