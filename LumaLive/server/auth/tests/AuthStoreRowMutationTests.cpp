@@ -1,4 +1,5 @@
 #include "IAuthStore.hpp"
+// Regression round 3 trigger: test-only change; no functional behavior change.
 #include <cassert>
 #include <cstdlib>
 #include <string>
