@@ -10,7 +10,7 @@ int main() {
     _putenv_s("LUMALIVE_EMAIL_PROVIDER","");
 #else
     setenv("LUMALIVE_AUTH_ENV","production",1);
-    setenv("LUMALIVE_EMAIL_PROVIDER","");
+    setenv("LUMALIVE_EMAIL_PROVIDER","",1);
 #endif
     auto fail_closed=CreateEmailProviderFromEnvironment();
     const auto closed=fail_closed->SendToken("alice@example.com","password_reset","token-123",std::chrono::seconds(1800));

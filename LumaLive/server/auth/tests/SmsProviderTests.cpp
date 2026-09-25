@@ -11,7 +11,7 @@ int main() {
     _putenv_s("LUMALIVE_SMS_PROVIDER","");
 #else
     setenv("LUMALIVE_AUTH_ENV","production",1);
-    setenv("LUMALIVE_SMS_PROVIDER","");
+    setenv("LUMALIVE_SMS_PROVIDER","",1);
 #endif
     auto fail_closed=CreateSmsProviderFromEnvironment();
     const auto closed=fail_closed->SendOtp("+14155552673","phone_login","123456",std::chrono::seconds(300));
