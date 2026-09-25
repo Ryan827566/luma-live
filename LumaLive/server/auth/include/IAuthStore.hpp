@@ -47,11 +47,14 @@ public:
     virtual shared::contracts::Result LoadUsers(
         std::vector<AuthUserRecord>& users) = 0;
 
-    // Atomic replacement of the server-side user snapshot.
-    // The AuthService serializes mutations, so the repository can commit this
-    // as one transaction and never expose a partially-written account set.
-    virtual shared::contracts::Result ReplaceUsers(
-        const std::vector<AuthUserRecord>& users) = 0;
+    // Persist exactly one account row. Implementations must keep unrelated
+    // accounts untouched so multiple auth-service instances cannot overwrite
+    // each other's user changes.
+    virtual shared::contracts::Result UpsertUser(
+        const AuthUserRecord& user) = 0;
+
+    virtual shared::contracts::Result DeleteUser(
+        std::string_view user_id) = 0;
 
     virtual shared::contracts::Result LoadSecurityEvents(
         std::vector<AuthSecurityEventRecord>& events) = 0;
