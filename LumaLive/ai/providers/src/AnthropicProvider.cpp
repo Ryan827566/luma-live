@@ -1,6 +1,8 @@
 #include "AnthropicProvider.hpp"
 
 #include <cstdlib>
+#include <string>
+#include <unordered_map>
 #include <utility>
 
 namespace luma::ai::providers {
@@ -9,13 +11,14 @@ namespace {
 std::string Escape(const std::string& value) {
     std::string output;
     for (const char c : value) {
-        if (c == '\\') output += "\\";
-        else if (c == '"') output += "\"";
-        else if (c == '
-') output += "\n";
-        else if (c == '') output += "\r";
-        else if (c == '	') output += "\t";
-        else output += c;
+        switch (c) {
+        case '\\': output += "\\\\"; break;
+        case '"': output += "\\\""; break;
+        case '\n': output += "\\n"; break;
+        case '\r': output += "\\r"; break;
+        case '\t': output += "\\t"; break;
+        default: output += c; break;
+        }
     }
     return output;
 }
@@ -34,10 +37,9 @@ std::string ExtractJsonString(const std::string& body, const std::string& key) {
         const char c = body[i];
         if (escaped) {
             switch (c) {
-            case 'n': output += '
-'; break;
-            case 'r': output += ''; break;
-            case 't': output += '	'; break;
+            case 'n': output += '\n'; break;
+            case 'r': output += '\r'; break;
+            case 't': output += '\t'; break;
             default: output += c; break;
             }
             escaped = false;
@@ -86,6 +88,14 @@ core::AiResponse AnthropicProvider::Execute(const core::AiRequest& request) {
         response.error = "input is empty";
         return response;
     }
+    if (response.model.empty()) {
+        response.error = "model is not configured";
+        return response;
+    }
+    if (config_.endpoint.empty()) {
+        response.error = "provider endpoint is empty";
+        return response;
+    }
 
     const char* api_key = config_.api_key_env.empty()
         ? nullptr : std::getenv(config_.api_key_env.c_str());
@@ -105,16 +115,12 @@ core::AiResponse AnthropicProvider::Execute(const core::AiRequest& request) {
     };
 
     std::string body = "{\"model\":\"" + Escape(response.model) +
-                       "\",\"max_tokens\":1024,\"messages\":[";
+                       "\",\"max_tokens\":1024";
     if (!request.system_prompt.empty()) {
-        body += "{\"role\":\"user\",\"content\":\"" +
-                Escape(request.system_prompt + "\n\n" + request.input) +
-                "\"}";
-    } else {
-        body += "{\"role\":\"user\",\"content\":\"" +
-                Escape(request.input) + "\"}";
+        body += ",\"system\":\"" + Escape(request.system_prompt) + "\"";
     }
-    body += "]}";
+    body += ",\"messages\":[{\"role\":\"user\",\"content\":\"" +
+            Escape(request.input) + "\"}]}";
 
     const auto http = client_->Post(url, headers, body);
     if (http.status < 200 || http.status >= 300) {
