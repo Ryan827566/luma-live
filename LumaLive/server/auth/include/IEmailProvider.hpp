@@ -17,6 +17,8 @@ class IEmailProvider {
 public:
     virtual ~IEmailProvider() = default;
 
+    virtual bool IsConfigured() const = 0;
+
     virtual EmailSendResult SendToken(
         std::string_view email,
         std::string_view purpose,
