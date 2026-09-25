@@ -25,7 +25,7 @@ public:
     std::unordered_map<std::string, std::string> headers;
     providers::HttpResponse response{
         200,
-        R"({"choices":[{"message":{"content":"ok"}}]})",
+        R"({"choices":[{"message":{"content":"ok"}}])",
         ""
     };
 
@@ -47,7 +47,8 @@ int main() {
     SetEnv("OPENAI_API_KEY_TEST", "openai-secret");
 
     const auto openai_config =
-        providers::MakeOpenAiConfig("https://api.openai.com/v1", "OPENAI_API_KEY_TEST", "gpt-test");
+        providers::MakeOpenAiConfig(
+            "https://api.openai.com/v1", "OPENAI_API_KEY_TEST", "gpt-test");
     providers::OpenAiCompatibleProvider openai(openai_config, http);
 
     core::AiRequest request;
@@ -64,10 +65,13 @@ int main() {
     assert(http->body.find("\"system\"") != std::string::npos);
 
     SetEnv("ANTHROPIC_API_KEY_TEST", "anthropic-secret");
-    http->response = {200, R"({"content":[{"type":"text","text":"hello from anthropic"}]})", ""};
+    http->response = {
+        200, R"({"content":[{"type":"text","text":"hello from anthropic"}]})", ""
+    };
 
     const auto anthropic_config =
-        providers::MakeAnthropicConfig("https://api.anthropic.com", "ANTHROPIC_API_KEY_TEST", "claude-test");
+        providers::MakeAnthropicConfig(
+            "https://api.anthropic.com", "ANTHROPIC_API_KEY_TEST", "claude-test");
     providers::AnthropicProvider anthropic(anthropic_config, http);
 
     const auto anthropic_response = anthropic.Execute(request);
@@ -77,6 +81,7 @@ int main() {
     assert(http->headers.at("x-api-key") == "anthropic-secret");
     assert(http->headers.at("anthropic-version") == "2023-06-01");
     assert(http->headers.at("Content-Type") == "application/json");
+    assert(http->body.find("\"system\":\"be concise\"") != std::string::npos);
 
     ClearEnv("OPENAI_API_KEY_TEST");
     ClearEnv("ANTHROPIC_API_KEY_TEST");
