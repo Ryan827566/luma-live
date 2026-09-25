@@ -67,7 +67,7 @@ int main() {
     providers::OpenAiCompatibleProvider openai(openai_config, http);
 
     http->response = {
-        200, R"({"choices":[{"message":{"content":"ok"}}]})", ""
+        200, R"({"choices":[{"message":{"content":"ok"}}])", ""
     };
     const auto openai_response = openai.Execute(request);
     assert(openai_response.success);
@@ -104,12 +104,13 @@ int main() {
         providers::MakeOpenAiConfig("http://127.0.0.1:11434/v1", "", "local-model");
     providers::OpenAiCompatibleProvider local(local_config, http);
     http->response = {
-        200, R"({"choices":[{"message":{"content":"local-ok"}}]})", ""
+        200, R"({"choices":[{"message":{"content":"local-ok"}}])", ""
     };
     const auto local_response = local.Execute(request);
     assert(local_response.success);
     assert(local_response.text == "local-ok");
-    assert(local_response.headers.empty());
+    assert(!http->headers.contains("Authorization"));
+    assert(http->headers.at("Content-Type") == "application/json");
 
     return 0;
 }
