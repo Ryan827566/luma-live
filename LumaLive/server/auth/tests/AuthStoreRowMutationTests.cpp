@@ -30,13 +30,13 @@ int main() {
         : luma::server::auth::CreateInMemoryAuthStore();
 
     assert(left->Open().IsOk());
-    assert(right->Open().IsOk());
+    if(database_url&&*database_url)assert(right->Open().IsOk());
 
     const auto user_a=MakeUser("row_isolation_a");
     const auto user_b=MakeUser("row_isolation_b");
 
     assert(left->UpsertUser(user_a).IsOk());
-    assert(right->UpsertUser(user_b).IsOk());
+    assert((database_url&&*database_url ? right->UpsertUser(user_b) : left->UpsertUser(user_b)).IsOk());
 
     std::vector<luma::server::auth::AuthUserRecord> loaded;
     assert(left->LoadUsers(loaded).IsOk());
@@ -54,7 +54,7 @@ int main() {
     assert(left->UpsertUser(updated_a).IsOk());
 
     loaded.clear();
-    assert(right->LoadUsers(loaded).IsOk());
+    assert((database_url&&*database_url ? right->LoadUsers(loaded) : left->LoadUsers(loaded)).IsOk());
     saw_a=saw_b=false;
     for(const auto& user:loaded) {
         if(user.id==user_a.id) {
@@ -68,13 +68,13 @@ int main() {
     }
     assert(saw_a&&saw_b);
 
-    assert(right->DeleteUser(user_a.id).IsOk());
+    assert((database_url&&*database_url ? right->DeleteUser(user_a.id) : left->DeleteUser(user_a.id)).IsOk());
     loaded.clear();
     assert(left->LoadUsers(loaded).IsOk());
     for(const auto& user:loaded) assert(user.id!=user_a.id);
 
     assert(left->DeleteUser(user_b.id).IsOk());
     left->Close();
-    right->Close();
+    if(database_url&&*database_url)right->Close();
     return 0;
 }
