@@ -376,6 +376,9 @@ public:
         Packet q;if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
         if(q.type!=Type::PasswordResetIssued||q.fields.size()!=4)return{false,"invalid password reset response"};
+        if(q.fields[0].empty()){
+            return{true,"if the account exists, a reset message will be available through the configured delivery channel"};
+        }
         pending_reset_challenges_[q.fields[0]]=PendingReset{
             q.fields[1],std::stoll(q.fields[2]),static_cast<std::uint32_t>(std::stoul(q.fields[3]))};
         return{true,"password reset token="+q.fields[0]+" expires="+q.fields[2]};
