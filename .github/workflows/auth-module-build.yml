@@ -46,6 +46,27 @@ jobs:
           g++ -std=c++20 -Wall -Wextra -Werror -pthread             -I LumaLive/server/auth/include             LumaLive/server/auth/src/EmailProvider.cpp             LumaLive/server/auth/tests/EmailProviderTests.cpp             -o email_provider_test
           ./email_provider_test
 
+      - name: Compile and run SMS provider unit test
+        run: |
+          g++ -std=c++20 -Wall -Wextra -Werror -pthread \
+            -I LumaLive/server/auth/include \
+            LumaLive/server/auth/src/SmsProvider.cpp \
+            LumaLive/server/auth/tests/SmsProviderTests.cpp \
+            -o sms_provider_test
+          ./sms_provider_test
+
+      - name: Compile and run auth store row mutation test
+        env:
+          LUMALIVE_AUTH_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/lumalive_test
+        run: |
+          g++ -std=c++20 -Wall -Wextra -Werror -pthread \
+            -I LumaLive/shared \
+            -I LumaLive/server/auth/include \
+            LumaLive/server/auth/src/AuthStore.cpp \
+            LumaLive/server/auth/tests/AuthStoreRowMutationTests.cpp \
+            -o auth_store_row_mutation_test -ldl
+          ./auth_store_row_mutation_test
+
       - name: Compile auth server
         run: |
           g++ -std=c++20 -Wall -Wextra -Werror -pthread             -I LumaLive/shared             -I LumaLive/server/auth/include             LumaLive/server/auth/src/AuthServiceImpl.cpp             LumaLive/server/auth/src/AuthStore.cpp             LumaLive/shared/contracts/auth/AuthCrypto.cpp             LumaLive/server/auth/src/SmsProvider.cpp             LumaLive/server/auth/src/EmailProvider.cpp             LumaLive/apps/luma-auth-server/src/main.cpp             -o luma_auth_server -ldl
