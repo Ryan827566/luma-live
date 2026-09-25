@@ -22,6 +22,8 @@ std::string EnvironmentValue(const char* name) {
 
 class DevelopmentSmsProvider final : public ISmsProvider {
 public:
+    bool IsConfigured() const override { return true; }
+
     SmsSendResult SendOtp(
         std::string_view phone,
         std::string_view purpose,
@@ -37,6 +39,7 @@ public:
 class UnavailableSmsProvider final : public ISmsProvider {
 public:
     explicit UnavailableSmsProvider(std::string name) : name_(std::move(name)) {}
+    bool IsConfigured() const override { return false; }
 
     SmsSendResult SendOtp(
         std::string_view,
@@ -58,11 +61,13 @@ std::unique_ptr<ISmsProvider> CreateDevelopmentSmsProvider() {
 
 std::unique_ptr<ISmsProvider> CreateSmsProviderFromEnvironment() {
     const std::string provider=EnvironmentValue("LUMALIVE_SMS_PROVIDER");
+    const auto auth_env=EnvironmentValue("LUMALIVE_AUTH_ENV");
     if(provider=="mock"||provider=="development"){
-        const auto auth_env=EnvironmentValue("LUMALIVE_AUTH_ENV");
         if(auth_env=="development"||auth_env=="test")return CreateDevelopmentSmsProvider();
         return std::make_unique<UnavailableSmsProvider>("development");
     }
+    if(provider.empty()&&(auth_env=="development"||auth_env=="test"))
+        return CreateDevelopmentSmsProvider();
     if(provider.empty())return std::make_unique<UnavailableSmsProvider>("unset");
     return std::make_unique<UnavailableSmsProvider>(provider);
 }
