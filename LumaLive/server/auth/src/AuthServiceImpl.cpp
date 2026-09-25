@@ -417,33 +417,35 @@ private:
         return true;
     }
 
-    bool SaveUnlocked(){
-        if(!auth_store_)return false;
-        std::vector<AuthUserRecord> rows;
-        rows.reserve(users_.size());
-        for(const auto&[_,u]:users_){
-            AuthUserRecord row{};
-            row.id=u.id;
-            row.username=u.username;
-            row.email=u.email;
-            row.display_name=u.display_name;
-            row.avatar_url=u.avatar_url;
-            row.phone=u.phone;
-            row.salt_hex=u.salt_hex;
-            row.verifier_hex=u.verifier_hex;
-            row.password_kdf_iterations=u.password_kdf_iterations;
-            row.email_verified=u.email_verified;
-            row.phone_verified=u.phone_verified;
-            row.mfa_enabled=u.mfa_enabled;
-            row.mfa_recovery_hash=u.mfa_recovery_hash;
-            row.mfa_totp_secret_hex=u.mfa_totp_secret_hex;
-            row.email_verify_hash=u.email_verify_hash;
-            row.email_verify_expires=u.email_verify_expires;
-            row.reset_token_hash=u.reset_token_hash;
-            row.reset_token_expires=u.reset_token_expires;
-            rows.push_back(std::move(row));
-        }
-        return auth_store_->ReplaceUsers(rows).IsOk();
+    static AuthUserRecord ToStoreRecord(const UserRecord& u){
+        AuthUserRecord row{};
+        row.id=u.id;
+        row.username=u.username;
+        row.email=u.email;
+        row.display_name=u.display_name;
+        row.avatar_url=u.avatar_url;
+        row.phone=u.phone;
+        row.salt_hex=u.salt_hex;
+        row.verifier_hex=u.verifier_hex;
+        row.password_kdf_iterations=u.password_kdf_iterations;
+        row.email_verified=u.email_verified;
+        row.phone_verified=u.phone_verified;
+        row.mfa_enabled=u.mfa_enabled;
+        row.mfa_recovery_hash=u.mfa_recovery_hash;
+        row.mfa_totp_secret_hex=u.mfa_totp_secret_hex;
+        row.email_verify_hash=u.email_verify_hash;
+        row.email_verify_expires=u.email_verify_expires;
+        row.reset_token_hash=u.reset_token_hash;
+        row.reset_token_expires=u.reset_token_expires;
+        return row;
+    }
+
+    bool PersistUserUnlocked(const UserRecord& u){
+        return auth_store_&&auth_store_->UpsertUser(ToStoreRecord(u)).IsOk();
+    }
+
+    bool DeleteUserUnlocked(std::string_view user_id){
+        return auth_store_&&auth_store_->DeleteUser(user_id).IsOk();
     }
 
     bool Send(Socket s,const Packet& p){
@@ -711,18 +713,34 @@ private:
         return false;
     }
 
-    bool TooManyResetRequests(const std::string& identifier){
-        const auto key="reset|"+normalize(identifier);
+    bool TooManyResetRequests(const std::string& identifier,const std::string& remote){
         const auto now=now_epoch();
         std::lock_guard lock(rate_mutex_);
-        auto&state=failures_[key];
-        if(state.window_started==0||now-state.window_started>600){
-            state.window_started=now;
-            state.count=0;
-            state.locked_until=0;
+
+        auto&identifier_state=failures_["reset|identifier|"+normalize(identifier)];
+        if(identifier_state.window_started==0||now-identifier_state.window_started>600){
+            identifier_state.window_started=now;
+            identifier_state.count=0;
+            identifier_state.locked_until=0;
         }
-        if(state.count>=3)return true;
-        ++state.count;
+        if(identifier_state.locked_until>now||identifier_state.count>=3){
+            identifier_state.locked_until=now+600;
+            return true;
+        }
+
+        auto&source_state=failures_["reset|source|"+remote];
+        if(source_state.window_started==0||now-source_state.window_started>600){
+            source_state.window_started=now;
+            source_state.count=0;
+            source_state.locked_until=0;
+        }
+        if(source_state.locked_until>now||source_state.count>=20){
+            source_state.locked_until=now+600;
+            return true;
+        }
+
+        ++identifier_state.count;
+        ++source_state.count;
         return false;
     }
 
@@ -776,7 +794,7 @@ private:
             by_username_[normalize(u.username)]=u.id;
             by_email_[normalize(u.email)]=u.id;
 
-            if(!SaveUnlocked()){
+            if(!PersistUserUnlocked(u)){
                 users_.erase(u.id);
                 by_username_.erase(normalize(u.username));
                 by_email_.erase(normalize(u.email));
@@ -918,7 +936,7 @@ private:
 
             if(recovery_candidate){
                 const auto recovery_hashes_before=it->second.mfa_recovery_hash;
-                if(!consume_recovery_code(it->second.mfa_recovery_hash,p.fields[1])||!SaveUnlocked()){
+                if(!consume_recovery_code(it->second.mfa_recovery_hash,p.fields[1])||!PersistUserUnlocked(it->second)){
                     it->second.mfa_recovery_hash=recovery_hashes_before;
                     c.pending={};
                     bad("storage_error","unable to persist MFA recovery code usage");return;
@@ -1111,7 +1129,7 @@ private:
                 by_username_[new_username]=user_id;
                 by_email_[new_email]=user_id;
 
-                if(!SaveUnlocked()){
+                if(!PersistUserUnlocked(user_it->second)){
                     user_it->second=old;
                     by_username_.erase(new_username);
                     by_email_.erase(new_email);
@@ -1143,7 +1161,7 @@ private:
                 by_email_.erase(email);                if(old.phone_verified&&!old.phone.empty())by_phone_.erase(old.phone);
 
 
-                if(!SaveUnlocked()){
+                if(!DeleteUserUnlocked(old.id)){
                     users_[old.id]=old;
                     by_username_[username]=old.id;
                     by_email_[email]=old.id;
@@ -1184,7 +1202,11 @@ private:
                 bad("email_delivery_failed","unable to send email verification message");
                 return;
             }
-            if(!SaveUnlocked()){bad("storage_error","unable to persist verification challenge");return;}
+            if(!PersistUserUnlocked(it->second)){
+                it->second.email_verify_hash.clear();
+                it->second.email_verify_expires=0;
+                bad("storage_error","unable to persist verification challenge");return;
+            }
             AppendAudit(user_id,"email_verification_requested","verification challenge issued");
             send(Type::EmailVerificationIssued,{delivery.debug_token,std::to_string(expires)});
             return;
@@ -1203,10 +1225,18 @@ private:
             if(sha256_text(p.fields[1])!=it->second.email_verify_hash){
                 bad("invalid_token","invalid email verification token");return;
             }
+            const auto old_verified=it->second.email_verified;
+            const auto old_hash=it->second.email_verify_hash;
+            const auto old_expires=it->second.email_verify_expires;
             it->second.email_verified=true;
             it->second.email_verify_hash.clear();
             it->second.email_verify_expires=0;
-            if(!SaveUnlocked()){bad("storage_error","unable to persist email verification");return;}
+            if(!PersistUserUnlocked(it->second)){
+                it->second.email_verified=old_verified;
+                it->second.email_verify_hash=old_hash;
+                it->second.email_verify_expires=old_expires;
+                bad("storage_error","unable to persist email verification");return;
+            }
             AppendAudit(user_id,"email_verified","email address verified");
             send(Type::EmailVerified);
             return;
@@ -1315,7 +1345,7 @@ private:
 
             user_it->second.phone=challenge.phone;
             user_it->second.phone_verified=true;
-            if(!SaveUnlocked()){
+            if(!PersistUserUnlocked(user_it->second)){
                 user_it->second.phone=old_phone;
                 user_it->second.phone_verified=old_verified;
                 if(old_verified&&!old_phone.empty())by_phone_[old_phone]=user_id;
@@ -1454,7 +1484,7 @@ private:
 
             if(recovery_used){
                 const auto recovery_hashes_before=it->second.mfa_recovery_hash;
-                if(!consume_recovery_code(it->second.mfa_recovery_hash,mfa_code)||!SaveUnlocked()){
+                if(!consume_recovery_code(it->second.mfa_recovery_hash,mfa_code)||!PersistUserUnlocked(it->second)){
                     it->second.mfa_recovery_hash=recovery_hashes_before;
                     bad("storage_error","unable to persist MFA recovery code usage");return;
                 }
@@ -1527,13 +1557,17 @@ private:
                 bad("invalid_credentials","current password is incorrect");return;
             }
 
+            const auto old_user=it->second;
             it->second.salt_hex=c.pending.new_salt_hex;
             it->second.verifier_hex=p.fields[2];
             it->second.password_kdf_iterations=luma::contracts::auth::crypto::kPasswordPbkdf2Iterations;
             it->second.reset_token_hash.clear();
             it->second.reset_token_expires=0;
 
-            if(!SaveUnlocked()){bad("storage_error","unable to persist password change");return;}
+            if(!PersistUserUnlocked(it->second)){
+                it->second=old_user;
+                bad("storage_error","unable to persist password change");return;
+            }
 
             {
                 std::lock_guard sl(session_mutex_);
@@ -1553,7 +1587,7 @@ private:
             if(p.fields.size()!=1||p.fields[0].empty()||p.fields[0].size()>254){
                 bad("invalid_identifier","invalid reset identifier");return;
             }
-            if(TooManyResetRequests(p.fields[0])){
+            if(TooManyResetRequests(p.fields[0],c.remote_address)){
                 bad("temporarily_locked","too many reset requests; try again later");return;
             }
 
@@ -1572,6 +1606,8 @@ private:
             }
 
             auto&u=users_.at(user_id);
+            const auto old_reset_hash=u.reset_token_hash;
+            const auto old_reset_expires=u.reset_token_expires;
             const auto token=make_token();
             const auto salt_hex=hex(random_bytes(16));
             const auto expires=now_epoch()+30*60;
@@ -1587,7 +1623,11 @@ private:
                 return;
             }
 
-            if(!SaveUnlocked()){bad("storage_error","unable to persist reset challenge");return;}
+            if(!PersistUserUnlocked(u)){
+                u.reset_token_hash=old_reset_hash;
+                u.reset_token_expires=old_reset_expires;
+                bad("storage_error","unable to persist reset challenge");return;
+            }
             AppendAudit(user_id,"password_reset_requested","password reset challenge issued");
             send(Type::PasswordResetIssued,{
                 delivery.debug_token,salt_hex,std::to_string(expires),
@@ -1610,13 +1650,17 @@ private:
                 bad("invalid_token","password reset token is invalid or expired");return;
             }
 
+            const auto old_user=*target;
             target->salt_hex=p.fields[1];
             target->verifier_hex=p.fields[2];
             target->password_kdf_iterations=luma::contracts::auth::crypto::kPasswordPbkdf2Iterations;
             target->reset_token_hash.clear();
             target->reset_token_expires=0;
 
-            if(!SaveUnlocked()){bad("storage_error","unable to persist password reset");return;}
+            if(!PersistUserUnlocked(*target)){
+                *target=old_user;
+                bad("storage_error","unable to persist password reset");return;
+            }
 
             {
                 std::lock_guard sl(session_mutex_);
@@ -1691,7 +1735,7 @@ private:
                 it->second.mfa_recovery_hash=join_recovery_hashes(recovery_hashes);
                 it->second.mfa_totp_secret_hex=totp_secret_hex;
                 it->second.mfa_enabled=true;
-                if(!SaveUnlocked()){
+                if(!PersistUserUnlocked(it->second)){
                     it->second.mfa_recovery_hash=old_recovery_hashes;
                     it->second.mfa_totp_secret_hex=old_totp_secret;
                     it->second.mfa_enabled=old_mfa_enabled;
@@ -1727,19 +1771,13 @@ private:
                         credential_ok=verify_totp(secret,p.fields[1],now_epoch(),1);
                     }catch(...){credential_ok=false;}
                 }
-                if(!credential_ok&&!recovery_used&&!it->second.mfa_totp_secret_hex.empty()){
-                    try{
-                        const auto secret=base32_encode(from_hex(it->second.mfa_totp_secret_hex));
-                        credential_ok=verify_totp(secret,p.fields[1],now_epoch(),1);
-                    }catch(...){credential_ok=false;}
-                }
                 if(!credential_ok){
                     bad("invalid_mfa_code","invalid MFA recovery code or TOTP code");return;
                 }
                 it->second.mfa_enabled=false;
                 it->second.mfa_recovery_hash.clear();
                 it->second.mfa_totp_secret_hex.clear();
-                if(!SaveUnlocked()){
+                if(!PersistUserUnlocked(it->second)){
                     it->second.mfa_enabled=true;
                     it->second.mfa_recovery_hash=old_recovery_hashes;
                     it->second.mfa_totp_secret_hex=old_totp_secret;
