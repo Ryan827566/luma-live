@@ -25,7 +25,8 @@ public:
  void AudioFrame(const Audio& frame){std::lock_guard lock(linksMutex_);if(audioEnabled_)for(auto& [id,link]:links_)if(link->active)link->rtc->AddAudioFrame(frame);}
  void Leave(){videoEnabled_=false;audioEnabled_=false;session_.Leave();Clear();}
  void Poll(){
-  std::vector<Message> incoming;session_.Poll([&](const Message& m){incoming.push_back(m);});
+  // Bind queued SDP/ICE to the membership that existed when it arrived.
+  std::vector<std::pair<Message,std::uint64_t>> incoming;session_.Poll([&](const Message& m){auto member=session_.Members().find(m.peer_id);if(member!=session_.Members().end())incoming.emplace_back(m,member->second.instance);});
   if(session_.GetState()!=MeetingSession::State::Joined){videoEnabled_=false;audioEnabled_=false;Clear();return;}
   {
    std::lock_guard lock(linksMutex_);
@@ -37,7 +38,7 @@ public:
     }
     links_[id]->video=member.video!="off";links_[id]->audio=member.microphone;if(!member.microphone)mixer_.Remove(id);
    }
-   for(const auto& m:incoming){auto it=links_.find(m.peer_id);if(it==links_.end()||!it->second->active)continue;auto& link=*it->second;
+   for(const auto& [m,instance]:incoming){auto it=links_.find(m.peer_id);if(it==links_.end()||it->second->instance!=instance||!it->second->active)continue;auto& link=*it->second;
     if(m.type==Type::MeetingOffer&&!link.initiator&&link.nonce.empty()&&!m.value.empty()){link.nonce=m.value;if(!link.rtc->SetRemoteDescription("offer",m.sdp))Fail(link,"Invalid meeting offer");}
     else if(m.type==Type::MeetingAnswer&&link.initiator&&!link.remoteSet&&m.value==link.nonce){if(!link.rtc->SetRemoteDescription("answer",m.sdp))Fail(link,"Invalid meeting answer");}
     else if(m.type==Type::MeetingIceCandidate){if(!link.nonce.empty()&&m.sdp!=link.nonce)continue;if(link.remoteSet){if(!AddIce(link,m))Fail(link,"Invalid meeting ICE");}else if(link.ice.size()<128)link.ice.push_back(m);else Fail(link,"Meeting ICE queue overflow");}
