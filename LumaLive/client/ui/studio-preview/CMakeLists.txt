@@ -77,3 +77,8 @@ add_executable(luma_meeting_audio_mixer_tests tests/MeetingAudioMixerTests.cpp)
 target_include_directories(luma_meeting_audio_mixer_tests PRIVATE include)
 target_link_libraries(luma_meeting_audio_mixer_tests PRIVATE luma_client_media_pipeline)
 add_test(NAME luma_meeting_audio_mixer_tests COMMAND luma_meeting_audio_mixer_tests)
+
+# Manual visual QA helper with real signaling participants.
+add_executable(luma_meeting_ui_fixture tests/MeetingUiFixture.cpp)
+target_include_directories(luma_meeting_ui_fixture PRIVATE include)
+target_link_libraries(luma_meeting_ui_fixture PRIVATE luma_signaling luma_client_signaling)

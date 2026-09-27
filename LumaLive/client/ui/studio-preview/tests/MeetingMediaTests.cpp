@@ -19,10 +19,25 @@ int main(){CoInitializeEx(nullptr,COINIT_MULTITHREADED);int result=0;try{
  require(start(0,true),"host start");auto deadline=std::chrono::steady_clock::now()+3s;while(!clients[0].Session().IsHost()&&std::chrono::steady_clock::now()<deadline){clients[0].Poll();std::this_thread::sleep_for(5ms);}require(clients[0].Session().IsHost(),"host registration");require(start(1,false)&&start(2,false),"join peers");
  Media::Video frame;frame.width=160;frame.height=120;frame.format=luma::client::media::pipeline::PixelFormat::I420;frame.data.resize(28800,128);
  Media::Audio pcm;pcm.sample_rate=48000;pcm.channels=1;pcm.format=luma::client::media::pipeline::AudioSampleFormat::S16;pcm.data.resize(960);
- int tick=0;auto pump=[&]{for(int i=0;i<3;++i){clients[i].Poll();require(clients[i].Error().empty(),clients[i].Error().c_str());if(clients[i].Session().GetState()==Session::State::Joined){clients[i].SetVideo("camera");clients[i].SetMicrophone(true);frame.timestamp_us=std::uint64_t(tick)*10000;std::fill(frame.data.begin(),frame.data.begin()+19200,static_cast<unsigned char>(40+i*60));if(tick%3==0)clients[i].VideoFrame(frame);for(int n=0;n<480;++n){int16_t sample=static_cast<int16_t>(std::sin((tick*480+n)*(421.+i*313)*6.283185307/48000)*12000);std::memcpy(pcm.data.data()+n*2,&sample,2);}clients[i].AudioFrame(pcm);auto output=clients[i].MixAudio();for(size_t n=0;n+1<output.data.size();n+=2){int16_t value;std::memcpy(&value,output.data.data()+n,2);if(std::abs(int(value))>100){++mixed[i];break;}}}}++tick;std::this_thread::sleep_for(10ms);};
+ std::array<std::string,3> sources{"camera","camera","camera"};std::array<bool,3> microphones{true,true,true};
+ int tick=0;auto pump=[&]{for(int i=0;i<3;++i){clients[i].Poll();require(clients[i].Error().empty(),clients[i].Error().c_str());if(clients[i].Session().GetState()==Session::State::Joined){clients[i].SetVideo(sources[i]);clients[i].SetMicrophone(microphones[i]);frame.timestamp_us=std::uint64_t(tick)*10000;std::fill(frame.data.begin(),frame.data.begin()+19200,static_cast<unsigned char>(40+i*60));if(tick%3==0)clients[i].VideoFrame(frame);for(int n=0;n<480;++n){int16_t sample=static_cast<int16_t>(std::sin((tick*480+n)*(421.+i*313)*6.283185307/48000)*12000);std::memcpy(pcm.data.data()+n*2,&sample,2);}clients[i].AudioFrame(pcm);auto output=clients[i].MixAudio();for(size_t n=0;n+1<output.data.size();n+=2){int16_t value;std::memcpy(&value,output.data.data()+n,2);if(std::abs(int(value))>100){++mixed[i];break;}}}}++tick;std::this_thread::sleep_for(10ms);};
  auto complete=[&]{for(int to=0;to<3;++to)for(int from=0;from<3;++from)if(to!=from&&(videos[to][from]<5||audio[to][from]<8))return false;return true;};
  deadline=std::chrono::steady_clock::now()+20s;while(!complete()&&std::chrono::steady_clock::now()<deadline)pump();
  for(int to=0;to<3;++to)for(int from=0;from<3;++from)if(to!=from)std::cout<<from<<"->"<<to<<" video="<<videos[to][from]<<" audible="<<audio[to][from]<<'\n';require(complete(),"Not all six directed media paths decoded");for(auto blocks:mixed)require(blocks>0,"Decoded audio did not reach meeting mixer");
+ // Continue submitting capture frames while controls are OFF: the media
+ // layer itself must enforce privacy, not rely on capture stopping promptly.
+ sources[1]="off";microphones[1]=false;
+ for(int n=0;n<40;++n)pump();
+ require(clients[0].Session().Members().at("b").video=="off"&&!clients[2].Session().Members().at("b").microphone,"off state did not reach peers");
+ int mutedVideo=videos[0][1]+videos[2][1],mutedAudio=audio[0][1]+audio[2][1];
+ for(int n=0;n<30;++n)pump();
+ require(mutedVideo==videos[0][1]+videos[2][1]&&mutedAudio==audio[0][1]+audio[2][1],"disabled participant media leaked");
+ sources[1]="screen";microphones[1]=true;
+ deadline=std::chrono::steady_clock::now()+8s;
+ while((videos[0][1]+videos[2][1]<mutedVideo+10||audio[0][1]+audio[2][1]<mutedAudio+16)&&std::chrono::steady_clock::now()<deadline)pump();
+ require(videos[0][1]+videos[2][1]>=mutedVideo+10&&audio[0][1]+audio[2][1]>=mutedAudio+16,"media did not resume after source change");
+ require(clients[2].Session().Members().at("b").video=="screen","screen source state missing");
+ sources[1]="camera";
  require(clients[0].Session().Remove("b"),"remove member");deadline=std::chrono::steady_clock::now()+3s;while(clients[1].Session().GetState()!=Session::State::Removed&&std::chrono::steady_clock::now()<deadline)pump();require(clients[1].Session().GetState()==Session::State::Removed,"member was not removed");
  int before=videos[1][0]+videos[1][2]+audio[1][0]+audio[1][2];for(int n=0;n<20;++n)pump();require(before==videos[1][0]+videos[1][2]+audio[1][0]+audio[1][2],"removed client still received media");
  // Keep c paused while b joins, negotiates, leaves and rejoins with the same ID.
@@ -33,5 +48,5 @@ int main(){CoInitializeEx(nullptr,COINIT_MULTITHREADED);int result=0;try{
  int oldVideo=videos[2][1],oldAudio=audio[2][1];deadline=std::chrono::steady_clock::now()+15s;
  while((videos[2][1]<oldVideo+5||audio[2][1]<oldAudio+8)&&std::chrono::steady_clock::now()<deadline)pump();
  require(videos[2][1]>=oldVideo+5&&audio[2][1]>=oldAudio+8,"same-ID rejoin media failed after queued old offer");
- require(clients[0].Session().End(),"end meeting");deadline=std::chrono::steady_clock::now()+3s;while(clients[2].Session().GetState()!=Session::State::Ended&&std::chrono::steady_clock::now()<deadline)pump();require(clients[2].Session().GetState()==Session::State::Ended,"meeting did not end");for(auto& client:clients)client.Leave();server.Stop();std::cout<<"PASS: three-client decoded video/audio mesh, removal, same-ID rejoin and meeting end\n";
+ require(clients[0].Session().End(),"end meeting");deadline=std::chrono::steady_clock::now()+3s;while(clients[2].Session().GetState()!=Session::State::Ended&&std::chrono::steady_clock::now()<deadline)pump();require(clients[2].Session().GetState()==Session::State::Ended,"meeting did not end");for(auto& client:clients)client.Leave();server.Stop();std::cout<<"PASS: three-client decoded video/audio mesh, mute/source controls, removal, same-ID rejoin and meeting end\n";
 }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';result=1;}CoUninitialize();return result;}
