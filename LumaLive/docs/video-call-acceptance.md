@@ -36,3 +36,11 @@ UI reconnect remains enabled for an established call that has moved into recover
 Local runnable preview is prepared in outputs/LumaLive-call-preview (outside the source repository). Launch signaling server, then two Studio instances; join the same room with distinct participant IDs; select a participant and call, then accept in the other window. Use headphones for two clients on one computer. The automated call test uses synthetic sources, while actual devices require the interactive desktop.
 
 Device interruption follow-up: completed capture workers are joined before a restart, and Media Foundation Flush no longer runs under the reader-slot mutex. UI detects unexpected camera/microphone termination, clears stale local video and remote source state, resets controls and shows an error. Release build and full call regression passed after this change. Actual device unplug/replug is still pending interactive hardware acceptance.
+
+## Camera startup investigation after D-drive migration
+
+Active repository: D:/workspace/luma-live. A fresh standalone Release configure/build succeeded under build/d-drive; executables are in output/camera-preview/Release. Corrected the standalone bundled WebRTC root (one excess parent directory and cache shadowing). PreviewMediaTests passed.
+
+Capture startup now keeps HRESULT and failure stage, preserves device enumeration errors, initializes COM for startup callers, enables Source Reader advanced video processing, and retries NV12 without forced dimensions/frame rate when the requested mode is rejected. Added luma_camera_probe: enumeration by default, explicit --capture requests frames.
+
+Actual probe result on this machine: one Integrated Camera enumerated; ActivateObject returned 0x80070005 (access denied), before format negotiation. Readable user, desktop-app and machine webcam consent values were Allow. This does not establish that user privacy settings are disabled, nor that format fallback fixes this particular failure. The restricted execution environment may contribute. No physical camera frame was received; camera preview remains pending external interactive validation. The diagnostic should be run with an outer process timeout because driver Flush/join is not bounded. Native NV12 stride handling remains a known follow-up for devices returning padded buffers.

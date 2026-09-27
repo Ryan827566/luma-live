@@ -8,6 +8,7 @@
 #include <thread>
 #include <utility>
 #include <algorithm>
+#include <cstdio>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -80,7 +81,12 @@ HRESULT FindDevice(const std::string& requested_id, CaptureDeviceType type, IMFA
         CoTaskMemFree(activates);
     }
     attributes->Release();
-    return *result ? S_OK : MF_E_NOT_FOUND;
+    return *result ? S_OK : (FAILED(hr) ? hr : MF_E_NOT_FOUND);
+}
+
+std::string CaptureFailure(const char* stage, HRESULT hr) {
+    char code[16]{};std::snprintf(code,sizeof(code),"0x%08lX",static_cast<unsigned long>(hr));
+    return std::string(stage)+" ("+code+")";
 }
 
 HRESULT ConfigureReader(IMFSourceReader* reader, CaptureDeviceType type, const CameraCaptureConfig& camera, const AudioCaptureConfig& audio) {
@@ -104,6 +110,14 @@ HRESULT ConfigureReader(IMFSourceReader* reader, CaptureDeviceType type, const C
         }
     }
     if (SUCCEEDED(hr)) hr = reader->SetCurrentMediaType(type == CaptureDeviceType::Camera ? MF_SOURCE_READER_FIRST_VIDEO_STREAM : MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, media_type);
+    // Preserve NV12 output for both preview and WebRTC, but let the reader
+    // negotiate native dimensions/rate when the requested mode is unavailable.
+    if (FAILED(hr) && type == CaptureDeviceType::Camera) {
+        media_type->DeleteItem(MF_MT_FRAME_SIZE);
+        media_type->DeleteItem(MF_MT_FRAME_RATE);
+        media_type->DeleteItem(MF_MT_INTERLACE_MODE);
+        hr = reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, media_type);
+    }
     media_type->Release();
     return hr;
 }
@@ -208,19 +222,26 @@ private:
         // Reap that completed thread before assigning the replacement.
         auto& previous_worker = type == CaptureDeviceType::Camera ? camera_thread_ : microphone_thread_;
         if (previous_worker.joinable()) previous_worker.join();
+        ScopedCom com;
+        if (!com.Ok()) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::Internal, CaptureFailure("COM initialization failed", com.hr));
         IMFActivate* activate = nullptr;
         HRESULT hr = FindDevice(type == CaptureDeviceType::Camera ? camera.device_id : audio.device_id, type, &activate);
-        if (FAILED(hr)) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidArgument, "capture device not found");
+        if (FAILED(hr)) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidArgument, CaptureFailure("capture device lookup failed", hr));
         IMFMediaSource* source = nullptr;
         hr = activate->ActivateObject(IID_PPV_ARGS(&source));
         activate->Release();
-        if (FAILED(hr)) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::Internal, "failed to activate capture device");
+        if (FAILED(hr)) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::Internal, CaptureFailure("capture device activation failed", hr));
         IMFSourceReader* reader = nullptr;
-        hr = MFCreateSourceReaderFromMediaSource(source, nullptr, &reader);
+        IMFAttributes* attributes = nullptr;
+        hr = MFCreateAttributes(&attributes, 1);
+        if (SUCCEEDED(hr) && type == CaptureDeviceType::Camera)
+            hr = attributes->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
+        if (SUCCEEDED(hr)) hr = MFCreateSourceReaderFromMediaSource(source, attributes, &reader);
+        if (attributes) attributes->Release();
         source->Release();
-        if (FAILED(hr)) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::Internal, "failed to create source reader");
+        if (FAILED(hr)) return shared::contracts::Result::Failure(shared::contracts::ErrorCode::Internal, CaptureFailure("source reader creation failed", hr));
         hr = ConfigureReader(reader, type, camera, audio);
-        if (FAILED(hr)) { reader->Release(); return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidArgument, "requested capture format is not supported"); }
+        if (FAILED(hr)) { reader->Release(); return shared::contracts::Result::Failure(shared::contracts::ErrorCode::InvalidArgument, CaptureFailure("capture format negotiation failed", hr)); }
 
         auto& active = type == CaptureDeviceType::Camera ? camera_running_ : microphone_running_;
         active = true;
