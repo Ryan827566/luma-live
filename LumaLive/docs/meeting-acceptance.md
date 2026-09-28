@@ -70,3 +70,9 @@ Extracted the UI speaker selector and corrected hold timing: continued speech by
 Release client build and 96/144/192 DPI plus real-three-member UI command regression passed. Fixed the PowerShell test process-handle lifetime so Windows PowerShell reads the fixture exit code reliably, and removed prior render output before each check. Meeting session and three-client synthetic decoded-media regressions passed again.
 
 Initial CTest run found the signaling and mixer executables absent in the migrated output directory (Not Run). Built both targets, then signaling, mixer and speaker tests all passed. No missing executable is counted as a passing test.
+
+## Peer connection state checkpoint
+
+User explicitly allowed this turn to continue below the usual 18% reserve; the exception does not change future runs. Exposed per-peer transport state on the UI thread and added distinct connecting/disconnected/failed hints to video tiles. Unhealthy connections no longer present a cached frame as current video; disconnected/closed events clear queued mixed audio for that peer. This is visibility, not automatic reconnection.
+
+Release Studio and media tests built. Three-client decoded media regression passed, including checks that all six decoded paths report connected and leave clears peer state. DPI renders and real-three-member UI command checks passed. Fault-state labels are implemented but network-fault injection remains pending. Next priority is coordinated peer recovery with stale negotiation rejection and dual-end decoded-media recovery tests.

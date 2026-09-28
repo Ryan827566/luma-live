@@ -15,6 +15,8 @@ public:
  ~MeetingMedia(){Leave();}
  MeetingSession& Session(){return session_;}
  const std::string& Error()const{return error_;}
+ // UI/control thread only, like Poll and Session.
+ std::string PeerState(const std::string& id)const{auto it=links_.find(id);return it==links_.end()?"absent":it->second->state;}
  Audio MixAudio(){return mixer_.Pull();}
  bool Start(const std::string& server,std::uint16_t port,const std::string& meeting,const std::string& self,bool create,Callbacks cb,const contracts::PeerConnectionConfig& config={}){
   Leave();self_=self;callbacks_=std::move(cb);config_=config;error_.clear();return session_.Start(server,port,meeting,self,create);
@@ -49,11 +51,12 @@ public:
     if(event.kind==0){event.message.target_peer_id=event.peer;if(event.message.type==Type::MeetingIceCandidate)event.message.sdp=link.nonce;else event.message.value=link.nonce;if(!session_.SendMedia(event.message))Fail(link,"Meeting signaling send failed");}
     else if(event.kind==1){link.remoteSet=true;for(const auto& m:link.ice)if(m.sdp==link.nonce&&!AddIce(link,m))Fail(link,"Invalid queued ICE");link.ice.clear();if(!link.initiator&&link.active&&!link.rtc->CreateAnswer())Fail(link,"Answer failed");}
     else if(event.message.value=="failed"||event.message.value.find("error")!=std::string::npos)Fail(link,"Peer "+event.peer+": "+event.message.value);
+    else if(event.kind==2){link.state=event.message.value;if(link.state=="disconnected"||link.state=="closed")mixer_.Remove(event.peer);}
    }
   }
  }
 private:
- struct Link{std::shared_ptr<webrtc::NativeWebRtcPeerConnection> rtc;std::uint64_t generation{},instance{};std::atomic<bool> active{true},video{false},audio{false};bool initiator=false,remoteSet=false;std::string nonce;std::vector<Message> ice;};
+ struct Link{std::shared_ptr<webrtc::NativeWebRtcPeerConnection> rtc;std::uint64_t generation{},instance{};std::atomic<bool> active{true},video{false},audio{false};bool initiator=false,remoteSet=false;std::string state="connecting";std::string nonce;std::vector<Message> ice;};
  struct Event{std::string peer;std::uint64_t generation;int kind;Message message;};
  void Queue(Event e){std::lock_guard lock(eventsMutex_);if(events_.size()<512)events_.push_back(std::move(e));else overflow_=true;}
  webrtc::WebRtcCallbacks Bind(const std::string& id,const std::shared_ptr<Link>& link){
@@ -68,7 +71,7 @@ private:
  }
  bool AddIce(Link& link,const Message& m){try{size_t used=0;int line=std::stoi(m.value,&used);return used==m.value.size()&&line>=0&&link.rtc->AddRemoteIceCandidate(m.candidate_mid,line,m.candidate);}catch(...){return false;}}
  void Close(Link& link){link.active=false;if(link.rtc)link.rtc->Close();}
- void Fail(Link& link,const std::string& reason){error_=reason;Close(link);}
+ void Fail(Link& link,const std::string& reason){error_=reason;link.state="failed";Close(link);}
  void Clear(){std::lock_guard lock(linksMutex_);for(auto& [id,link]:links_)Close(*link);links_.clear();mixer_.Clear();{std::lock_guard lock(eventsMutex_);events_.clear();}overflow_=false;}
  MeetingAudioMixer mixer_;MeetingSession session_;std::string self_,error_;Callbacks callbacks_;contracts::PeerConnectionConfig config_;
  std::mutex linksMutex_,eventsMutex_;std::map<std::string,std::shared_ptr<Link>> links_;std::deque<Event> events_;std::atomic<bool> videoEnabled_{false},audioEnabled_{false},overflow_{false};std::uint64_t generation_{0};

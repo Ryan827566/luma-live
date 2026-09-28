@@ -24,6 +24,8 @@ int main(){CoInitializeEx(nullptr,COINIT_MULTITHREADED);int result=0;try{
  auto complete=[&]{for(int to=0;to<3;++to)for(int from=0;from<3;++from)if(to!=from&&(videos[to][from]<5||audio[to][from]<8))return false;return true;};
  deadline=std::chrono::steady_clock::now()+20s;while(!complete()&&std::chrono::steady_clock::now()<deadline)pump();
  for(int to=0;to<3;++to)for(int from=0;from<3;++from)if(to!=from)std::cout<<from<<"->"<<to<<" video="<<videos[to][from]<<" audible="<<audio[to][from]<<'\n';require(complete(),"Not all six directed media paths decoded");for(auto blocks:mixed)require(blocks>0,"Decoded audio did not reach meeting mixer");
+ for(int to=0;to<3;++to)for(int from=0;from<3;++from)if(to!=from)require(clients[to].PeerState(std::string(1,char('a'+from)))=="connected","decoded peer is not connected");
+ require(clients[0].PeerState("unknown")=="absent","unknown peer state");
  // Continue submitting capture frames while controls are OFF: the media
  // layer itself must enforce privacy, not rely on capture stopping promptly.
  sources[1]="off";microphones[1]=false;
@@ -48,5 +50,5 @@ int main(){CoInitializeEx(nullptr,COINIT_MULTITHREADED);int result=0;try{
  int oldVideo=videos[2][1],oldAudio=audio[2][1];deadline=std::chrono::steady_clock::now()+15s;
  while((videos[2][1]<oldVideo+5||audio[2][1]<oldAudio+8)&&std::chrono::steady_clock::now()<deadline)pump();
  require(videos[2][1]>=oldVideo+5&&audio[2][1]>=oldAudio+8,"same-ID rejoin media failed after queued old offer");
- require(clients[0].Session().End(),"end meeting");deadline=std::chrono::steady_clock::now()+3s;while(clients[2].Session().GetState()!=Session::State::Ended&&std::chrono::steady_clock::now()<deadline)pump();require(clients[2].Session().GetState()==Session::State::Ended,"meeting did not end");for(auto& client:clients)client.Leave();server.Stop();std::cout<<"PASS: three-client decoded video/audio mesh, mute/source controls, removal, same-ID rejoin and meeting end\n";
+ require(clients[0].Session().End(),"end meeting");deadline=std::chrono::steady_clock::now()+3s;while(clients[2].Session().GetState()!=Session::State::Ended&&std::chrono::steady_clock::now()<deadline)pump();require(clients[2].Session().GetState()==Session::State::Ended,"meeting did not end");for(auto& client:clients){client.Leave();require(client.PeerState("b")=="absent","leave retained peer state");}server.Stop();std::cout<<"PASS: three-client decoded video/audio mesh, mute/source controls, removal, same-ID rejoin and meeting end\n";
 }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';result=1;}CoUninitialize();return result;}
