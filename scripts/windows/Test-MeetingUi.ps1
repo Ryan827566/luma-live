@@ -9,7 +9,9 @@ $keys = @('LUMALIVE_MEETING_RENDER_PATH','LUMALIVE_MEETING_RENDER_DPI','LUMALIVE
 $saved = @{}
 foreach ($key in $keys) { $saved[$key] = [Environment]::GetEnvironmentVariable($key, 'Process'); [Environment]::SetEnvironmentVariable($key, $null, 'Process') }
 function Invoke-Render {
+    if (Test-Path -LiteralPath $env:LUMALIVE_MEETING_RENDER_PATH) { Remove-Item -LiteralPath $env:LUMALIVE_MEETING_RENDER_PATH }
     $process = Start-Process -FilePath $client -ArgumentList '--meeting' -WindowStyle Hidden -PassThru
+    $processHandle = $process.Handle # Retain handle so Windows PowerShell can read ExitCode after exit.
     if (-not $process.WaitForExit(20000)) { $process.Kill(); throw 'Meeting UI render timed out' }
     if ($process.ExitCode -ne 0) { throw "Meeting UI check failed: $($process.ExitCode)" }
     if (-not (Test-Path -LiteralPath $env:LUMALIVE_MEETING_RENDER_PATH)) { throw 'Render file missing' }
@@ -25,6 +27,7 @@ try {
     $env:LUMALIVE_MEETING_RENDER_DPI = '96'
     $fixtureLog = Join-Path $results 'fixture.log'
     $fixture = Start-Process -FilePath $fixtureExe -WindowStyle Hidden -PassThru -RedirectStandardOutput $fixtureLog -RedirectStandardError (Join-Path $results 'fixture-error.log')
+    $fixtureHandle = $fixture.Handle
     $deadline = [DateTime]::UtcNow.AddSeconds(3)
     while ([DateTime]::UtcNow -lt $deadline) {
         if ((Test-Path -LiteralPath $fixtureLog) -and ((Get-Content -LiteralPath $fixtureLog -Raw) -match 'READY:')) { break }
@@ -38,7 +41,7 @@ try {
     $env:LUMALIVE_MEETING_TEST_CONTROLS = '1'
     Invoke-Render
     if (-not $fixture.WaitForExit(5000)) { throw 'Fixture did not end after UI left' }
-    if ($fixture.ExitCode -ne 0) { throw 'Real participants did not join' }
+    if ($fixture.ExitCode -ne 0) { throw "Fixture failed with exit code: $($fixture.ExitCode)" }
     Write-Output 'PASS: three-member UI, pin/grid/focus/speaker controls, mute toggle and fullscreen restore'
 } finally {
     if ($fixture -and -not $fixture.HasExited) { $fixture.Kill(); $fixture.WaitForExit() }

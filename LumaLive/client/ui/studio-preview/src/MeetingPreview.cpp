@@ -1,5 +1,6 @@
 #include "StudioPreview.hpp"
 #include "MeetingMedia.hpp"
+#include "MeetingSpeaker.hpp"
 #include "PreviewMedia.hpp"
 #include "AudioOutput.hpp"
 #include "DeviceCaptureFactory.hpp"
@@ -27,7 +28,7 @@ class MeetingWindow {
  std::vector<media::CaptureDeviceInfo> cameras_,mics_;
  std::string pinned_,activeSpeaker_;bool focusMode_=false,speakerMode_=false,full_=false;
  std::map<std::string,std::pair<float,std::chrono::steady_clock::time_point>> levels_;
- std::chrono::steady_clock::time_point speakerChanged_{};WINDOWPLACEMENT placement_{sizeof(WINDOWPLACEMENT)};LONG_PTR oldStyle_{};
+ MeetingSpeaker speakerSelection_;WINDOWPLACEMENT placement_{sizeof(WINDOWPLACEMENT)};LONG_PTR oldStyle_{};
  std::chrono::steady_clock::time_point connected_{};bool wasJoined_=false;HFONT titleFont_{};
  UINT dpi_=96;HFONT controlFont_{};
  int width_=1280,height_=850;
@@ -42,7 +43,15 @@ class MeetingWindow {
   fill(CameraDevice,cameras_,media::CaptureDeviceType::Camera);fill(MicDevice,mics_,media::CaptureDeviceType::Microphone);
  }
  void level(const std::string& id,const AudioFrame& audio){const auto peak=Peak(audio);std::lock_guard lock(frameMutex_);levels_[id]={peak,std::chrono::steady_clock::now()};}
- void updateSpeaker(){auto now=std::chrono::steady_clock::now();float best=.04f;std::string candidate;{std::lock_guard lock(frameMutex_);for(auto it=levels_.begin();it!=levels_.end();){auto m=meeting_.Session().Members().find(it->first);if(m==meeting_.Session().Members().end()){it=levels_.erase(it);continue;}if(m->second.microphone&&now-it->second.second<std::chrono::milliseconds(350)&&it->second.first>best){best=it->second.first;candidate=it->first;}++it;}}if(!meeting_.Session().Members().count(activeSpeaker_))activeSpeaker_.clear();if(!candidate.empty()&&(activeSpeaker_.empty()||now-speakerChanged_>std::chrono::milliseconds(1500))){activeSpeaker_=candidate;speakerChanged_=now;}}
+ void updateSpeaker(){
+  const auto now=std::chrono::steady_clock::now();std::set<std::string> eligible;std::map<std::string,float> fresh;
+  for(const auto& [id,member]:meeting_.Session().Members())if(member.microphone)eligible.insert(id);
+  {std::lock_guard lock(frameMutex_);for(auto it=levels_.begin();it!=levels_.end();){
+   if(!eligible.count(it->first)||now-it->second.second>=std::chrono::milliseconds(350)){it=levels_.erase(it);continue;}
+   fresh[it->first]=it->second.first;++it;
+  }}
+  activeSpeaker_=speakerSelection_.Update(eligible,fresh,now);
+ }
  bool confirmLeave(){return !meeting_.Session().IsHost()||MessageBoxW(window_,L"你是主持人。离开将结束所有成员的会议，确定离开？",L"离开会议",MB_YESNO|MB_ICONWARNING|MB_DEFBUTTON2)==IDYES;}
  void fullscreen(){full_=!full_;if(full_){oldStyle_=GetWindowLongPtrW(window_,GWL_STYLE);GetWindowPlacement(window_,&placement_);MONITORINFO mi{sizeof(mi)};GetMonitorInfoW(MonitorFromWindow(window_,MONITOR_DEFAULTTONEAREST),&mi);SetWindowLongPtrW(window_,GWL_STYLE,oldStyle_&~WS_OVERLAPPEDWINDOW);SetWindowPos(window_,HWND_TOP,mi.rcMonitor.left,mi.rcMonitor.top,mi.rcMonitor.right-mi.rcMonitor.left,mi.rcMonitor.bottom-mi.rcMonitor.top,SWP_FRAMECHANGED);}else{SetWindowLongPtrW(window_,GWL_STYLE,oldStyle_);SetWindowPlacement(window_,&placement_);SetWindowPos(window_,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_FRAMECHANGED);}}
  HWND control(int id){return controls_[id-Server];}
@@ -70,7 +79,7 @@ class MeetingWindow {
   if(id==Copy){if(!joined)return;auto text=L"LumaLive 视频会议\r\n服务器："+value(Server)+L"\r\n会议号："+value(Room);if(OpenClipboard(window_)){auto mem=GlobalAlloc(GMEM_MOVEABLE,(text.size()+1)*sizeof(wchar_t));if(mem){auto ptr=GlobalLock(mem);if(ptr){memcpy(ptr,text.c_str(),(text.size()+1)*sizeof(wchar_t));GlobalUnlock(mem);EmptyClipboard();if(!SetClipboardData(CF_UNICODETEXT,mem))GlobalFree(mem);else status_=L"会议信息已复制，可发送给参会者";}else GlobalFree(mem);}CloseClipboard();}return;}
   if((id==Camera||id==Microphone||id==Screen||id==Leave||id==End||id==Remove)&&!joined)return;
   if((id==Create||id==Join)&&(joined||meeting_.Session().GetState()==MeetingSession::State::Joining))return;
-  if(id==Create||id==Join){stopInputs();meeting_.Leave();{std::lock_guard lock(frameMutex_);frames_.clear();levels_.clear();}activeSpeaker_.clear();auto host=utf8(value(Server));auto at=host.rfind(':');int port=9000;if(at!=std::string::npos){try{size_t used=0;auto text=host.substr(at+1);port=std::stoi(text,&used);if(used!=text.size())port=0;}catch(...){port=0;}host.resize(at);}if(port<1||port>65535){status_=L"服务器端口无效，请输入 1–65535";return;}
+  if(id==Create||id==Join){stopInputs();meeting_.Leave();{std::lock_guard lock(frameMutex_);frames_.clear();levels_.clear();}activeSpeaker_.clear();speakerSelection_.Reset();auto host=utf8(value(Server));auto at=host.rfind(':');int port=9000;if(at!=std::string::npos){try{size_t used=0;auto text=host.substr(at+1);port=std::stoi(text,&used);if(used!=text.size())port=0;}catch(...){port=0;}host.resize(at);}if(port<1||port>65535){status_=L"服务器端口无效，请输入 1–65535";return;}
    self_=utf8(value(Identity));MeetingMedia::Callbacks cb;cb.video=[this](const std::string& peer,VideoFrame f){frame(peer,std::move(f));};cb.audio=[this](const std::string& peer,AudioFrame f){level(peer,f);};
    if(!meeting_.Start(host,static_cast<std::uint16_t>(port),utf8(value(Room)),self_,id==Create,std::move(cb)))status_=wide(meeting_.Session().Status());else status_=L"正在连接会议…";
   }else if(id==Leave){if(!confirmLeave())return;stopInputs();meeting_.Leave();status_=L"已离开会议";}

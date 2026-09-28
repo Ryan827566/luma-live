@@ -82,3 +82,8 @@ add_test(NAME luma_meeting_audio_mixer_tests COMMAND luma_meeting_audio_mixer_te
 add_executable(luma_meeting_ui_fixture tests/MeetingUiFixture.cpp)
 target_include_directories(luma_meeting_ui_fixture PRIVATE include)
 target_link_libraries(luma_meeting_ui_fixture PRIVATE luma_signaling luma_client_signaling)
+
+add_executable(luma_meeting_speaker_tests tests/MeetingSpeakerTests.cpp)
+target_include_directories(luma_meeting_speaker_tests PRIVATE include)
+target_compile_features(luma_meeting_speaker_tests PRIVATE cxx_std_20)
+add_test(NAME luma_meeting_speaker_tests COMMAND luma_meeting_speaker_tests)

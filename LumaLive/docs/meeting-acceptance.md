@@ -62,3 +62,11 @@ Run output/camera-preview/Release/Start-Meeting.cmd. UI helper luma_meeting_ui_f
 Added DPI-scaled native controls, drawing and minimum window size, with WM_DPICHANGED handling. Release build passed. scripts/windows/Test-MeetingUi.ps1 passed application-owned rendering at 96, 144 and 192 DPI, followed by a real three-member signaling fixture. Diagnostic command checks passed for pin-to-grid, grid/focus/speaker modes, speaker mute restoration, fullscreen bounds restoration and joined-state button availability. These exercise UI command routes, not physical keyboard/mouse or cross-monitor acceptance. Physical cross-monitor behavior and automatic audible-speaker switching remain pending.
 
 On 2026-09-28 the user confirmed local camera display works. This is user-confirmed local preview only; it does not establish physical multiparty audio/video or TURN acceptance. Broadcasting remains deferred.
+
+## Active-speaker selection follow-up
+
+Extracted the UI speaker selector and corrected hold timing: continued speech by the same member no longer renews the hold. Muted/removed members lose speaker eligibility immediately; silence retains the last eligible speaker, and a fresh meeting resets selection. Stale samples are discarded by the UI. Deterministic Release tests passed for noise threshold, hold timing, continued speech, silence, mute/leave, empty roster, rejoin and reset. This is selection-policy coverage; interactive audible-speaker acceptance remains pending.
+
+Release client build and 96/144/192 DPI plus real-three-member UI command regression passed. Fixed the PowerShell test process-handle lifetime so Windows PowerShell reads the fixture exit code reliably, and removed prior render output before each check. Meeting session and three-client synthetic decoded-media regressions passed again.
+
+Initial CTest run found the signaling and mixer executables absent in the migrated output directory (Not Run). Built both targets, then signaling, mixer and speaker tests all passed. No missing executable is counted as a passing test.
