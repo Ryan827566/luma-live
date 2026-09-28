@@ -44,3 +44,7 @@ Active repository: D:/workspace/luma-live. A fresh standalone Release configure/
 Capture startup now keeps HRESULT and failure stage, preserves device enumeration errors, initializes COM for startup callers, enables Source Reader advanced video processing, and retries NV12 without forced dimensions/frame rate when the requested mode is rejected. Added luma_camera_probe: enumeration by default, explicit --capture requests frames.
 
 Actual probe result on this machine: one Integrated Camera enumerated; ActivateObject returned 0x80070005 (access denied), before format negotiation. Readable user, desktop-app and machine webcam consent values were Allow. This does not establish that user privacy settings are disabled, nor that format fallback fixes this particular failure. The restricted execution environment may contribute. No physical camera frame was received; camera preview remains pending external interactive validation. The diagnostic should be run with an outer process timeout because driver Flush/join is not bounded. Native NV12 stride handling remains a known follow-up for devices returning padded buffers.
+
+## User-confirmed camera preview (2026-09-28)
+
+The user reports that camera display now works. Treat local preview as user-confirmed and stop the earlier camera startup investigation. The restricted-process probe failure above is historical evidence, not the current user-visible state. Multiparty physical-device and TURN checks remain separate and pending.

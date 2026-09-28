@@ -56,3 +56,9 @@ Fresh standalone Release build passed. Application-owned rendering passed at req
 Three-client media and session tests passed with additional checks: mute/video-off reject continuing synthetic capture input, source changes propagate, decoded media resumes, removal stops delivery, same-ID rejoin works, and meeting end cleans up. These validate real native codecs with synthetic sources, not physical camera/mic/speaker/screen devices.
 
 Run output/camera-preview/Release/Start-Meeting.cmd. UI helper luma_meeting_ui_fixture creates a local server on 19730 and two device-off participants for at most 30 seconds. Core meeting UI is implemented, but full module/product acceptance is incomplete; keep this checkpoint on the development branch.
+
+## Meeting DPI and interaction regression checkpoint
+
+Added DPI-scaled native controls, drawing and minimum window size, with WM_DPICHANGED handling. Release build passed. scripts/windows/Test-MeetingUi.ps1 passed application-owned rendering at 96, 144 and 192 DPI, followed by a real three-member signaling fixture. Diagnostic command checks passed for pin-to-grid, grid/focus/speaker modes, speaker mute restoration, fullscreen bounds restoration and joined-state button availability. These exercise UI command routes, not physical keyboard/mouse or cross-monitor acceptance. Physical cross-monitor behavior and automatic audible-speaker switching remain pending.
+
+On 2026-09-28 the user confirmed local camera display works. This is user-confirmed local preview only; it does not establish physical multiparty audio/video or TURN acceptance. Broadcasting remains deferred.
