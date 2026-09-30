@@ -20,7 +20,7 @@ int main(){CoInitializeEx(nullptr,COINIT_MULTITHREADED);int result=0;try{
  Media::Video frame;frame.width=160;frame.height=120;frame.format=luma::client::media::pipeline::PixelFormat::I420;frame.data.resize(28800,128);
  Media::Audio pcm;pcm.sample_rate=48000;pcm.channels=1;pcm.format=luma::client::media::pipeline::AudioSampleFormat::S16;pcm.data.resize(960);
  std::array<std::string,3> sources{"camera","camera","camera"};std::array<bool,3> microphones{true,true,true};
- int tick=0;auto pump=[&]{for(int i=0;i<3;++i){clients[i].Poll();require(clients[i].Error().empty(),clients[i].Error().c_str());if(clients[i].Session().GetState()==Session::State::Joined){clients[i].SetVideo(sources[i]);clients[i].SetMicrophone(microphones[i]);frame.timestamp_us=std::uint64_t(tick)*10000;std::fill(frame.data.begin(),frame.data.begin()+19200,static_cast<unsigned char>(40+i*60));if(tick%3==0)clients[i].VideoFrame(frame);for(int n=0;n<480;++n){int16_t sample=static_cast<int16_t>(std::sin((tick*480+n)*(421.+i*313)*6.283185307/48000)*12000);std::memcpy(pcm.data.data()+n*2,&sample,2);}clients[i].AudioFrame(pcm);auto output=clients[i].MixAudio();for(size_t n=0;n+1<output.data.size();n+=2){int16_t value;std::memcpy(&value,output.data.data()+n,2);if(std::abs(int(value))>100){++mixed[i];break;}}}}++tick;std::this_thread::sleep_for(10ms);};
+ bool injectedFailure=false;int tick=0;auto pump=[&]{for(int i=0;i<3;++i){clients[i].Poll();if(!injectedFailure)require(clients[i].Error().empty(),clients[i].Error().c_str());if(clients[i].Session().GetState()==Session::State::Joined){clients[i].SetVideo(sources[i]);clients[i].SetMicrophone(microphones[i]);frame.timestamp_us=std::uint64_t(tick)*10000;std::fill(frame.data.begin(),frame.data.begin()+19200,static_cast<unsigned char>(40+i*60));if(tick%3==0)clients[i].VideoFrame(frame);for(int n=0;n<480;++n){int16_t sample=static_cast<int16_t>(std::sin((tick*480+n)*(421.+i*313)*6.283185307/48000)*12000);std::memcpy(pcm.data.data()+n*2,&sample,2);}clients[i].AudioFrame(pcm);auto output=clients[i].MixAudio();for(size_t n=0;n+1<output.data.size();n+=2){int16_t value;std::memcpy(&value,output.data.data()+n,2);if(std::abs(int(value))>100){++mixed[i];break;}}}}++tick;std::this_thread::sleep_for(10ms);};
  auto complete=[&]{for(int to=0;to<3;++to)for(int from=0;from<3;++from)if(to!=from&&(videos[to][from]<5||audio[to][from]<8))return false;return true;};
  deadline=std::chrono::steady_clock::now()+20s;while(!complete()&&std::chrono::steady_clock::now()<deadline)pump();
  for(int to=0;to<3;++to)for(int from=0;from<3;++from)if(to!=from)std::cout<<from<<"->"<<to<<" video="<<videos[to][from]<<" audible="<<audio[to][from]<<'\n';require(complete(),"Not all six directed media paths decoded");for(auto blocks:mixed)require(blocks>0,"Decoded audio did not reach meeting mixer");
@@ -38,6 +38,17 @@ int main(){CoInitializeEx(nullptr,COINIT_MULTITHREADED);int result=0;try{
   require(videos[0][2]>v02&&clients[0].Session().Epoch()==epoch&&clients[0].Session().Members().size()==3,"reconnect disrupted meeting");
  };
  reconnect(0,"b");reconnect(1,"a");
+ for(int failed:{0,1}){
+  const int oldV01=videos[0][1],oldV10=videos[1][0],oldA01=audio[0][1],oldA10=audio[1][0],third=videos[2][0];
+  injectedFailure=true;clients[failed].FailPeerForTest(failed==0?"b":"a");pump();
+  require(clients[failed].PeerState(failed==0?"b":"a")=="failed","fault did not close transport");
+  deadline=std::chrono::steady_clock::now()+12s;
+  auto recovered=[&]{return clients[0].PeerState("b")=="connected"&&clients[1].PeerState("a")=="connected"&&videos[0][1]>=oldV01+5&&videos[1][0]>=oldV10+5&&audio[0][1]>=oldA01+8&&audio[1][0]>=oldA10+8;};
+  while(!recovered()&&std::chrono::steady_clock::now()<deadline)pump();
+  require(recovered(),"automatic recovery did not restore bidirectional decoded media");
+  require(videos[2][0]>third&&clients[0].Session().Epoch()==epoch,"automatic recovery disrupted meeting");
+  for(auto& client:clients)require(client.Error().empty(),"recovery left error");injectedFailure=false;
+ }
  require(!clients[0].Reconnect("missing")&&!clients[0].Reconnect("a"),"invalid reconnect accepted");
  // Continue submitting capture frames while controls are OFF: the media
  // layer itself must enforce privacy, not rely on capture stopping promptly.
