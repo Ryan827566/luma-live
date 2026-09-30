@@ -22,3 +22,7 @@ After functionality, replace preview windows with one native main window and tab
 Navigation placement: all module selectors belong in the far-left sidebar of the single main window, not across the top. Provide a distinctive LumaLive application/taskbar icon combining live video, audio and AI identity. Both requirements are pending implementation.
 
 2026-09-30 checkpoint: Release build succeeded in output/next/Release. Native SessionAi unit suite passed. Native WinHTTP-to-gateway integration passed ASR, summary, translation and TTS WAV through four actual HTTP requests to a mock provider. This does not verify real-provider quality or physical speaker playback.
+
+AI scope clarification: AI is a cross-module platform capability, not owned by video. The global assistant entry must serve call, meeting, live and account/login contexts through explicit adapters with separate permissions and data. SessionAi currently implements the call/meeting adapter only; global orchestration and other adapters are not complete. Login must not depend on AI availability or send passwords/tokens to a model.
+
+Sidebar checkpoint: module entry controls moved to the left. Call AI panel can be embedded as a child page, retaining its session when hidden. Meeting is still a separate window; full single-window delivery, localization and product visual design remain pending.

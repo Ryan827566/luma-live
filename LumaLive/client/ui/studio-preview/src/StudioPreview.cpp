@@ -66,10 +66,11 @@ class StudioWindow {
     std::atomic<bool> audioFailed_{false};
     std::shared_ptr<PlaybackState> playback_;
     ComPtr<IMFPMediaPlayer> player_;
+    bool aiView_{false};
     bool cameraView_{true},paused_{false},fullscreen_{false},closing_{false};
     RECT preview_{},remotePreview_{},savedWindow_{};DWORD savedStyle_{};
     std::wstring status_{L"选择摄像头，或打开一个视频 / 音频文件"},fileName_{L"尚未打开媒体"};
-    int width_{1440},height_{900},left_{52},right_{280},lower_{420},volume_{65};
+    int width_{1440},height_{900},left_{176},right_{280},lower_{420},volume_{65};
     UINT dpi_{96};
     HWND Control(int id)const{return controls_[id-100];}
     int S(int n)const{return MulDiv(n,dpi_,96);}
@@ -137,7 +138,15 @@ class StudioWindow {
     void Layout(){
         RECT rc;GetClientRect(window_,&rc);width_=MulDiv(rc.right,96,dpi_);height_=MulDiv(rc.bottom,96,dpi_);
         if(fullscreen_){MoveWindow(surface_,0,0,rc.right,rc.bottom,TRUE);ShowWindow(remoteSurface_,SW_HIDE);for(auto c:controls_)if(c)ShowWindow(c,SW_HIDE);return;}
-        ShowWindow(remoteSurface_,SW_SHOW);for(auto c:controls_)if(c)ShowWindow(c,SW_SHOW);ShowWindow(Control(RemoteMode),SW_HIDE);
+        ShowWindow(remoteSurface_,SW_SHOW);for(auto c:controls_)if(c)ShowWindow(c,SW_SHOW);ShowWindow(Control(RemoteMode),SW_SHOW);
+        Place(RemoteMode,12,106,left_-24,42);Place(Meeting,12,158,left_-24,42);Place(Ai,12,210,left_-24,42);
+        if(aiView_){
+            for(int id=Open;id<=Ai;++id)if(id!=RemoteMode&&id!=Meeting&&id!=Ai)ShowWindow(Control(id),SW_HIDE);
+            ShowWindow(surface_,SW_HIDE);ShowWindow(remoteSurface_,SW_HIDE);
+            ai_.Open(window_,true);ai_.Place(R(left_+16,96,width_-left_-32,height_-150));
+            InvalidateRect(window_,nullptr,FALSE);return;
+        }
+        ai_.Hide();ShowWindow(surface_,SW_SHOW);
         const int x=left_+16, end=width_-right_-16, total=end-x, deck=(total-16)/2;
         const int deckHeight=std::clamp(deck*9/16,180,std::max(180,height_-534));
         preview_=R(x,130,deck,deckHeight);remotePreview_=R(x+deck+16,130,deck,deckHeight);
@@ -145,7 +154,7 @@ class StudioWindow {
         MoveWindow(remoteSurface_,remotePreview_.left,remotePreview_.top,remotePreview_.right-remotePreview_.left,remotePreview_.bottom-remotePreview_.top,TRUE);
         lower_=130+deckHeight+66;
         const int sourceWidth=(total-16)/2,mx=x+sourceWidth+16,rx=width_-right_+16;
-        Place(Ai,width_-right_-448,52,88,32);Place(Meeting,width_-right_-348,52,158,32);Place(Open,width_-right_-174,52,158,32);Place(CameraMode,x,130+deckHeight+10,94,32);Place(FileMode,x+102,130+deckHeight+10,94,32);
+        Place(Open,width_-right_-174,52,158,32);Place(CameraMode,x,130+deckHeight+10,94,32);Place(FileMode,x+102,130+deckHeight+10,94,32);
         Place(Pause,x+206,130+deckHeight+10,74,32);Place(Stop,x+288,130+deckHeight+10,74,32);Place(FullScreen,end-112,130+deckHeight+10,112,32);
         Place(CameraList,x+12,lower_+66,sourceWidth-24,160);Place(Camera,x+12,lower_+104,sourceWidth-128,34);Place(Refresh,x+sourceWidth-108,lower_+104,96,34);
         Place(MicList,x+12,lower_+182,sourceWidth-24,160);Place(Microphone,x+12,lower_+220,sourceWidth-24,34);Place(ShareScreen,x+12,lower_+262,sourceWidth-24,28);
@@ -171,6 +180,7 @@ class StudioWindow {
         Fill(dc,R(12,13,10,14),Mint);Label(dc,L"LUMALIVE STUDIO",32,6,194,28,body_);Label(dc,L"MAIN WORKSPACE",232,6,220,28,small_,Muted);
         Label(dc,L"主工作台",width_-right_-210,6,110,28,small_,Ink);Label(dc,L"本地 / WebRTC",width_-right_-104,6,104,28,small_,Muted);
         Label(dc,L"◈",14,52,26,32,title_,Mint);
+        if(aiView_){Fill(dc,R(left_,40,width_-left_,height_-40),Bg);Label(dc,L"\u667a\u80fd\u52a9\u624b",left_+20,48,width_-left_-40,38,title_);return;}
         Label(dc,L"PROJECT:  LumaLive 工作台",x,50,total-194,36,body_);
         Label(dc,L"PREVIEW DECK / 本地预览",x,100,deck,28,small_,Mint);Label(dc,L"REMOTE DECK / 远端连线",x+deck+16,100,deck,28,small_,call_.Active()?Mint:Muted);
         RECT border=preview_;InflateRect(&border,1,1);Fill(dc,border,Mint);border=remotePreview_;InflateRect(&border,1,1);Fill(dc,border,call_.Active()?Mint:Border);
@@ -219,7 +229,7 @@ class StudioWindow {
         while(at<command.size()){if(token()==name)return token();}return {};
     }
     void DrawButton(const DRAWITEMSTRUCT& d){
-        bool primary=d.CtlID==Open||d.CtlID==Join,selected=(d.CtlID==CameraMode&&cameraView_)||(d.CtlID==FileMode&&!cameraView_);bool disabled=(d.itemState&ODS_DISABLED)!=0;
+        bool primary=d.CtlID==Open||d.CtlID==Join,selected=(d.CtlID==Ai&&aiView_)||(d.CtlID==RemoteMode&&!aiView_)||(d.CtlID==CameraMode&&cameraView_)||(d.CtlID==FileMode&&!cameraView_);bool disabled=(d.itemState&ODS_DISABLED)!=0;
         auto color=primary?Mint:(selected?RGB(15,57,89):RGB(27,33,43));if(d.itemState&ODS_SELECTED)color=RGB(26,90,144);
         Fill(d.hDC,d.rcItem,color);wchar_t label[128];GetWindowTextW(d.hwndItem,label,128);Text(d.hDC,label,d.rcItem,body_,disabled?RGB(98,112,120):Ink,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
         if(d.itemState&ODS_FOCUS){RECT r=d.rcItem;InflateRect(&r,-3,-3);DrawFocusRect(d.hDC,&r);}
@@ -229,7 +239,7 @@ class StudioWindow {
     }
     void Command(int id){
         switch(id){
-        case Ai:ai_.Open(window_);break;
+        case Ai:aiView_=true;Layout();break;
         case Meeting:{wchar_t executable[32768]{};GetModuleFileNameW(nullptr,executable,32768);std::wstring command=L"\""+std::wstring(executable)+L"\" --meeting";STARTUPINFOW startup{sizeof(startup)};PROCESS_INFORMATION process{};if(CreateProcessW(executable,command.data(),nullptr,nullptr,FALSE,0,nullptr,nullptr,&startup,&process)){CloseHandle(process.hThread);CloseHandle(process.hProcess);}else status_=L"Unable to open meeting preview";break;}
         case Open:OpenFile();break;
         case Camera:ToggleCamera();break;
@@ -240,7 +250,7 @@ class StudioWindow {
         case Refresh:if(capture_->IsCameraCapturing()||capture_->IsMicrophoneCapturing())status_=L"请先关闭采集，再刷新设备列表";else{Enumerate();status_=L"设备列表已刷新";}break;
         case CameraMode:cameraView_=true;if(player_)player_->Pause();paused_=true;break;
         case FileMode:cameraView_=false;if(!player_)OpenFile();else{auto hr=player_->Play();if(FAILED(hr))status_=L"播放失败："+Hr(hr);else{paused_=false;SetWindowTextW(Control(Pause),L"暂停");}}break;
-        case RemoteMode:break;
+        case RemoteMode:aiView_=false;Layout();break;
         case Join:{
             if(call_.Active()){call_.Stop();remoteVideo_.Clear();remoteAudio_.Close();remotePeak_=0;remoteVideos_=0;remoteAudios_=0;SetWindowTextW(Control(Join),L"加入房间");status_=L"已离开房间";EnableWindow(Control(Host),TRUE);EnableWindow(Control(Room),TRUE);EnableWindow(Control(Identity),TRUE);break;}
             wchar_t host[256]{},room[128]{};GetWindowTextW(Control(Host),host,256);GetWindowTextW(Control(Room),room,128);
@@ -270,7 +280,7 @@ class StudioWindow {
     LRESULT Handle(UINT message,WPARAM wp,LPARAM lp){
         switch(message){
         case WM_SIZE:Layout();return 0;
-        case WM_GETMINMAXINFO:{auto m=reinterpret_cast<MINMAXINFO*>(lp);m->ptMinTrackSize={S(1280),S(830)};return 0;}
+        case WM_GETMINMAXINFO:{auto m=reinterpret_cast<MINMAXINFO*>(lp);m->ptMinTrackSize={S(1404),S(830)};return 0;}
         case WM_DPICHANGED:{dpi_=HIWORD(wp);Fonts();auto r=reinterpret_cast<RECT*>(lp);SetWindowPos(window_,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);Layout();return 0;}
         case WM_ERASEBKGND:return 1;
         case WM_PAINT:{PAINTSTRUCT ps;auto dc=BeginPaint(window_,&ps);RECT r;GetClientRect(window_,&r);auto mem=CreateCompatibleDC(dc);auto bmp=CreateCompatibleBitmap(dc,std::max(1L,r.right),std::max(1L,r.bottom));auto old=SelectObject(mem,bmp);Paint(mem);BitBlt(dc,0,0,r.right,r.bottom,mem,0,0,SRCCOPY);SelectObject(mem,old);DeleteObject(bmp);DeleteDC(mem);EndPaint(window_,&ps);return 0;}
