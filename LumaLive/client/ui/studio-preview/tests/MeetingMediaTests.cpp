@@ -26,6 +26,19 @@ int main(){CoInitializeEx(nullptr,COINIT_MULTITHREADED);int result=0;try{
  for(int to=0;to<3;++to)for(int from=0;from<3;++from)if(to!=from)std::cout<<from<<"->"<<to<<" video="<<videos[to][from]<<" audible="<<audio[to][from]<<'\n';require(complete(),"Not all six directed media paths decoded");for(auto blocks:mixed)require(blocks>0,"Decoded audio did not reach meeting mixer");
  for(int to=0;to<3;++to)for(int from=0;from<3;++from)if(to!=from)require(clients[to].PeerState(std::string(1,char('a'+from)))=="connected","decoded peer is not connected");
  require(clients[0].PeerState("unknown")=="absent","unknown peer state");
+ // Both negotiation roles can rebuild one link; the third participant must keep streaming.
+ const auto epoch=clients[0].Session().Epoch();
+ auto reconnect=[&](int requester,const char* peer){
+  const int v01=videos[0][1],v10=videos[1][0],a01=audio[0][1],a10=audio[1][0],v02=videos[0][2];
+  require(clients[requester].Reconnect(peer),"reconnect rejected");
+  deadline=std::chrono::steady_clock::now()+12s;
+  while((videos[0][1]<v01+5||videos[1][0]<v10+5||audio[0][1]<a01+8||audio[1][0]<a10+8||clients[0].PeerState("b")!="connected"||clients[1].PeerState("a")!="connected")&&std::chrono::steady_clock::now()<deadline)pump();
+  require(videos[0][1]>=v01+5&&videos[1][0]>=v10+5&&audio[0][1]>=a01+8&&audio[1][0]>=a10+8,"bidirectional media did not resume after reconnect");
+  require(clients[0].PeerState("b")=="connected"&&clients[1].PeerState("a")=="connected","reconnect transport state");
+  require(videos[0][2]>v02&&clients[0].Session().Epoch()==epoch&&clients[0].Session().Members().size()==3,"reconnect disrupted meeting");
+ };
+ reconnect(0,"b");reconnect(1,"a");
+ require(!clients[0].Reconnect("missing")&&!clients[0].Reconnect("a"),"invalid reconnect accepted");
  // Continue submitting capture frames while controls are OFF: the media
  // layer itself must enforce privacy, not rely on capture stopping promptly.
  sources[1]="off";microphones[1]=false;

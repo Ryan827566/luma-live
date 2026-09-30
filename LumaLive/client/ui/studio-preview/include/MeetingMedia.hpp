@@ -17,6 +17,15 @@ public:
  const std::string& Error()const{return error_;}
  // UI/control thread only, like Poll and Session.
  std::string PeerState(const std::string& id)const{auto it=links_.find(id);return it==links_.end()?"absent":it->second->state;}
+ // Rebuild one transport without leaving the meeting or interrupting other peers.
+ bool Reconnect(const std::string& id){
+  std::lock_guard lock(linksMutex_);auto it=links_.find(id);
+  if(session_.GetState()!=MeetingSession::State::Joined||it==links_.end()||it->second->nonce.empty()||it->second->state=="reconnecting")return false;
+  auto old=it->second;
+  if(old->initiator)return Rebuild(id,old->instance,"");
+  Message request;request.type=Type::MeetingOffer;request.target_peer_id=id;request.value="restart-request";request.sdp=old->nonce;
+  if(!session_.SendMedia(request))return false;old->state="reconnecting";old->deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);return true;
+ }
  Audio MixAudio(){return mixer_.Pull();}
  bool Start(const std::string& server,std::uint16_t port,const std::string& meeting,const std::string& self,bool create,Callbacks cb,const contracts::PeerConnectionConfig& config={}){
   Leave();self_=self;callbacks_=std::move(cb);config_=config;error_.clear();return session_.Start(server,port,meeting,self,create);
@@ -34,14 +43,19 @@ public:
    std::lock_guard lock(linksMutex_);
    for(auto it=links_.begin();it!=links_.end();){auto member=session_.Members().find(it->first);if(member==session_.Members().end()||member->second.instance!=it->second->instance){Close(*it->second);mixer_.Remove(it->first);it=links_.erase(it);}else ++it;}
    for(const auto& [id,member]:session_.Members())if(id!=self_){
-    if(!links_.count(id)){auto link=std::make_shared<Link>();link->instance=member.instance;link->generation=++generation_;link->initiator=self_<id;link->nonce=link->initiator?std::to_string(++nextNonce_):"";link->rtc=webrtc::NativeWebRtcPeerConnection::Create();links_[id]=link;
-     auto cb=Bind(id,link);if(!link->rtc->Initialize(config_,std::move(cb))){Fail(*link,"Media initialization failed for "+id);continue;}
-     if(link->initiator&&!link->rtc->CreateOffer())Fail(*link,"Offer failed for "+id);
-    }
+    if(!links_.count(id)&&!Rebuild(id,member.instance,""))continue;
     links_[id]->video=member.video!="off";links_[id]->audio=member.microphone;if(!member.microphone)mixer_.Remove(id);
    }
-   for(const auto& [m,instance]:incoming){auto it=links_.find(m.peer_id);if(it==links_.end()||it->second->instance!=instance||!it->second->active)continue;auto& link=*it->second;
-    if(m.type==Type::MeetingOffer&&!link.initiator&&link.nonce.empty()&&!m.value.empty()){link.nonce=m.value;if(!link.rtc->SetRemoteDescription("offer",m.sdp))Fail(link,"Invalid meeting offer");}
+   for(const auto& [m,instance]:incoming){auto it=links_.find(m.peer_id);if(it==links_.end()||it->second->instance!=instance)continue;
+    if(m.type==Type::MeetingOffer&&m.value=="restart-request"){
+     if(it->second->initiator&&m.sdp==it->second->nonce)Rebuild(m.peer_id,instance,"");
+     continue;
+    }
+    if(m.type==Type::MeetingOffer&&!it->second->initiator&&!it->second->nonce.empty()&&Nonce(m.value)>Nonce(it->second->nonce)){
+     if(!Rebuild(m.peer_id,instance,m.value))continue;
+    }
+    auto& link=*links_.at(m.peer_id);if(!link.active)continue;
+    if(m.type==Type::MeetingOffer&&!link.initiator&&!link.remotePending&&!link.remoteSet&&Nonce(m.value)>0&&(link.nonce.empty()||link.nonce==m.value)){link.nonce=m.value;link.remotePending=true;if(!link.rtc->SetRemoteDescription("offer",m.sdp))Fail(link,"Invalid meeting offer");}
     else if(m.type==Type::MeetingAnswer&&link.initiator&&!link.remoteSet&&m.value==link.nonce){if(!link.rtc->SetRemoteDescription("answer",m.sdp))Fail(link,"Invalid meeting answer");}
     else if(m.type==Type::MeetingIceCandidate){if(!link.nonce.empty()&&m.sdp!=link.nonce)continue;if(link.remoteSet){if(!AddIce(link,m))Fail(link,"Invalid meeting ICE");}else if(link.ice.size()<128)link.ice.push_back(m);else Fail(link,"Meeting ICE queue overflow");}
    }
@@ -51,13 +65,26 @@ public:
     if(event.kind==0){event.message.target_peer_id=event.peer;if(event.message.type==Type::MeetingIceCandidate)event.message.sdp=link.nonce;else event.message.value=link.nonce;if(!session_.SendMedia(event.message))Fail(link,"Meeting signaling send failed");}
     else if(event.kind==1){link.remoteSet=true;for(const auto& m:link.ice)if(m.sdp==link.nonce&&!AddIce(link,m))Fail(link,"Invalid queued ICE");link.ice.clear();if(!link.initiator&&link.active&&!link.rtc->CreateAnswer())Fail(link,"Answer failed");}
     else if(event.message.value=="failed"||event.message.value.find("error")!=std::string::npos)Fail(link,"Peer "+event.peer+": "+event.message.value);
-    else if(event.kind==2){link.state=event.message.value;if(link.state=="disconnected"||link.state=="closed")mixer_.Remove(event.peer);}
+    else if(event.kind==2){if(link.state=="connected"&&event.message.value=="disconnected")link.deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);link.state=event.message.value;if(link.state=="disconnected"||link.state=="closed")mixer_.Remove(event.peer);}
    }
+   for(auto& [id,link]:links_)if(link->active&&link->state!="connected"&&std::chrono::steady_clock::now()>link->deadline)Fail(*link,"Connection timed out for "+id);
   }
  }
 private:
- struct Link{std::shared_ptr<webrtc::NativeWebRtcPeerConnection> rtc;std::uint64_t generation{},instance{};std::atomic<bool> active{true},video{false},audio{false};bool initiator=false,remoteSet=false;std::string state="connecting";std::string nonce;std::vector<Message> ice;};
+ struct Link{std::chrono::steady_clock::time_point deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);std::shared_ptr<webrtc::NativeWebRtcPeerConnection> rtc;std::uint64_t generation{},instance{};std::atomic<bool> active{true},video{false},audio{false};bool initiator=false,remoteSet=false,remotePending=false;std::string state="connecting";std::string nonce;std::vector<Message> ice;};
  struct Event{std::string peer;std::uint64_t generation;int kind;Message message;};
+ static std::uint64_t Nonce(const std::string& value){if(value.empty()||value.size()>20||value.find_first_not_of("0123456789")!=std::string::npos)return 0;try{return std::stoull(value);}catch(...){return 0;}}
+ // Caller holds linksMutex_. Generation fencing discards callbacks from the old transport.
+ bool Rebuild(const std::string& id,std::uint64_t instance,const std::string& nonce){
+  auto old=links_.find(id);if(old!=links_.end())Close(*old->second);mixer_.Remove(id);
+  auto link=std::make_shared<Link>();link->instance=instance;link->generation=++generation_;link->initiator=self_<id;
+  link->nonce=link->initiator?std::to_string(++nextNonce_):nonce;link->state=old==links_.end()?"connecting":"reconnecting";
+  const auto& member=session_.Members().at(id);link->video=member.video!="off";link->audio=member.microphone;
+  link->rtc=webrtc::NativeWebRtcPeerConnection::Create();links_[id]=link;
+  if(!link->rtc->Initialize(config_,Bind(id,link))){Fail(*link,"Media initialization failed for "+id);return false;}
+  if(link->initiator&&!link->rtc->CreateOffer()){Fail(*link,"Offer failed for "+id);return false;}
+  error_.clear();return true;
+ }
  void Queue(Event e){std::lock_guard lock(eventsMutex_);if(events_.size()<512)events_.push_back(std::move(e));else overflow_=true;}
  webrtc::WebRtcCallbacks Bind(const std::string& id,const std::shared_ptr<Link>& link){
   webrtc::WebRtcCallbacks cb;std::weak_ptr<Link> weak=link;const auto generation=link->generation;

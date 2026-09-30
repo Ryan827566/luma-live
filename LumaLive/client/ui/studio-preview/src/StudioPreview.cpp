@@ -2,6 +2,7 @@
 #include "PreviewMedia.hpp"
 #include "AudioOutput.hpp"
 #include "PreviewCall.hpp"
+#include "AiPanel.hpp"
 #include "DeviceCaptureFactory.hpp"
 #include "ScreenCaptureService.hpp"
 #include <commctrl.h>
@@ -23,7 +24,7 @@ namespace luma::client::ui::preview {
 namespace {
 using Microsoft::WRL::ComPtr;
 constexpr COLORREF Bg=RGB(8,10,13), Panel=RGB(16,19,24), Border=RGB(39,45,55), Ink=RGB(232,237,245), Muted=RGB(145,155,171), Mint=RGB(0,145,245);
-enum Id {Open=100,Camera,Microphone,Monitor,Volume,TestSound,Refresh,CameraList,MicList,Pause,Stop,FileMode,CameraMode,FullScreen,Join,Host,Room,RemoteMode,Identity,Peers,Dial,AcceptCall,RejectCall,EndCall,ShareScreen,Reconnect,Meeting};
+enum Id {Open=100,Camera,Microphone,Monitor,Volume,TestSound,Refresh,CameraList,MicList,Pause,Stop,FileMode,CameraMode,FullScreen,Join,Host,Room,RemoteMode,Identity,Peers,Dial,AcceptCall,RejectCall,EndCall,ShareScreen,Reconnect,Meeting,Ai};
 std::wstring Wide(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),nullptr,0);std::wstring out(n,L' ');MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),out.data(),n);return out;}
 void Fill(HDC dc,RECT r,COLORREF c){auto b=CreateSolidBrush(c);FillRect(dc,&r,b);DeleteObject(b);}
 void Text(HDC dc,const std::wstring& s,RECT r,HFONT font,COLORREF color=Ink,UINT flags=DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS){auto old=SelectObject(dc,font);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,color);DrawTextW(dc,s.c_str(),-1,&r,flags);SelectObject(dc,old);}
@@ -49,12 +50,12 @@ public:
 class StudioWindow {
     HWND window_{},surface_{},remoteSurface_{};HINSTANCE instance_{};
     HFONT body_{},small_{},title_{},brand_{};HBRUSH panelBrush_{CreateSolidBrush(Panel)};
-    std::array<HWND,32> controls_{};
+    std::array<HWND,33> controls_{};
     std::unique_ptr<media::IDeviceCaptureService> capture_;
     media::CaptureDeviceList cameras_,microphones_;
     media::ScreenCaptureService screen_;
     VideoMailbox video_;AudioOutput audio_;
-    VideoMailbox remoteVideo_;AudioOutput remoteAudio_;PreviewCall call_;
+    VideoMailbox remoteVideo_;AudioOutput remoteAudio_;PreviewCall call_;AiPanel ai_;std::atomic<bool> aiCallActive_{false};
     std::vector<std::string> shownPeers_;
     CallState shownCallState_{CallState::Offline};
     std::string reportedScreenError_;
@@ -107,7 +108,7 @@ class StudioWindow {
         else {
             auto index=SendMessageW(Control(MicList),CB_GETCURSEL,0,0);if(index<0||size_t(index)>=microphones_.devices.size())return;
             media::AudioCaptureConfig config;config.device_id=microphones_.devices[index].id;config.channels=1;audioCount_=0;audioFailed_=false;
-            auto result=capture_->StartMicrophone(config,[this](AudioFrame f){peak_=Peak(f);call_.Audio(f);++audioCount_;if(monitor_&&!audio_.Push(f))audioFailed_=true;});
+            auto result=capture_->StartMicrophone(config,[this](AudioFrame f){peak_=Peak(f);call_.Audio(f);if(aiCallActive_)ai_.session.Submit("local",f);++audioCount_;if(monitor_&&!audio_.Push(f))audioFailed_=true;});
             if(result.IsOk()){expectMicrophone_=true;SetWindowTextW(Control(Microphone),L"关闭麦克风");status_=L"麦克风已开启 · 戴上耳机后可开启监听";}else status_=L"麦克风无法开启："+Wide(result.Message());
         }
         EnableWindow(Control(MicList),!capture_->IsMicrophoneCapturing()&&!microphones_.devices.empty());EnableWindow(Control(Monitor),capture_->IsMicrophoneCapturing());InvalidateRect(window_,nullptr,FALSE);
@@ -144,7 +145,7 @@ class StudioWindow {
         MoveWindow(remoteSurface_,remotePreview_.left,remotePreview_.top,remotePreview_.right-remotePreview_.left,remotePreview_.bottom-remotePreview_.top,TRUE);
         lower_=130+deckHeight+66;
         const int sourceWidth=(total-16)/2,mx=x+sourceWidth+16,rx=width_-right_+16;
-        Place(Meeting,width_-right_-348,52,158,32);Place(Open,width_-right_-174,52,158,32);Place(CameraMode,x,130+deckHeight+10,94,32);Place(FileMode,x+102,130+deckHeight+10,94,32);
+        Place(Ai,width_-right_-448,52,88,32);Place(Meeting,width_-right_-348,52,158,32);Place(Open,width_-right_-174,52,158,32);Place(CameraMode,x,130+deckHeight+10,94,32);Place(FileMode,x+102,130+deckHeight+10,94,32);
         Place(Pause,x+206,130+deckHeight+10,74,32);Place(Stop,x+288,130+deckHeight+10,74,32);Place(FullScreen,end-112,130+deckHeight+10,112,32);
         Place(CameraList,x+12,lower_+66,sourceWidth-24,160);Place(Camera,x+12,lower_+104,sourceWidth-128,34);Place(Refresh,x+sourceWidth-108,lower_+104,96,34);
         Place(MicList,x+12,lower_+182,sourceWidth-24,160);Place(Microphone,x+12,lower_+220,sourceWidth-24,34);Place(ShareScreen,x+12,lower_+262,sourceWidth-24,28);
@@ -228,6 +229,7 @@ class StudioWindow {
     }
     void Command(int id){
         switch(id){
+        case Ai:ai_.Open(window_);break;
         case Meeting:{wchar_t executable[32768]{};GetModuleFileNameW(nullptr,executable,32768);std::wstring command=L"\""+std::wstring(executable)+L"\" --meeting";STARTUPINFOW startup{sizeof(startup)};PROCESS_INFORMATION process{};if(CreateProcessW(executable,command.data(),nullptr,nullptr,FALSE,0,nullptr,nullptr,&startup,&process)){CloseHandle(process.hThread);CloseHandle(process.hProcess);}else status_=L"Unable to open meeting preview";break;}
         case Open:OpenFile();break;
         case Camera:ToggleCamera();break;
@@ -248,7 +250,7 @@ class StudioWindow {
             if(endpoint.empty()||port<1||port>65535||!*room){status_=L"请填写有效服务器地址、端口和房间";break;}
             webrtc::WebRtcCallbacks cb;remoteVideos_=0;remoteAudios_=0;
             cb.on_remote_video=[this](VideoFrame f){remoteVideo_.Put(f);++remoteVideos_;};
-            cb.on_remote_audio=[this](AudioFrame f){remotePeak_=Peak(f);if(!remoteAudio_.Push(f))audioFailed_=true;++remoteAudios_;};
+            cb.on_remote_audio=[this](AudioFrame f){remotePeak_=Peak(f);if(aiCallActive_)ai_.session.Submit("remote",f);if(!remoteAudio_.Push(f))audioFailed_=true;++remoteAudios_;};
             wchar_t identity[128]{};GetWindowTextW(Control(Identity),identity,128);const auto peer=utf8(identity);if(peer.empty()){status_=L"请输入参与者编号";break;}
             if(call_.Start(endpoint,static_cast<uint16_t>(port),utf8(room),peer,std::move(cb))){SetWindowTextW(Control(Join),L"离开房间");EnableWindow(Control(Host),FALSE);EnableWindow(Control(Room),FALSE);EnableWindow(Control(Identity),FALSE);status_=L"正在加入房间，成功后选择对象发起通话";}else status_=L"无法加入房间 · 请先启动信令服务器，并检查地址及端口";
             break;
@@ -264,7 +266,7 @@ class StudioWindow {
         }
         InvalidateRect(window_,nullptr,FALSE);InvalidateRect(surface_,nullptr,FALSE);for(int i:{CameraMode,FileMode,RemoteMode})InvalidateRect(Control(i),nullptr,TRUE);
     }
-    void Shutdown(){if(closing_)return;closing_=true;KillTimer(window_,1);monitor_=false;screen_.Stop();if(capture_){capture_->StopCamera();capture_->StopMicrophone();capture_->Stop();}call_.Stop();remoteAudio_.Close();CloseFile();audio_.Close();}
+    void Shutdown(){if(closing_)return;closing_=true;aiCallActive_=false;ai_.Close();KillTimer(window_,1);monitor_=false;screen_.Stop();if(capture_){capture_->StopCamera();capture_->StopMicrophone();capture_->Stop();}call_.Stop();remoteAudio_.Close();CloseFile();audio_.Close();}
     LRESULT Handle(UINT message,WPARAM wp,LPARAM lp){
         switch(message){
         case WM_SIZE:Layout();return 0;
@@ -282,7 +284,7 @@ class StudioWindow {
             remotePeak_.store(remotePeak_.load()*0.9f);
             if(call_.Active()){auto state=call_.Poll();if(!state.empty())status_=L"连线状态："+Wide(state);}
             if(shownPeers_!=call_.Participants()){std::wstring selected;wchar_t name[256]{};GetWindowTextW(Control(Peers),name,256);selected=name;shownPeers_=call_.Participants();SendMessageW(Control(Peers),CB_RESETCONTENT,0,0);int selectedIndex=0;for(size_t i=0;i<shownPeers_.size();++i){auto name=Wide(shownPeers_[i]);SendMessageW(Control(Peers),CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name.c_str()));if(name==selected)selectedIndex=static_cast<int>(i);}SendMessageW(Control(Peers),CB_SETCURSEL,selectedIndex,0);}
-            const auto cs=call_.State();if(cs!=shownCallState_){if(cs==CallState::Ready||cs==CallState::Offline){remoteVideo_.Clear();remoteAudio_.Close();remotePeak_=0;remoteVideos_=0;remoteAudios_=0;}shownCallState_=cs;InvalidateRect(window_,nullptr,FALSE);}
+            const auto cs=call_.State();aiCallActive_=cs==CallState::Connected;if(cs!=shownCallState_){if((cs==CallState::Outgoing||cs==CallState::Incoming))ai_.session.Reset();if(cs==CallState::Ready||cs==CallState::Offline)ai_.session.Enable(false);if(cs==CallState::Ready||cs==CallState::Offline){remoteVideo_.Clear();remoteAudio_.Close();remotePeak_=0;remoteVideos_=0;remoteAudios_=0;}shownCallState_=cs;InvalidateRect(window_,nullptr,FALSE);}
             EnableWindow(Control(Dial),cs==CallState::Ready&&!shownPeers_.empty());EnableWindow(Control(Peers),cs==CallState::Ready);EnableWindow(Control(AcceptCall),cs==CallState::Incoming);EnableWindow(Control(RejectCall),cs==CallState::Incoming);EnableWindow(Control(EndCall),cs==CallState::Outgoing||cs==CallState::Connecting||cs==CallState::Connected);SetWindowTextW(Control(EndCall),cs==CallState::Outgoing?L"取消呼叫":L"结束通话");
             EnableWindow(Control(Reconnect),cs==CallState::Connected||(cs==CallState::Connecting&&call_.DurationSeconds()>0));
             if(call_.RemoteVideoSource()=="off")remoteVideo_.Clear();
@@ -309,7 +311,7 @@ public:
         dpi_=GetDpiForWindow(window_);Fonts();BOOL dark=TRUE;DwmSetWindowAttribute(window_,20,&dark,sizeof(dark));
         surface_=CreateWindowExW(0,L"LumaVideoSurface",L"视频预览",WS_CHILD|WS_VISIBLE,0,0,1,1,window_,nullptr,instance,this);
         remoteSurface_=CreateWindowExW(0,L"LumaVideoSurface",L"远端视频",WS_CHILD|WS_VISIBLE,0,0,1,1,window_,nullptr,instance,this);
-        Button(Meeting,L"视频会议（预览）");Button(Open,L"打开媒体文件");Button(CameraMode,L"摄像头");Button(FileMode,L"媒体文件");Button(Camera,L"开启摄像头");Button(Refresh,L"刷新设备");Button(Microphone,L"开启麦克风");Button(Monitor,L"监听：关闭");Button(TestSound,L"测试扬声器");Button(Pause,L"暂停");Button(Stop,L"停止播放");Button(FullScreen,L"全屏预览");
+        Button(Ai,L"AI 字幕");Button(Meeting,L"视频会议（预览）");Button(Open,L"打开媒体文件");Button(CameraMode,L"摄像头");Button(FileMode,L"媒体文件");Button(Camera,L"开启摄像头");Button(Refresh,L"刷新设备");Button(Microphone,L"开启麦克风");Button(Monitor,L"监听：关闭");Button(TestSound,L"测试扬声器");Button(Pause,L"暂停");Button(Stop,L"停止播放");Button(FullScreen,L"全屏预览");
         Button(RemoteMode,L"实时连线");Button(Join,L"加入房间");Make(Host,L"EDIT",L"127.0.0.1:9000",WS_BORDER|ES_AUTOHSCROLL);Make(Room,L"EDIT",L"luma-demo",WS_BORDER|ES_AUTOHSCROLL);
         Make(Identity,L"EDIT",(L"studio-"+std::to_wstring(GetCurrentProcessId())).c_str(),WS_BORDER|ES_AUTOHSCROLL);Make(Peers,L"COMBOBOX",L"通话对象",CBS_DROPDOWNLIST|WS_VSCROLL);Button(ShareScreen,L"共享主屏幕");Button(Dial,L"发起视频通话");Button(AcceptCall,L"接听");Button(RejectCall,L"拒绝");Button(EndCall,L"结束通话");Button(Reconnect,L"重新连接");for(int id:{Dial,AcceptCall,RejectCall,EndCall,Reconnect})EnableWindow(Control(id),FALSE);
         Make(CameraList,L"COMBOBOX",L"摄像头",CBS_DROPDOWNLIST|WS_VSCROLL);Make(MicList,L"COMBOBOX",L"麦克风",CBS_DROPDOWNLIST|WS_VSCROLL);Make(Volume,TRACKBAR_CLASSW,L"输出音量",TBS_HORZ|TBS_NOTICKS);SendMessageW(Control(Volume),TBM_SETRANGE,TRUE,MAKELPARAM(0,100));SendMessageW(Control(Volume),TBM_SETPOS,TRUE,volume_);EnableWindow(Control(Monitor),FALSE);
