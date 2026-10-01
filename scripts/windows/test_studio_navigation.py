@@ -46,6 +46,13 @@ try:
     u.SendMessageW(root, 0x111, 127, 0)
     child = u.FindWindowExW(root, None, "LumaSessionAi", None)
     assert child and u.GetAncestor(child, 2) == root, "AI opened outside the studio"
+    u.GetWindowTextW.argtypes = [w.HWND, w.LPWSTR, c.c_int]
+    label = c.create_unicode_buffer(128)
+    u.GetWindowTextW(u.GetDlgItem(child, 2), label, 128)
+    language = c.WinDLL("kernel32").GetUserDefaultUILanguage() & 0x3ff
+    expected = "\u542f\u7528\u5b57\u5e55" if language == 4 else "Start captions"
+    assert label.value == expected, "Caption action does not follow Windows display language"
+
     assert u.GetWindowLongW(child, -16) & 0x10000000
     u.SendMessageW(root, 0x111, 117, 0)
     assert not (u.GetWindowLongW(child, -16) & 0x10000000), "AI page not hidden"
