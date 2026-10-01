@@ -46,5 +46,19 @@ int main(){try{
  capped.Submit("alex",audio);bool blocked=Wait([&]{return cappedEntered.load();});bool queued=capped.Keywords();cappedRelease=true;
  Check(blocked&&queued,"keyword not queued behind transcription");Check(Wait([&]{return !capped.Enabled();}),"transcript cap not reached");
  Check(capped.Keywords()&&Wait([&]{return capped.Text().find("remaining keywords")!=std::string::npos;}),"dropped keyword job left actions permanently busy");
+
+ std::atomic<bool> autoEntered{false},autoRelease{false};
+ SessionAi automatic([&](const std::wstring& route,const std::string& body,const std::wstring&){
+  if(route==L"/transcribe")return SessionAi::Reply{true,"source words"};
+  Check(body=="[alex] source words","automatic translation lost speaker");
+  if(route==L"/translate?ja"){autoEntered=true;while(!autoRelease)std::this_thread::sleep_for(1ms);return SessionAi::Reply{true,"STALE AUTO"};}
+  Check(route==L"/translate?es","automatic target incorrect");return SessionAi::Reply{true,"CURRENT AUTO"};
+ });
+ Check(!automatic.AutoTranslate("ja"),"automatic translation enabled without captions");
+ automatic.Enable(true);Check(automatic.AutoTranslate("ja"),"automatic translation rejected");automatic.Submit("alex",audio);
+ bool autoStarted=Wait([&]{return autoEntered.load();});automatic.AutoTranslate("");autoRelease=true;Check(autoStarted,"automatic translation not scheduled");
+ std::this_thread::sleep_for(30ms);Check(automatic.Text().find("STALE AUTO")==std::string::npos,"disabled translation leaked late result");
+ automatic.AutoTranslate("es");automatic.Submit("alex",audio);Check(Wait([&]{return automatic.Text().find("CURRENT AUTO")!=std::string::npos;}),"automatic translation missing");
+ automatic.Enable(false);Check(!automatic.AutoTranslating(),"stopping captions left automatic translation active");automatic.Reset();Check(automatic.Text().find("CURRENT AUTO")==std::string::npos,"automatic result leaked across sessions");
  std::cout<<"PASS: default-off, WAV chunks, attributed transcript, summary, keywords, empty states, stop, session fencing and errors\n";return 0;
  }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
