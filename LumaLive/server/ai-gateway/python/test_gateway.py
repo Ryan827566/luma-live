@@ -84,6 +84,34 @@ class Tests(unittest.TestCase):
         self.assertEqual(data['messages'][1], {'role': 'user', 'content': '小李明天提交报告'})
         self.assertFalse(data['stream'])
 
+    def test_keywords_route_preserves_provider_text_and_transcript(self):
+        transcript = 'Alice: release planning. Bob: camera quality.'
+        keywords = 'release planning\ncamera quality'
+        self.upstream.payload = json.dumps({'choices': [{'message': {'content': keywords}}]}).encode()
+        self.assertEqual(self.request('/keywords', transcript.encode()), (200, keywords))
+        path, headers, body = self.upstream.received[0]
+        data = json.loads(body)
+        self.assertEqual(path, '/v1/chat/completions')
+        self.assertEqual(data['model'], 'chat-model')
+        self.assertFalse(data['stream'])
+        self.assertEqual(data['messages'][1], {'role': 'user', 'content': transcript})
+        self.assertIn('Extract keywords', data['messages'][0]['content'])
+        self.assertIn('Do not invent', data['messages'][0]['content'])
+
+    def test_keywords_validation_and_upstream_failure(self):
+        for body in (b'', b' ', b'\xff'):
+            self.assertEqual(self.request('/keywords', body)[0], 400)
+        self.assertEqual(self.request('/keywords', b'x', {'Content-Type': 'application/json'})[0], 415)
+        self.assertEqual(self.request('/keywords', b'x', {'Content-Type': 'text/plain',
+                         'Content-Length': str(gateway.TEXT_LIMIT + 1)})[0], 413)
+        self.assertEqual(self.upstream.received, [])
+        for content in (None, '', '   ', [], 12):
+            self.upstream.payload = json.dumps({'choices': [{'message': {'content': content}}]}).encode()
+            self.assertEqual(self.request('/keywords'), (502, 'Provider returned invalid keywords'))
+        self.upstream.status = 401
+        self.upstream.payload = b'test-secret private transcript'
+        self.assertEqual(self.request('/keywords'), (502, 'Provider rejected request'))
+
     def test_configuration_health_redacts_secrets(self):
         status, text = self.request('/health', method='GET')
         self.assertEqual(status, 200)

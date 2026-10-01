@@ -1,8 +1,10 @@
 #pragma once
 #include "MediaTypes.hpp"
+#include "AiMessages.hpp"
 #include <windows.h>
 #include <winhttp.h>
 #include <condition_variable>
+#include <algorithm>
 #include <deque>
 #include <functional>
 #include <map>
@@ -18,23 +20,28 @@ public:
  using Transport=std::function<Reply(const std::wstring&,const std::string&,const std::wstring&)>;
  explicit SessionAi(Transport transport=Http):transport_(std::move(transport)),worker_([this]{Run();}){}
  ~SessionAi(){{std::lock_guard lock(mutex_);quit_=true;enabled_=false;jobs_.clear();}wake_.notify_one();worker_.join();}
- void Enable(bool on){std::lock_guard lock(mutex_);enabled_=on;++generation_;buffers_.clear();jobs_.clear();speech_.clear();summaryPending_=false;status_=on?"Transcription enabled; audio is sent to the configured service.":"Transcription stopped.";}
- void Reset(){Enable(false);std::lock_guard lock(mutex_);transcript_.clear();summary_.clear();translation_.clear();}
+ void Enable(bool on){std::lock_guard lock(mutex_);enabled_=on;++generation_;buffers_.clear();jobs_.clear();speech_.clear();summaryPending_=false;error_.clear();status_=on?AiMessage::Enabled:AiMessage::Stopped;}
+ void Reset(){Enable(false);std::lock_guard lock(mutex_);transcript_.clear();summary_.clear();translation_.clear();keywords_.clear();}
  bool Enabled(){std::lock_guard lock(mutex_);return enabled_;}
  void Submit(const std::string& speaker,const media::pipeline::AudioFrame& frame){
   std::lock_guard lock(mutex_);if(!enabled_)return;
-  if(frame.sample_rate!=48000||frame.channels!=1||frame.format!=media::pipeline::AudioSampleFormat::S16||frame.data.size()%2){status_="AI requires 48 kHz mono S16 audio.";return;}
+  if(frame.sample_rate!=48000||frame.channels!=1||frame.format!=media::pipeline::AudioSampleFormat::S16||frame.data.size()%2){status_=AiMessage::AudioFormat;return;}
   if(frame.data.size()>480000||(!buffers_.count(speaker)&&buffers_.size()>=6))return;
   auto& pcm=buffers_[speaker];pcm.append(reinterpret_cast<const char*>(frame.data.data()),frame.data.size());
-  if(pcm.size()>=480000){if(jobs_.size()<8){jobs_.push_back({generation_,false,speaker,Wave(pcm.substr(0,480000))});wake_.notify_one();}else status_="AI is busy; an audio segment was dropped.";pcm.erase(0,480000);}
+  if(pcm.size()>=480000){if(jobs_.size()<8){jobs_.push_back({generation_,false,speaker,Wave(pcm.substr(0,480000))});wake_.notify_one();}else status_=AiMessage::Dropped;pcm.erase(0,480000);}
  }
- bool Translate(const std::string& language){std::lock_guard lock(mutex_);if(language!="zh"&&language!="en"&&language!="ja"&&language!="ko"&&language!="es")return false;if(transcript_.empty()||summaryPending_||jobs_.size()>=8)return false;summaryPending_=true;Job job{generation_,true,"",transcript_};job.language=language;jobs_.push_back(std::move(job));status_="Translating...";wake_.notify_one();return true;}
- bool Speak(){std::lock_guard lock(mutex_);if(summary_.empty()||summaryPending_||jobs_.size()>=8||summary_.size()>12000)return false;Job job{generation_,true,"",summary_};job.speech=true;summaryPending_=true;jobs_.push_back(std::move(job));status_="Generating AI voice...";wake_.notify_one();return true;}
+ bool Translate(const std::string& language){std::lock_guard lock(mutex_);if(language!="zh"&&language!="en"&&language!="ja"&&language!="ko"&&language!="es")return false;if(!ReadyForText())return false;summaryPending_=true;Job job{generation_,true,"",transcript_};job.language=language;jobs_.push_back(std::move(job));status_=AiMessage::Translating;wake_.notify_one();return true;}
+ bool Speak(){std::lock_guard lock(mutex_);if(summary_.empty()){status_=AiMessage::NoSummary;return false;}if(summaryPending_||jobs_.size()>=8){status_=AiMessage::Busy;return false;}if(std::count_if(summary_.begin(),summary_.end(),[](unsigned char c){return (c&0xc0)!=0x80;})>4000){status_=AiMessage::SpeechLimit;return false;}Job job{generation_,true,"",summary_};job.speech=true;summaryPending_=true;jobs_.push_back(std::move(job));status_=AiMessage::VoicePending;wake_.notify_one();return true;}
+ bool Keywords(){std::lock_guard lock(mutex_);if(!ReadyForText())return false;Job job{generation_,true,"",transcript_};job.keywords=true;summaryPending_=true;jobs_.push_back(std::move(job));status_=AiMessage::KeywordsPending;wake_.notify_one();return true;}
+ std::string LastError(){std::lock_guard lock(mutex_);return error_;}
+ AiMessage Status(){std::lock_guard lock(mutex_);return status_;}
  std::string TakeSpeech(){std::lock_guard lock(mutex_);return std::exchange(speech_,{});}
- bool Summarize(){std::lock_guard lock(mutex_);if(transcript_.empty()||summaryPending_||jobs_.size()>=8)return false;summaryPending_=true;jobs_.push_back({generation_,true,"",transcript_});status_="Generating summary...";wake_.notify_one();return true;}
- std::string Text(){std::lock_guard lock(mutex_);return status_+"\r\n\r\n"+transcript_+(summary_.empty()?"":"\r\n--- AI summary ---\r\n"+summary_)+(translation_.empty()?"":"\r\n--- Translation ---\r\n"+translation_);}
+ bool Summarize(){std::lock_guard lock(mutex_);if(!ReadyForText())return false;summaryPending_=true;jobs_.push_back({generation_,true,"",transcript_});status_=AiMessage::SummaryPending;wake_.notify_one();return true;}
+ std::string Text(){std::lock_guard lock(mutex_);return AiMessageText(status_)+"\r\n\r\n"+transcript_+(summary_.empty()?"":"\r\n"+UiUtf8(UiLabel(L"\u6458\u8981\u4e0e\u5f85\u529e",L"Summary and actions"))+"\r\n"+summary_)+(translation_.empty()?"":"\r\n"+UiUtf8(UiLabel(L"\u7ffb\u8bd1",L"Translation"))+"\r\n"+translation_)+(keywords_.empty()?"":"\r\n"+UiUtf8(UiLabel(L"\u5173\u952e\u8bcd",L"Keywords"))+"\r\n"+keywords_);}
+
 private:
- struct Job {std::uint64_t generation;bool summary;std::string speaker,body;std::string language;bool speech=false;};
+ bool ReadyForText(){if(transcript_.empty()){status_=AiMessage::NoTranscript;return false;}if(summaryPending_||jobs_.size()>=8){status_=AiMessage::Busy;return false;}return true;}
+ struct Job {std::uint64_t generation;bool summary;std::string speaker,body;std::string language;bool speech=false;bool keywords=false;};
  struct Handle{HINTERNET h{};~Handle(){if(h)WinHttpCloseHandle(h);}operator HINTERNET()const{return h;}};
  static Reply Http(const std::wstring& path,const std::string& body,const std::wstring& contentType){
   Handle session{WinHttpOpen(L"LumaLive/1",WINHTTP_ACCESS_TYPE_NO_PROXY,nullptr,nullptr,0)};
@@ -60,17 +67,19 @@ private:
   wav="RIFF";word(unsigned(pcm.size()+36),4);wav+="WAVEfmt ";word(16,4);word(1,2);word(1,2);word(48000,4);word(96000,4);word(2,2);word(16,2);wav+="data";word(unsigned(pcm.size()),4);wav+=pcm;return wav;
  }
  void Run(){for(;;){Job job;{std::unique_lock lock(mutex_);wake_.wait(lock,[&]{return quit_||!jobs_.empty();});if(quit_)return;job=std::move(jobs_.front());jobs_.pop_front();}
-   Reply result;try{result=transport_((job.speech?L"/speech":!job.language.empty()?L"/translate?"+std::wstring(job.language.begin(),job.language.end()):job.summary?L"/summary":L"/transcribe"),job.body,job.summary?L"text/plain; charset=utf-8":L"audio/wav");}catch(...){result={false,"AI request failed."};}
+   Reply result;try{result=transport_((job.speech?L"/speech":job.keywords?L"/keywords":!job.language.empty()?L"/translate?"+std::wstring(job.language.begin(),job.language.end()):job.summary?L"/summary":L"/transcribe"),job.body,job.summary?L"text/plain; charset=utf-8":L"audio/wav");}catch(...){result={false,"AI request failed."};}
    std::lock_guard lock(mutex_);if(quit_||job.generation!=generation_)continue;
    if(job.summary)summaryPending_=false;
-   if(!result.ok){status_=result.text;continue;}
-   if(job.speech){speech_=std::move(result.text);status_="AI-generated voice ready.";}
-   else if(!job.language.empty()){translation_=result.text;status_="Translation ready. Verify AI output.";}
-   else if(job.summary){summary_=result.text;status_="Summary ready. Verify AI output against the transcript.";}
-   else if(transcript_.size()+job.speaker.size()+result.text.size()+6<=64000){transcript_+="["+job.speaker+"] "+result.text+"\r\n";status_="Transcribing (five-second segments)...";}
-   else{enabled_=false;buffers_.clear();jobs_.clear();status_="Transcript limit reached. Copy your transcript before starting a new session.";}
+   if(!result.ok){error_=result.text;status_=AiMessage::RequestFailed;continue;}
+   error_.clear();
+   if(job.speech){speech_=std::move(result.text);status_=AiMessage::VoiceReady;}
+   else if(job.keywords){keywords_=result.text;status_=AiMessage::KeywordsReady;}
+   else if(!job.language.empty()){translation_=result.text;status_=AiMessage::TranslationReady;}
+   else if(job.summary){summary_=result.text;status_=AiMessage::SummaryReady;}
+   else if(transcript_.size()+job.speaker.size()+result.text.size()+6<=64000){transcript_+="["+job.speaker+"] "+result.text+"\r\n";status_=AiMessage::Transcribing;}
+   else{enabled_=false;buffers_.clear();jobs_.clear();summaryPending_=false;status_=AiMessage::Limit;}
   }}
  Transport transport_;std::mutex mutex_;std::condition_variable wake_;std::deque<Job> jobs_;std::map<std::string,std::string> buffers_;
- bool quit_=false,enabled_=false,summaryPending_=false;std::uint64_t generation_=0;std::string transcript_,summary_,translation_,speech_,status_="AI is off. Configure and start the local AI gateway before enabling.";std::thread worker_;
+ bool quit_=false,enabled_=false,summaryPending_=false;std::uint64_t generation_=0;std::string transcript_,summary_,translation_,speech_,keywords_,error_;AiMessage status_=AiMessage::Off;std::thread worker_;
 };
 }

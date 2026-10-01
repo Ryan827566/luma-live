@@ -12,5 +12,6 @@ int main(){SessionAi ai;ai.Enable(true);luma::client::media::pipeline::AudioFram
  std::string speech;auto end=std::chrono::steady_clock::now()+std::chrono::seconds(10);
  while(speech.empty()&&std::chrono::steady_clock::now()<end){speech=ai.TakeSpeech();std::this_thread::sleep_for(std::chrono::milliseconds(20));}
  if(speech.size()!=4844||speech.substr(0,4)!="RIFF")return 6;
- ai.Enable(false);std::cout<<"PASS: native WinHTTP -> local gateway -> mock model: ASR, summary, translation, TTS WAV\n";return 0;
+ if(!ai.Keywords()||!Wait(ai,"HTTP keywords"))return 7;
+ ai.Enable(false);std::cout<<"PASS: native WinHTTP -> local gateway -> mock model: ASR, summary, translation, TTS WAV, keywords\n";return 0;
 }

@@ -33,10 +33,16 @@ class Provider(BaseHTTPRequestHandler):
         else:
             data = json.loads(body)
             assert '[speaker] HTTP transcript' in data['messages'][1]['content']
-            translation = data['messages'][0]['content'].startswith('Translate')
-            if translation:
-                assert 'ja' in data['messages'][0]['content']
-            response = {'choices': [{'message': {'content': 'HTTP translation' if translation else 'HTTP summary'}}]}
+            prompt = data['messages'][0]['content']
+            if prompt.startswith('Translate'):
+                assert 'ja' in prompt
+                content = 'HTTP translation'
+            elif prompt.startswith('Extract keywords'):
+                content = 'HTTP keywords'
+            else:
+                assert prompt.startswith('Summarize')
+                content = 'HTTP summary'
+            response = {'choices': [{'message': {'content': content}}]}
         payload = json.dumps(response).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
@@ -60,8 +66,8 @@ def main(executable):
         result = subprocess.run([executable], env=env, timeout=40)
         if result.returncode:
             return result.returncode
-        assert len(upstream.requests) == 4, 'Unexpected provider calls'
-        print('PASS: four real HTTP provider requests; no external service used')
+        assert len(upstream.requests) == 5, 'Unexpected provider calls'
+        print('PASS: five real HTTP provider requests; no external service used')
         return 0
     finally:
         for server in (local, upstream):

@@ -12,20 +12,39 @@ int main(){try{
  SessionAi ai([&](const std::wstring& path,const std::string& body,const std::wstring& type){
   ++calls;
   if(path==L"/transcribe"){Check(type==L"audio/wav"&&body.size()==480044&&body.substr(0,4)=="RIFF"&&body.substr(8,4)=="WAVE","invalid WAV request");return SessionAi::Reply{true,"Project update"};}
+  if(path==L"/keywords"){Check(body.find("[alex] Project update")!=std::string::npos,"keywords missing transcript");return SessionAi::Reply{true,"Project, release"};}
   Check(path==L"/summary"&&body.find("[alex] Project update")!=std::string::npos,"summary missing attributed transcript");return SessionAi::Reply{true,"Action: review the release"};
  });
  luma::client::media::pipeline::AudioFrame audio;audio.sample_rate=48000;audio.channels=1;audio.format=luma::client::media::pipeline::AudioSampleFormat::S16;audio.data.resize(480000,0);
  ai.Submit("alex",audio);std::this_thread::sleep_for(20ms);Check(calls==0,"default-off uploaded audio");
+ Check(!ai.Keywords()&&ai.Status()==AiMessage::NoTranscript,"empty keywords lacks guidance");
+ Check(!ai.Speak()&&ai.Status()==AiMessage::NoSummary,"missing summary lacks guidance");
  Check(!ai.Summarize(),"empty summary accepted");ai.Enable(true);ai.Submit("alex",audio);
  Check(Wait([&]{return ai.Text().find("[alex] Project update")!=std::string::npos;}),"transcript missing");
  Check(ai.Summarize(),"summary rejected");Check(Wait([&]{return ai.Text().find("Action: review")!=std::string::npos;}),"summary missing");
+ Check(ai.Keywords(),"keywords rejected");Check(Wait([&]{return ai.Text().find("Project, release")!=std::string::npos;}),"keywords missing");
  ai.Enable(false);int before=calls;ai.Submit("alex",audio);std::this_thread::sleep_for(20ms);Check(calls==before,"stop uploaded audio");
- ai.Reset();Check(ai.Text().find("Project update")==std::string::npos,"new call retained transcript");
+ ai.Reset();Check(ai.Text().find("Project update")==std::string::npos&&ai.Text().find("Project, release")==std::string::npos,"new call retained transcript");
  std::atomic<bool> entered{false},release{false};
  SessionAi stale([&](const std::wstring&,const std::string&,const std::wstring&){entered=true;while(!release)std::this_thread::sleep_for(1ms);return SessionAi::Reply{true,"OLD SESSION"};});
  stale.Enable(true);stale.Submit("old",audio);bool started=Wait([&]{return entered.load();});stale.Reset();release=true;Check(started,"worker did not start");
  std::this_thread::sleep_for(30ms);Check(stale.Text().find("OLD SESSION")==std::string::npos,"late result contaminated new session");
  SessionAi failing([](const std::wstring&,const std::string&,const std::wstring&){return SessionAi::Reply{false,"provider not configured"};});
- failing.Enable(true);failing.Submit("alex",audio);Check(Wait([&]{return failing.Text().find("provider not configured")!=std::string::npos;}),"provider error hidden");
- std::cout<<"PASS: default-off, WAV chunks, attributed transcript, summary, stop, session fencing and errors\n";return 0;
+ failing.Enable(true);failing.Submit("alex",audio);Check(Wait([&]{return failing.LastError().find("provider not configured")!=std::string::npos;}),"provider error hidden");Check(failing.Status()==AiMessage::RequestFailed,"missing error state");Check(failing.Text().find("provider not configured")==std::string::npos,"provider diagnostics leaked into localized UI");
+
+ SessionAi longSummary([](const std::wstring& route,const std::string&,const std::wstring&){return SessionAi::Reply{true,route==L"/summary"?std::string(4001,'s'):"speech"};});
+ longSummary.Enable(true);longSummary.Submit("alex",audio);Check(Wait([&]{return longSummary.Status()==AiMessage::Transcribing;}),"long summary input missing");
+ Check(longSummary.Summarize()&&Wait([&]{return longSummary.Status()==AiMessage::SummaryReady;}),"long summary missing");
+ Check(!longSummary.Speak()&&longSummary.Status()==AiMessage::SpeechLimit&&longSummary.Enabled(),"speech limit confused with transcript limit");
+ std::atomic<int> chunks{0};std::atomic<bool> cappedEntered{false},cappedRelease{false};
+ SessionAi capped([&](const std::wstring& route,const std::string&,const std::wstring&){
+  if(route==L"/keywords")return SessionAi::Reply{true,"remaining keywords"};
+  if(++chunks==1)return SessionAi::Reply{true,std::string(63000,'x')};
+  cappedEntered=true;while(!cappedRelease)std::this_thread::sleep_for(1ms);return SessionAi::Reply{true,std::string(2000,'y')};
+ });
+ capped.Enable(true);capped.Submit("alex",audio);Check(Wait([&]{return capped.Text().size()>63000;}),"cap test initial transcript missing");
+ capped.Submit("alex",audio);bool blocked=Wait([&]{return cappedEntered.load();});bool queued=capped.Keywords();cappedRelease=true;
+ Check(blocked&&queued,"keyword not queued behind transcription");Check(Wait([&]{return !capped.Enabled();}),"transcript cap not reached");
+ Check(capped.Keywords()&&Wait([&]{return capped.Text().find("remaining keywords")!=std::string::npos;}),"dropped keyword job left actions permanently busy");
+ std::cout<<"PASS: default-off, WAV chunks, attributed transcript, summary, keywords, empty states, stop, session fencing and errors\n";return 0;
  }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

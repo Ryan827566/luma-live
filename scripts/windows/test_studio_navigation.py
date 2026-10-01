@@ -52,6 +52,12 @@ try:
     language = c.WinDLL("kernel32").GetUserDefaultUILanguage() & 0x3ff
     expected = "\u542f\u7528\u5b57\u5e55" if language == 4 else "Start captions"
     assert label.value == expected, "Caption action does not follow Windows display language"
+    assert u.GetDlgItem(child, 9), "Keyword extraction action missing"
+    u.SendMessageW(child, 0x111, 9, 0)
+    u.SendMessageW(u.GetDlgItem(child, 4), 0xD, 128, c.cast(label, c.c_void_p).value)
+    guidance = "\u8bf7\u5148\u542f\u7528\u5b57\u5e55" if language == 4 else "Start captions and collect"
+    assert label.value.startswith(guidance), "Empty keyword guidance mismatch: " + ascii(label.value) + " expected " + ascii(guidance)
+
 
     assert u.GetWindowLongW(child, -16) & 0x10000000
     u.SendMessageW(root, 0x111, 117, 0)

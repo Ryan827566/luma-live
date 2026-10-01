@@ -21,6 +21,7 @@ public:
   translate_=add(L"BUTTON",UiLabel(L"\u7ffb\u8bd1\u8bb0\u5f55",L"Translate transcript"),WS_TABSTOP,6);
   speak_=add(L"BUTTON",UiLabel(L"AI \u6717\u8bfb\u6458\u8981",L"Read AI summary"),WS_TABSTOP,7);
   stopSpeech_=add(L"BUTTON",UiLabel(L"\u505c\u6b62\u6717\u8bfb",L"Stop reading"),WS_TABSTOP,8);
+  keywords_=add(L"BUTTON",UiLabel(L"\u63d0\u53d6\u5173\u952e\u8bcd",L"Extract keywords"),WS_TABSTOP,9);
   text_=add(L"EDIT",L"",WS_TABSTOP|WS_BORDER|WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY,4);
   SendMessageW(text_,EM_SETLIMITTEXT,200000,0);Layout();SetTimer(window_,1,300,nullptr);Refresh();ShowWindow(window_,SW_SHOW);
  }
@@ -29,9 +30,9 @@ public:
  void Close(){session.Enable(false);if(!speech_.empty()){PlaySoundW(nullptr,nullptr,0);speech_.clear();}if(window_)DestroyWindow(window_);}
 private:
  bool embedded_{false};
- HWND window_{},note_{},toggle_{},summary_{},text_{},language_{},translate_{},speak_{},stopSpeech_{};HFONT font_{};std::string shown_,speech_;
+ HWND window_{},note_{},toggle_{},summary_{},text_{},language_{},translate_{},speak_{},stopSpeech_{},keywords_{};HFONT font_{};std::string shown_,speech_;
  static std::wstring Wide(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),nullptr,0);std::wstring out(n,L' ');MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),out.data(),n);return out;}
- void Layout(){if(!text_)return;RECT r;GetClientRect(window_,&r);MoveWindow(note_,20,16,r.right-40,68,TRUE);MoveWindow(toggle_,20,90,140,34,TRUE);MoveWindow(summary_,172,90,180,34,TRUE);MoveWindow(language_,20,134,140,180,TRUE);MoveWindow(translate_,172,134,180,34,TRUE);MoveWindow(speak_,366,90,150,34,TRUE);MoveWindow(stopSpeech_,366,134,150,34,TRUE);MoveWindow(text_,20,182,r.right-40,r.bottom-202,TRUE);}
+ void Layout(){if(!text_)return;RECT r;GetClientRect(window_,&r);MoveWindow(note_,20,16,r.right-40,68,TRUE);MoveWindow(toggle_,20,90,140,34,TRUE);MoveWindow(summary_,172,90,180,34,TRUE);MoveWindow(language_,20,134,140,180,TRUE);MoveWindow(translate_,172,134,180,34,TRUE);MoveWindow(speak_,366,90,150,34,TRUE);MoveWindow(stopSpeech_,366,134,150,34,TRUE);MoveWindow(keywords_,20,178,180,34,TRUE);MoveWindow(text_,20,226,r.right-40,r.bottom-246,TRUE);}
  void Refresh(){auto voice=session.TakeSpeech();if(!voice.empty()){PlaySoundW(nullptr,nullptr,0);speech_=std::move(voice);PlaySoundW(reinterpret_cast<LPCWSTR>(speech_.data()),nullptr,SND_MEMORY|SND_ASYNC|SND_NODEFAULT);}SetWindowTextW(toggle_,session.Enabled()?UiLabel(L"\u505c\u6b62\u5b57\u5e55",L"Stop captions"):UiLabel(L"\u542f\u7528\u5b57\u5e55",L"Start captions"));auto value=session.Text();if(value!=shown_){shown_=value;SetWindowTextW(text_,Wide(value).c_str());SendMessageW(text_,EM_SETSEL,WPARAM(-1),LPARAM(-1));SendMessageW(text_,EM_SCROLLCARET,0,0);}}
  static LRESULT CALLBACK Proc(HWND h,UINT message,WPARAM w,LPARAM l){
   auto self=reinterpret_cast<AiPanel*>(GetWindowLongPtrW(h,GWLP_USERDATA));
@@ -41,7 +42,7 @@ private:
    case WM_SIZE:self->Layout();return 0;
    case WM_GETMINMAXINFO:reinterpret_cast<MINMAXINFO*>(l)->ptMinTrackSize={560,420};return 0;
    case WM_TIMER:self->Refresh();return 0;
-   case WM_COMMAND:if(LOWORD(w)==7){self->session.Speak();}else if(LOWORD(w)==8){PlaySoundW(nullptr,nullptr,0);self->speech_.clear();}else if(LOWORD(w)==6){const char* langs[]={"en","zh","ja","ko","es"};auto index=SendMessageW(self->language_,CB_GETCURSEL,0,0);if(index>=0&&index<5)self->session.Translate(langs[index]);self->Refresh();}else if(LOWORD(w)==2){self->session.Enable(!self->session.Enabled());self->Refresh();}else if(LOWORD(w)==3){self->session.Summarize();self->Refresh();}return 0;
+   case WM_COMMAND:if(LOWORD(w)==9){self->session.Keywords();self->Refresh();}else if(LOWORD(w)==7){self->session.Speak();}else if(LOWORD(w)==8){PlaySoundW(nullptr,nullptr,0);self->speech_.clear();}else if(LOWORD(w)==6){const char* langs[]={"en","zh","ja","ko","es"};auto index=SendMessageW(self->language_,CB_GETCURSEL,0,0);if(index>=0&&index<5)self->session.Translate(langs[index]);self->Refresh();}else if(LOWORD(w)==2){self->session.Enable(!self->session.Enabled());self->Refresh();}else if(LOWORD(w)==3){self->session.Summarize();self->Refresh();}return 0;
    case WM_CLOSE:self->Close();return 0;
    case WM_DESTROY:if(!self->speech_.empty()){PlaySoundW(nullptr,nullptr,0);self->speech_.clear();}KillTimer(h,1);self->window_=nullptr;self->text_=nullptr;self->shown_.clear();if(self->font_){DeleteObject(self->font_);self->font_=nullptr;}return 0;
   }
