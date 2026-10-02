@@ -1,3 +1,4 @@
+#include "CaptionOverlay.hpp"
 #include "StudioPreview.hpp"
 #include "PreviewMedia.hpp"
 #include "AudioOutput.hpp"
@@ -176,6 +177,7 @@ class StudioWindow {
         auto frame=remote?remoteVideo_.Get():(cameraView_?video_.Get():nullptr);
         if(frame){double ratio=std::min(double(r.right)/frame->width,double(r.bottom)/frame->height);int w=int(frame->width*ratio),h=int(frame->height*ratio);BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=frame->width;info.bmiHeader.biHeight=-static_cast<LONG>(frame->height);info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;info.bmiHeader.biCompression=BI_RGB;SetStretchBltMode(dc,COLORONCOLOR);StretchDIBits(dc,(r.right-w)/2,(r.bottom-h)/2,w,h,0,0,frame->width,frame->height,frame->data.data(),&info,DIB_RGB_COLORS,SRCCOPY);}
         else {RECT t{S(20),r.bottom/2-S(28),r.right-S(20),r.bottom/2};Text(dc,remote?(call_.State()==CallState::Connected&&call_.RemoteVideoSource()=="off"?L"对方已关闭视频":L"等待远端画面"):(cameraView_?L"摄像头尚未开启":L"本地媒体预览"),t,body_,Ink,DT_CENTER|DT_VCENTER|DT_SINGLELINE);t.top+=S(34);t.bottom+=S(34);Text(dc,remote?L"选择房间内的对象，接听后开始通话":(cameraView_?L"选择下方设备，开启视频输入":L"打开视频或音频文件开始播放"),t,small_,Muted,DT_CENTER|DT_VCENTER|DT_SINGLELINE);}
+        if(call_.State()==CallState::Connected){auto caption=ai_.session.CaptionFor(remote?"remote":"local");DrawCaptionOverlay(dc,r,Wide(caption.original),Wide(caption.translated),body_);}
     }
     void Paint(HDC dc){
         RECT all;GetClientRect(window_,&all);Fill(dc,all,Bg);if(fullscreen_)return;
@@ -320,7 +322,7 @@ class StudioWindow {
             if(playback_){auto error=playback_->error.exchange(S_OK);if(FAILED(error))status_=L"播放失败："+Hr(error)+L"。请检查文件或 Windows 媒体解码支持。";else if(playback_->ended.exchange(false)){status_=L"播放结束："+fileName_;SetWindowTextW(Control(Pause),L"重新播放");}}
             if(audioFailed_.exchange(false))status_=L"音频输出暂不可用或过载 · 请检查输出设备";
             EnableWindow(Control(Pause),player_&&!cameraView_);EnableWindow(Control(Stop),bool(player_));
-            if(cameraView_)InvalidateRect(surface_,nullptr,FALSE);InvalidateRect(remoteSurface_,nullptr,FALSE);
+            if(cameraView_||!player_||!playback_||!playback_->ready)InvalidateRect(surface_,nullptr,FALSE);InvalidateRect(remoteSurface_,nullptr,FALSE);
             RECT detail=R(left_+16,lower_,width_-left_-right_-32,130);InvalidateRect(window_,&detail,FALSE);
             RECT r=R(width_-right_+16,180,right_-32,56);InvalidateRect(window_,&r,FALSE);r=R(width_-right_+16,600,right_-32,90);InvalidateRect(window_,&r,FALSE);r=R(0,height_-39,width_,39);InvalidateRect(window_,&r,FALSE);return 0;}
         case WM_CLOSE:if(meetingPage_&&!meetingPage_->CanClose())return 0;Shutdown();DestroyWindow(window_);return 0;

@@ -56,9 +56,23 @@ int main(){try{
  });
  Check(!automatic.AutoTranslate("ja"),"automatic translation enabled without captions");
  automatic.Enable(true);Check(automatic.AutoTranslate("ja"),"automatic translation rejected");automatic.Submit("alex",audio);
- bool autoStarted=Wait([&]{return autoEntered.load();});automatic.AutoTranslate("");autoRelease=true;Check(autoStarted,"automatic translation not scheduled");
+ bool autoStarted=Wait([&]{return autoEntered.load();});
+ Check(automatic.CaptionFor("alex").original=="source words"&&automatic.CaptionFor("other").original.empty(),"caption speaker attribution failed");
+ Check(automatic.CaptionFor("alex",std::chrono::steady_clock::now()+11s).original.empty(),"caption failed to expire");automatic.AutoTranslate("");autoRelease=true;Check(autoStarted,"automatic translation not scheduled");
  std::this_thread::sleep_for(30ms);Check(automatic.Text().find("STALE AUTO")==std::string::npos,"disabled translation leaked late result");
  automatic.AutoTranslate("es");automatic.Submit("alex",audio);Check(Wait([&]{return automatic.Text().find("CURRENT AUTO")!=std::string::npos;}),"automatic translation missing");
- automatic.Enable(false);Check(!automatic.AutoTranslating(),"stopping captions left automatic translation active");automatic.Reset();Check(automatic.Text().find("CURRENT AUTO")==std::string::npos,"automatic result leaked across sessions");
+ Check(automatic.CaptionFor("alex").translated=="CURRENT AUTO","translated caption missing");
+ automatic.Enable(false);Check(automatic.CaptionFor("alex").original.empty(),"stop retained caption");Check(!automatic.AutoTranslating(),"stopping captions left automatic translation active");automatic.Reset();Check(automatic.Text().find("CURRENT AUTO")==std::string::npos,"automatic result leaked across sessions");
+ std::atomic<bool> firstEntered{false},firstRelease{false},oldTranslated{false},newRelease{false};std::atomic<int> sequence{0};
+ SessionAi overlap([&](const std::wstring& route,const std::string& body,const std::wstring&){
+  if(route==L"/transcribe"){if(++sequence==1){firstEntered=true;while(!firstRelease)std::this_thread::sleep_for(1ms);return SessionAi::Reply{true,"first"};}return SessionAi::Reply{true,"second"};}
+  if(body=="[alex] first"){oldTranslated=true;return SessionAi::Reply{true,"old translation"};}
+  while(!newRelease)std::this_thread::sleep_for(1ms);return SessionAi::Reply{true,"new translation"};
+ });
+ overlap.Enable(true);overlap.AutoTranslate("en");overlap.Submit("alex",audio);bool firstReady=Wait([&]{return firstEntered.load();});overlap.Submit("alex",audio);firstRelease=true;
+ bool oldReady=Wait([&]{return oldTranslated.load();});std::this_thread::sleep_for(20ms);auto during=overlap.CaptionFor("alex");newRelease=true;
+ Check(firstReady&&oldReady&&during.original=="second"&&during.translated.empty(),"old translation attached to newer caption");Check(Wait([&]{return overlap.CaptionFor("alex").translated=="new translation";}),"latest translation missing");
+ SessionAi silence([](const std::wstring&,const std::string&,const std::wstring&){return SessionAi::Reply{true,"   \n"};});
+ silence.Enable(true);silence.Submit("silent",audio);Check(Wait([&]{return silence.Status()==AiMessage::Transcribing;}),"silence not handled");Check(silence.CaptionFor("silent").original.empty()&&silence.Text().find("[silent]")==std::string::npos,"silence produced caption");
  std::cout<<"PASS: default-off, WAV chunks, attributed transcript, summary, keywords, empty states, stop, session fencing and errors\n";return 0;
  }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

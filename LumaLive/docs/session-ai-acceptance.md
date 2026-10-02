@@ -38,3 +38,10 @@ AI status and section headings use Chinese/English UI resources. Raw provider di
 The native keyword HTTP test uses a local mock provider and verifies request routing, not semantic model quality. Python gateway tests include invalid keyword content type, empty/oversized input and redacted upstream errors.
 
 Verified 2026-10-01: Release client and native AI test targets built. Native unit tests passed, including keyword routing/reset, missing-input guidance, oversized speech without stopping captions, and queued-keyword recovery after transcript cap. Native WinHTTP -> gateway -> mock provider passed five operations (ASR, summary, translation, WAV TTS, keywords). Python gateway suite passed 10 tests. Hosted UI smoke passed localized empty-keyword guidance, three-participant membership retention, fullscreen/context separation and clean shutdown. No real AI provider or physical audio playback was used.
+
+
+## Automatic translation and captions in video tiles
+
+Enable captions, select the translation language, then enable automatic translation in the AI page. Each completed five-second ASR segment queues a translation; stopping captions also stops automatic translation. Switching the target rejects older queued/in-flight translations. The source and translated text appear on the corresponding call/meeting participant tile; meeting participant labels remain unobstructed. Only the latest utterance for that track is shown for up to ten seconds. Stop/reset, silence and hidden/disconnected meeting members do not retain visible captions. Late translations cannot attach to newer speech. The file player's native video surface does not support this overlay.
+
+The b2f8c214 checkpoint subsequently passed Release build, automatic translation cancellation/restart unit tests and hosted three-member UI navigation. This remains segmented translation through a configured provider, not streaming recognition or a real-provider quality/latency acceptance.

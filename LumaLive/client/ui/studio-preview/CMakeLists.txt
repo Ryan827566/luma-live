@@ -100,3 +100,8 @@ add_executable(luma_session_ai_gateway_tests tests/SessionAiGatewayTests.cpp)
 target_include_directories(luma_session_ai_gateway_tests PRIVATE include)
 target_compile_features(luma_session_ai_gateway_tests PRIVATE cxx_std_20)
 target_link_libraries(luma_session_ai_gateway_tests PRIVATE luma_client_media_pipeline winhttp)
+
+add_executable(luma_caption_overlay_tests tests/CaptionOverlayTests.cpp)
+target_include_directories(luma_caption_overlay_tests PRIVATE include)
+target_link_libraries(luma_caption_overlay_tests PRIVATE user32 gdi32)
+add_test(NAME luma_caption_overlay_tests COMMAND luma_caption_overlay_tests)
