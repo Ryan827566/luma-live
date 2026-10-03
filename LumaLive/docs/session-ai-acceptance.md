@@ -50,3 +50,8 @@ The b2f8c214 checkpoint subsequently passed Release build, automatic translation
 ## Canceling generated speech (2026-10-03)
 
 Stop reading now stops playback, removes queued speech jobs, discards ready audio, and invalidates late responses from in-flight generation. Canceling speech releases only the busy state owned by that speech job; it cannot unlock a newer summary/keyword operation. Generation already sent to the provider cannot be recalled. Chinese/English UI status confirms stopping when speech was pending/ready. Unit tests passed for queued, in-flight and ready cancellation, late-result isolation, unrelated pending work and subsequent new speech. Native HTTP/mock-provider integration still passed all five operations. Physical speaker playback and real TTS quality remain pending.
+
+
+Speech playback lifecycle follow-up: the UI receives audio and its cancellation revision atomically. A session reset, caption stop/restart or transcript limit invalidates already-consumed audio; the panel stops its playback on the next UI refresh (normally within 300 ms), including when its hosted page is hidden. Transcript-limit shutdown also discards buffered speech. This extends cancellation beyond queued requests to playback that has already started. Physical audibility remains a manual check.
+
+Verified 2026-10-03: rebuilt actual luma_studio.exe after user closed the running instance; SessionAi revision/reset tests and three-member hosted navigation/clean shutdown passed. Physical playback cutoff is still a manual check.

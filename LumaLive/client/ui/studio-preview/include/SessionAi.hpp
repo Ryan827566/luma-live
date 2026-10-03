@@ -46,7 +46,9 @@ public:
  bool Keywords(){std::lock_guard lock(mutex_);if(!ReadyForText())return false;Job job{generation_,true,"",transcript_};job.keywords=true;summaryPending_=true;jobs_.push_back(std::move(job));status_=AiMessage::KeywordsPending;wake_.notify_one();return true;}
  std::string LastError(){std::lock_guard lock(mutex_);return error_;}
  AiMessage Status(){std::lock_guard lock(mutex_);return status_;}
- std::string TakeSpeech(){std::lock_guard lock(mutex_);return std::exchange(speech_,{});}
+ struct SpeechPacket {std::string audio;std::uint64_t revision;};
+ SpeechPacket TakeSpeechPacket(){std::lock_guard lock(mutex_);return {std::exchange(speech_,{}),speechEpoch_};}
+ std::string TakeSpeech(){return TakeSpeechPacket().audio;}
  bool Summarize(){std::lock_guard lock(mutex_);if(!ReadyForText())return false;summaryPending_=true;jobs_.push_back({generation_,true,"",transcript_});status_=AiMessage::SummaryPending;wake_.notify_one();return true;}
  std::string Text(){std::lock_guard lock(mutex_);return AiMessageText(status_)+"\r\n\r\n"+transcript_+(summary_.empty()?"":"\r\n"+UiUtf8(UiLabel(L"\u6458\u8981\u4e0e\u5f85\u529e",L"Summary and actions"))+"\r\n"+summary_)+(translation_.empty()?"":"\r\n"+UiUtf8(UiLabel(L"\u7ffb\u8bd1",L"Translation"))+"\r\n"+translation_)+(keywords_.empty()?"":"\r\n"+UiUtf8(UiLabel(L"\u5173\u952e\u8bcd",L"Keywords"))+"\r\n"+keywords_)+(autoTranslation_.empty()?"":"\r\n"+UiUtf8(UiLabel(L"\u81ea\u52a8\u7ffb\u8bd1",L"Automatic translation"))+"\r\n"+autoTranslation_);}
 
@@ -94,7 +96,7 @@ private:
    else if(job.summary){summary_=result.text;status_=AiMessage::SummaryReady;}
    else if(result.text.find_first_not_of(" \r\n\t")==std::string::npos){captions_.erase(job.speaker);status_=AiMessage::Transcribing;}
    else if(transcript_.size()+job.speaker.size()+result.text.size()+6<=64000){transcript_+="["+job.speaker+"] "+result.text+"\r\n";captions_[job.speaker]={{result.text,{}},std::chrono::steady_clock::now(),++captionSerial_};status_=AiMessage::Transcribing;if(!autoLanguage_.empty()){if(jobs_.size()<8){Job translation{generation_,true,job.speaker,"["+job.speaker+"] "+result.text};translation.captionSerial=captionSerial_;translation.language=autoLanguage_;translation.autoEpoch=autoEpoch_;jobs_.push_back(std::move(translation));wake_.notify_one();}else status_=AiMessage::Dropped;}}
-   else{enabled_=false;autoLanguage_.clear();++autoEpoch_;buffers_.clear();jobs_.clear();summaryPending_=false;speechPending_=false;++speechEpoch_;status_=AiMessage::Limit;}
+   else{enabled_=false;autoLanguage_.clear();++autoEpoch_;buffers_.clear();jobs_.clear();summaryPending_=false;speechPending_=false;speech_.clear();++speechEpoch_;status_=AiMessage::Limit;}
   }}
  Transport transport_;std::mutex mutex_;std::condition_variable wake_;std::deque<Job> jobs_;std::map<std::string,std::string> buffers_;
  bool quit_=false,enabled_=false,summaryPending_=false,speechPending_=false;std::uint64_t generation_=0,autoEpoch_=1,speechEpoch_=1;std::string autoLanguage_,autoTranslation_;std::string transcript_,summary_,translation_,speech_,keywords_,error_;AiMessage status_=AiMessage::Off;std::thread worker_;

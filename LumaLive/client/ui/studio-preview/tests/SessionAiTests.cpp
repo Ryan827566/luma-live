@@ -63,7 +63,9 @@ int main(){try{
  Check(cancelVoice.Speak()&&Wait([&]{return cancelVoice.Status()==AiMessage::VoiceReady;}),"new voice rejected after cancellation");
  cancelVoice.StopSpeech();Check(cancelVoice.TakeSpeech().empty()&&cancelVoice.Status()==AiMessage::VoiceStopped,"canceling ready voice retained audio");
  Check(cancelVoice.Speak()&&Wait([&]{return cancelVoice.Status()==AiMessage::VoiceReady;}),"second new voice failed");
- Check(cancelVoice.TakeSpeech()=="CURRENT VOICE"&&voiceCalls==3,"new voice epoch failed");
+ auto packet=cancelVoice.TakeSpeechPacket();Check(packet.audio=="CURRENT VOICE"&&voiceCalls==3,"new voice epoch failed");
+ cancelVoice.Reset();auto resetPacket=cancelVoice.TakeSpeechPacket();Check(resetPacket.audio.empty()&&resetPacket.revision!=packet.revision,"session reset did not invalidate playing speech");
+ auto revision=resetPacket.revision;cancelVoice.Enable(true);auto enabledPacket=cancelVoice.TakeSpeechPacket();Check(enabledPacket.audio.empty()&&enabledPacket.revision!=revision,"capture restart retained playback revision");
 
  // Queued voice jobs must be removed before the provider sees them.
  std::atomic<int> queuedAsrCalls{0},queuedVoiceCalls{0};std::atomic<bool> queuedAsrEntered{false},queuedAsrRelease{false};
