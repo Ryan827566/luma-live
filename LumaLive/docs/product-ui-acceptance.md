@@ -4,7 +4,7 @@ Status: requirements and source audit, not visual acceptance.
 
 ## Product direction
 
-A Windows live-communication workspace for calling, meetings and live production, with a shared AI assistant. Preserve the supplied Figma dark neutral/blue brand direction. One top-level client window; module navigation stays on the far left. AI is a cross-module capability and is not owned by the video module. User requested functionality before the visual overhaul.
+A Windows live-communication workspace for calling, meetings and live production, with a shared AI assistant. Preserve the supplied Figma dark neutral/blue brand direction. One top-level client window; module navigation stays on the far left. AI is a cross-module capability and is not owned by the video module. User priority changed on 2026-10-03: complete this UI checklist before continuing other functionality.
 
 ## Design sources
 
@@ -35,3 +35,6 @@ Inspected the generated standalone meeting idle render at output/next/Release/ui
 7. Real-provider AI configuration and opt-in status remain explicit. The global assistant must identify which business context it is using and keep scopes separate.
 
 Do not mark product UI complete based on compilation, synthetic media tests or this document. Require an actual rendered and interacted-with client plus resolved acceptance findings.
+
+
+2026-10-03 UI checkpoint (not visually accepted): added shared native theme/button hover/focus tokens. Call workspace labels now use Chinese/English pairs, technical headings were simplified, connection configuration collapsed, and host-close confirmation reveals the meeting page. Meeting prejoin now focuses on room/name; idle roster/media actions are hidden. Host leave/end/remove/close use inline confirm/cancel rather than MessageBox. Navigation test updated for these controls. Figma structure API again failed with no-selection response; screenshot reviewed only, no exact-fidelity claim. Taste redesign guidance reread remotely; no local installation claim. AI visual rewrite, icon assets, broader locale coverage, full DPI/keyboard/visual acceptance are still pending. No newly built UI executable is claimed by this checkpoint.

@@ -3,6 +3,7 @@ import ctypes as c
 from ctypes import wintypes as w
 import subprocess
 import sys
+import os
 import time
 
 u = c.WinDLL("user32", use_last_error=True)
@@ -50,6 +51,7 @@ try:
     label = c.create_unicode_buffer(128)
     u.GetWindowTextW(u.GetDlgItem(child, 2), label, 128)
     language = c.WinDLL("kernel32").GetUserDefaultUILanguage() & 0x3ff
+    if os.environ.get("LUMALIVE_UI_LANGUAGE"): language = 4 if os.environ["LUMALIVE_UI_LANGUAGE"].startswith("zh") else 0
     expected = "\u542f\u7528\u5b57\u5e55" if language == 4 else "Start captions"
     assert label.value == expected, "Caption action does not follow Windows display language"
     assert u.GetDlgItem(child, 9), "Keyword extraction action missing"
@@ -105,18 +107,12 @@ try:
         u.SendMessageW(root, 0x111, 126, 0)
         assert u.SendMessageW(u.GetDlgItem(meeting, 210), 0x18B, 0, 0) == 3, "Navigation lost membership"
         u.PostMessageW(meeting, 0x111, 212, 0)
-        u.GetClassNameW.argtypes = [w.HWND, w.LPWSTR, c.c_int]
-        dialogs = []
-        @callback
-        def dialog(hwnd, _):
-            pid = w.DWORD(); u.GetWindowThreadProcessId(hwnd, c.byref(pid))
-            name = c.create_unicode_buffer(64); u.GetClassNameW(hwnd, name, 64)
-            if pid.value == process.pid and name.value == "#32770": dialogs.append(hwnd)
-            return True
+        u.IsWindowVisible.argtypes = [w.HWND]; u.IsWindowVisible.restype = w.BOOL
+        confirmation = u.GetDlgItem(meeting, 223)
         until = time.monotonic() + 3
-        while not dialogs and time.monotonic() < until: u.EnumWindows(dialog, 0); time.sleep(.05)
-        assert len(dialogs) == 1, "End confirmation missing"
-        u.PostMessageW(dialogs[0], 0x111, 6, 0)
+        while confirmation and not u.IsWindowVisible(confirmation) and time.monotonic() < until: time.sleep(.05)
+        assert confirmation and u.IsWindowVisible(confirmation), "Inline end confirmation missing"
+        u.PostMessageW(meeting, 0x111, 223, 0)
         assert fixture.wait(timeout=8) == 0, "Fixture did not observe meeting end"
         time.sleep(.2)
         print("PASS: three real participants retained across tabs, call exclusivity and end flow")
