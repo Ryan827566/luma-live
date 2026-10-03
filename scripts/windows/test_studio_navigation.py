@@ -57,7 +57,20 @@ try:
     if traditional: expected = "啟用字幕"
     assert label.value == expected, "Caption action does not follow Windows display language"
     assert u.GetDlgItem(child, 9), "Keyword extraction action missing"
-    u.SendMessageW(child, 0x111, 9, 0)
+    u.GetNextDlgTabItem.argtypes = [w.HWND, w.HWND, w.BOOL]; u.GetNextDlgTabItem.restype = w.HWND
+    order = (2, 3, 9, 7, 5, 6, 10, 8, 4)
+    for previous, following in zip(order, order[1:]):
+        assert u.GetNextDlgTabItem(child, u.GetDlgItem(child, previous), False) == u.GetDlgItem(child, following), "AI Tab order differs from visual order"
+        assert u.GetNextDlgTabItem(child, u.GetDlgItem(child, following), True) == u.GetDlgItem(child, previous), "AI reverse Tab order differs"
+    # Queued Enter exercises the production IsDialogMessage path.
+    before = c.create_unicode_buffer(128)
+    u.SendMessageW(u.GetDlgItem(child, 4), 0xD, 128, c.cast(before, c.c_void_p).value)
+    u.PostMessageW(u.GetDlgItem(child, 9), 0x100, 0x0D, 0)
+    until = time.monotonic() + 2
+    while time.monotonic() < until:
+        u.SendMessageW(u.GetDlgItem(child, 4), 0xD, 128, c.cast(label, c.c_void_p).value)
+        if label.value != before.value: break
+        time.sleep(.05)
     u.SendMessageW(u.GetDlgItem(child, 4), 0xD, 128, c.cast(label, c.c_void_p).value)
     guidance = "\u8bf7\u5148\u542f\u7528\u5b57\u5e55" if language == 4 else "Start captions and collect"
     if traditional: guidance = "請先啟用字幕"

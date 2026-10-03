@@ -8,6 +8,9 @@ inline constexpr COLORREF Background=RGB(8,10,13),Surface=RGB(16,19,24),Elevated
 inline HFONT Font(int size,int weight=400){return CreateFontW(-size,0,0,0,weight,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ChineseUi()?L"Microsoft YaHei UI":L"Segoe UI");}
 inline void Fill(HDC dc,RECT r,COLORREF color){auto brush=CreateSolidBrush(color);FillRect(dc,&r,brush);DeleteObject(brush);}
 inline LRESULT CALLBACK HoverProc(HWND h,UINT message,WPARAM w,LPARAM l,UINT_PTR id,DWORD_PTR){
+ // Owner-drawn buttons need Enter forwarded through dialog navigation.
+ if(message==WM_GETDLGCODE&&l&&reinterpret_cast<MSG*>(l)->message==WM_KEYDOWN&&reinterpret_cast<MSG*>(l)->wParam==VK_RETURN)return DefSubclassProc(h,message,w,l)|DLGC_WANTMESSAGE;
+ if(message==WM_KEYDOWN&&w==VK_RETURN){if(IsWindowEnabled(h)&&!(l&(LPARAM(1)<<30)))SendMessageW(h,BM_CLICK,0,0);return 0;}
  if(message==WM_MOUSEMOVE&&!GetPropW(h,L"LumaHover")){SetPropW(h,L"LumaHover",HANDLE(1));TRACKMOUSEEVENT track{sizeof(track),TME_LEAVE,h,0};TrackMouseEvent(&track);InvalidateRect(h,nullptr,FALSE);}
  if(message==WM_MOUSELEAVE){RemovePropW(h,L"LumaHover");InvalidateRect(h,nullptr,FALSE);}
  if(message==WM_NCDESTROY){RemovePropW(h,L"LumaHover");RemoveWindowSubclass(h,HoverProc,id);}
