@@ -313,6 +313,7 @@ class StudioWindow {
         case WM_SIZE:Layout();return 0;
         case WM_GETMINMAXINFO:{auto m=reinterpret_cast<MINMAXINFO*>(lp);m->ptMinTrackSize={S(1404),S(830)};return 0;}
         case WM_DPICHANGED:{dpi_=HIWORD(wp);Fonts();auto r=reinterpret_cast<RECT*>(lp);SetWindowPos(window_,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);Layout();return 0;}
+        case WM_PRINTCLIENT:Paint(reinterpret_cast<HDC>(wp));return 0;
         case WM_ERASEBKGND:return 1;
         case WM_PAINT:{PAINTSTRUCT ps;auto dc=BeginPaint(window_,&ps);RECT r;GetClientRect(window_,&r);auto mem=CreateCompatibleDC(dc);auto bmp=CreateCompatibleBitmap(dc,std::max(1L,r.right),std::max(1L,r.bottom));auto old=SelectObject(mem,bmp);Paint(mem);BitBlt(dc,0,0,r.right,r.bottom,mem,0,0,SRCCOPY);SelectObject(mem,old);DeleteObject(bmp);DeleteDC(mem);EndPaint(window_,&ps);return 0;}
         case WM_DRAWITEM:DrawButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lp));return TRUE;
@@ -343,7 +344,7 @@ class StudioWindow {
         return DefWindowProcW(window_,message,wp,lp);
     }
     static LRESULT CALLBACK Proc(HWND h,UINT m,WPARAM w,LPARAM l){auto self=reinterpret_cast<StudioWindow*>(GetWindowLongPtrW(h,GWLP_USERDATA));if(m==WM_NCCREATE){self=static_cast<StudioWindow*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);self->window_=h;SetWindowLongPtrW(h,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));}return self?self->Handle(m,w,l):DefWindowProcW(h,m,w,l);}
-    static LRESULT CALLBACK SurfaceProc(HWND h,UINT m,WPARAM w,LPARAM l){auto self=reinterpret_cast<StudioWindow*>(GetWindowLongPtrW(h,GWLP_USERDATA));if(m==WM_NCCREATE){self=static_cast<StudioWindow*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);SetWindowLongPtrW(h,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));}if(self){if(m==WM_ERASEBKGND)return 1;if(m==WM_PAINT){PAINTSTRUCT ps;auto dc=BeginPaint(h,&ps);self->PaintSurface(h,dc);EndPaint(h,&ps);return 0;}if(m==WM_SIZE&&h==self->surface_&&self->player_&&!self->cameraView_)self->player_->UpdateVideo();}return DefWindowProcW(h,m,w,l);}
+    static LRESULT CALLBACK SurfaceProc(HWND h,UINT m,WPARAM w,LPARAM l){auto self=reinterpret_cast<StudioWindow*>(GetWindowLongPtrW(h,GWLP_USERDATA));if(m==WM_NCCREATE){self=static_cast<StudioWindow*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);SetWindowLongPtrW(h,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));}if(self){if(m==WM_PRINTCLIENT){self->PaintSurface(h,reinterpret_cast<HDC>(w));return 0;}if(m==WM_ERASEBKGND)return 1;if(m==WM_PAINT){PAINTSTRUCT ps;auto dc=BeginPaint(h,&ps);self->PaintSurface(h,dc);EndPaint(h,&ps);return 0;}if(m==WM_SIZE&&h==self->surface_&&self->player_&&!self->cameraView_)self->player_->UpdateVideo();}return DefWindowProcW(h,m,w,l);}
 public:
     ~StudioWindow(){Shutdown();for(auto f:{body_,small_,title_,brand_})if(f)DeleteObject(f);DeleteObject(panelBrush_);}
     int Run(HINSTANCE instance,int show){

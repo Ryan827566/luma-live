@@ -39,4 +39,6 @@ python scripts/windows/verify_client.py
 结果写入 `output/client-verification.json`，包含状态、各检查日志路径和被测 EXE 的 SHA-256。报告为 passed 仅代表这些本机自动检查通过；真实 AI、物理设备和最终产品视觉验收仍需单独进行。
 
 
-注意：统一脚本最后通过 Windows PowerShell 执行 DPI 检查。如果当前系统策略禁止运行 `.ps1`，总报告会保留 failed，前面各项结果仍可查看。这是测试运行条件未满足，不表示 DPI 检查本身已失败；不要把该项当作通过，也不要为了运行测试擅自降低系统执行策略。
+DPI 检查现由 `scripts/windows/test_meeting_ui.py` 直接运行原生诊断程序，不再依赖 PowerShell 脚本执行策略，也不修改系统策略。当前支持跟随系统显示语言选择简体中文、繁体中文转换及英文；其它语言仍回退英文，尚不代表完整多语言交付。
+
+界面截图可以运行 `python scripts/windows/capture_studio_ui.py output/next/Release/luma_studio.exe output/ui-visual-review` 生成。脚本仅启动并绘制自己的测试客户端，不截取其它桌面窗口。关闭测试客户端后查看目录中的 calls.bmp、meetings.bmp、assistant.bmp。

@@ -53,11 +53,14 @@ try:
     language = c.WinDLL("kernel32").GetUserDefaultUILanguage() & 0x3ff
     if os.environ.get("LUMALIVE_UI_LANGUAGE"): language = 4 if os.environ["LUMALIVE_UI_LANGUAGE"].startswith("zh") else 0
     expected = "\u542f\u7528\u5b57\u5e55" if language == 4 else "Start captions"
+    traditional = os.environ.get("LUMALIVE_UI_LANGUAGE") in ("zh-TW", "zh-HK")
+    if traditional: expected = "啟用字幕"
     assert label.value == expected, "Caption action does not follow Windows display language"
     assert u.GetDlgItem(child, 9), "Keyword extraction action missing"
     u.SendMessageW(child, 0x111, 9, 0)
     u.SendMessageW(u.GetDlgItem(child, 4), 0xD, 128, c.cast(label, c.c_void_p).value)
     guidance = "\u8bf7\u5148\u542f\u7528\u5b57\u5e55" if language == 4 else "Start captions and collect"
+    if traditional: guidance = "請先啟用字幕"
     assert label.value.startswith(guidance), "Empty keyword guidance mismatch: " + ascii(label.value) + " expected " + ascii(guidance)
 
 
@@ -103,16 +106,22 @@ try:
         u.SendMessageW(root, 0x111, 114, 0)  # call join must be blocked while meeting owns session
         u.GetWindowTextW.argtypes = [w.HWND, w.LPWSTR, c.c_int]
         label = c.create_unicode_buffer(128); u.GetWindowTextW(u.GetDlgItem(root, 114), label, 128)
-        assert label.value != "\u79bb\u5f00\u623f\u95f4", "Call joined concurrently with meeting"
+        assert label.value not in ("\u79bb\u5f00\u623f\u95f4", "Leave room"), "Call joined concurrently with meeting"
         u.SendMessageW(root, 0x111, 126, 0)
         assert u.SendMessageW(u.GetDlgItem(meeting, 210), 0x18B, 0, 0) == 3, "Navigation lost membership"
-        u.PostMessageW(meeting, 0x111, 212, 0)
+        u.SendMessageW(u.GetDlgItem(meeting, 212), 0xF5, 0, 0)  # native button click
         u.IsWindowVisible.argtypes = [w.HWND]; u.IsWindowVisible.restype = w.BOOL
         confirmation = u.GetDlgItem(meeting, 223)
         until = time.monotonic() + 3
-        while confirmation and not u.IsWindowVisible(confirmation) and time.monotonic() < until: time.sleep(.05)
-        assert confirmation and u.IsWindowVisible(confirmation), "Inline end confirmation missing"
-        u.PostMessageW(meeting, 0x111, 223, 0)
+        while confirmation and not (u.GetWindowLongW(confirmation, -16) & 0x10000000) and time.monotonic() < until: time.sleep(.05)
+        assert confirmation and (u.GetWindowLongW(confirmation, -16) & 0x10000000), "Inline end confirmation missing"
+        u.PostMessageW(u.GetDlgItem(meeting, 224), 0x100, 0x1B, 0)  # Escape cancels
+        until = time.monotonic() + 2
+        while u.GetWindowLongW(confirmation, -16) & 0x10000000 and time.monotonic() < until: time.sleep(.05)
+        assert not (u.GetWindowLongW(confirmation, -16) & 0x10000000), "Escape did not cancel inline confirmation"
+        assert u.SendMessageW(u.GetDlgItem(meeting, 210), 0x18B, 0, 0) == 3, "Cancel ended the meeting"
+        u.SendMessageW(u.GetDlgItem(meeting, 212), 0xF5, 0, 0)
+        u.SendMessageW(confirmation, 0xF5, 0, 0)
         assert fixture.wait(timeout=8) == 0, "Fixture did not observe meeting end"
         time.sleep(.2)
         print("PASS: three real participants retained across tabs, call exclusivity and end flow")

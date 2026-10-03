@@ -49,7 +49,7 @@ def main():
         print("PASS:", name, flush=True)
     save()
     try:
-        targets = ["luma_studio", "luma_signaling_server", "luma_meeting_ui_fixture", "luma_session_ai_tests", "luma_session_ai_gateway_tests", "luma_caption_overlay_tests"]
+        targets = ["luma_studio", "luma_signaling_server", "luma_meeting_ui_fixture", "luma_session_ai_tests", "luma_session_ai_gateway_tests", "luma_caption_overlay_tests", "luma_ui_locale_tests"]
         run("build", [cmake, "--build", str(build), "--config", "Release", "--target", *targets, "--parallel", "1", "--", "/nr:false"], 1800)
         # The configured output must also be newer than the linked preview library.
         executable = binary / "luma_studio.exe"
@@ -57,12 +57,13 @@ def main():
         if not executable.is_file() or not library.is_file() or executable.stat().st_mtime_ns < library.stat().st_mtime_ns:
             raise RuntimeError("Client executable is missing or older than the preview library; check the CMake runtime output directory.")
         record["client"] = {"path": str(executable), "sha256": hashlib.sha256(executable.read_bytes()).hexdigest()}
+        run("locale", [str(binary / "luma_ui_locale_tests.exe")], 20)
         run("ai-state", [str(binary / "luma_session_ai_tests.exe")], 30)
         run("captions", [str(binary / "luma_caption_overlay_tests.exe"), str(root / "output/caption-overlay.bmp")], 20)
         run("gateway", [sys.executable, "-m", "unittest", "discover", "-s", "LumaLive/server/ai-gateway/python", "-p", "test_gateway.py"], 60)
         run("native-ai", [sys.executable, "LumaLive/server/ai-gateway/python/test_native_client.py", str(binary / "luma_session_ai_gateway_tests.exe")], 60)
         run("navigation", [sys.executable, "scripts/windows/test_studio_navigation.py", str(executable), str(binary / "luma_meeting_ui_fixture.exe")], 60)
-        run("meeting-ui", ["powershell.exe", "-NoProfile", "-File", str(root / "scripts/windows/Test-MeetingUi.ps1"), "-BinaryDirectory", str(binary)], 90)
+        run("meeting-ui", [sys.executable, "scripts/windows/test_meeting_ui.py", str(binary)], 90)
         record["status"] = "passed"
     except Exception as error:
         record["status"] = "failed"

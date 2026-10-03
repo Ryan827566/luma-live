@@ -1,0 +1,4 @@
+#include "UiLocale.hpp"
+#include <iostream>
+using namespace luma::client::ui::preview;
+int main(){SetEnvironmentVariableW(L"LUMALIVE_UI_LANGUAGE",L"en-US");if(std::wstring(UiLabel(L"\u4f1a\u8bae",L"Meetings"))!=L"Meetings")return 1;SetEnvironmentVariableW(L"LUMALIVE_UI_LANGUAGE",L"zh-CN");if(UiUtf8(UiLabel(L"\u4f1a\u8bae",L"Meetings"))!="\xe4\xbc\x9a\xe8\xae\xae")return 2;SetEnvironmentVariableW(L"LUMALIVE_UI_LANGUAGE",L"zh-TW");auto saved=UiLabel(L"\u4f1a\u8bae",L"Meetings");if(std::wstring(saved)!=L"\u6703\u8b70")return 3;for(int i=0;i<100;++i)UiLabel((L"\u8bbe\u7f6e"+std::to_wstring(i)).c_str(),L"Setting");if(std::wstring(saved)!=L"\u6703\u8b70")return 4;SetEnvironmentVariableW(L"LUMALIVE_UI_LANGUAGE",L"fr-FR");if(std::wstring(UiLabel(L"\u4f1a\u8bae",L"Meetings"))!=L"Meetings")return 5;std::cout<<"PASS: Chinese, traditional conversion, English, pointer lifetime, fallback\n";}
