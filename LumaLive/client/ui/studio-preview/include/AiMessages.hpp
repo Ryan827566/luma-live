@@ -1,8 +1,9 @@
 #pragma once
 #include "UiLocale.hpp"
 namespace luma::client::ui::preview {
-enum class AiMessage {SpeechLimit,Off,Enabled,Stopped,AudioFormat,Dropped,Translating,VoicePending,SummaryPending,KeywordsPending,VoiceReady,TranslationReady,SummaryReady,KeywordsReady,Transcribing,Limit,RequestFailed,NoTranscript,NoSummary,Busy};
+enum class AiMessage {VoiceStopped,SpeechLimit,Off,Enabled,Stopped,AudioFormat,Dropped,Translating,VoicePending,SummaryPending,KeywordsPending,VoiceReady,TranslationReady,SummaryReady,KeywordsReady,Transcribing,Limit,RequestFailed,NoTranscript,NoSummary,Busy};
 inline std::string AiMessageText(AiMessage message){switch(message){
+case AiMessage::VoiceStopped:return UiUtf8(UiLabel(L"\u5df2\u505c\u6b62\u6717\u8bfb\u3002",L"Reading stopped."));
 case AiMessage::SpeechLimit:return UiUtf8(UiLabel(L"\u6458\u8981\u8fc7\u957f\uff0c\u672c\u6b21\u65e0\u6cd5\u6717\u8bfb\u3002\u5b57\u5e55\u8bb0\u5f55\u4ecd\u53ef\u7ee7\u7eed\u3002",L"Summary is too long to read aloud. Caption collection can continue."));
 case AiMessage::Off:return UiUtf8(UiLabel(L"AI \u5df2\u5173\u95ed\u3002\u8bf7\u5148\u914d\u7f6e\u5e76\u542f\u52a8\u672c\u5730 AI \u670d\u52a1\u3002",L"AI is off. Configure and start the local AI gateway before enabling."));
 case AiMessage::Enabled:return UiUtf8(UiLabel(L"\u5b57\u5e55\u5df2\u542f\u7528\uff0c\u97f3\u9891\u5c06\u53d1\u9001\u81f3\u5df2\u914d\u7f6e\u7684\u670d\u52a1\u3002",L"Transcription enabled; audio is sent to the configured service."));

@@ -36,6 +36,49 @@ int main(){try{
  longSummary.Enable(true);longSummary.Submit("alex",audio);Check(Wait([&]{return longSummary.Status()==AiMessage::Transcribing;}),"long summary input missing");
  Check(longSummary.Summarize()&&Wait([&]{return longSummary.Status()==AiMessage::SummaryReady;}),"long summary missing");
  Check(!longSummary.Speak()&&longSummary.Status()==AiMessage::SpeechLimit&&longSummary.Enabled(),"speech limit confused with transcript limit");
+
+ // A canceled in-flight voice response must not play or unlock a newer text job.
+ std::atomic<bool> voiceEntered{false},voiceRelease{false},keywordEntered{false},keywordRelease{false};
+ std::atomic<int> voiceCalls{0};
+ auto gate=[](std::atomic<bool>& released){auto deadline=std::chrono::steady_clock::now()+5s;while(!released&&std::chrono::steady_clock::now()<deadline)std::this_thread::sleep_for(1ms);};
+ SessionAi cancelVoice([&](const std::wstring& route,const std::string&,const std::wstring&){
+  if(route==L"/transcribe")return SessionAi::Reply{true,"spoken words"};
+  if(route==L"/summary")return SessionAi::Reply{true,"voice summary"};
+  if(route==L"/keywords"){keywordEntered=true;gate(keywordRelease);return SessionAi::Reply{true,"voice keyword"};}
+  Check(route==L"/speech","unexpected voice-test route");
+  if(++voiceCalls==1){voiceEntered=true;gate(voiceRelease);return SessionAi::Reply{true,"CANCELED VOICE"};}
+  return SessionAi::Reply{true,"CURRENT VOICE"};
+ });
+ cancelVoice.Enable(true);cancelVoice.Submit("alex",audio);
+ Check(Wait([&]{return cancelVoice.Status()==AiMessage::Transcribing;}),"voice test transcript missing");
+ Check(cancelVoice.Summarize()&&Wait([&]{return cancelVoice.Status()==AiMessage::SummaryReady;}),"voice test summary missing");
+ Check(cancelVoice.Speak()&&Wait([&]{return voiceEntered.load();}),"voice request did not start");
+ cancelVoice.StopSpeech();Check(cancelVoice.Status()==AiMessage::VoiceStopped,"voice cancellation status missing");
+ Check(cancelVoice.Keywords(),"canceling voice did not release text-action busy state");
+ voiceRelease=true;Check(Wait([&]{return keywordEntered.load();}),"text job did not follow canceled voice");
+ Check(cancelVoice.TakeSpeech().empty(),"canceled in-flight voice leaked audio");
+ cancelVoice.StopSpeech();Check(cancelVoice.Status()==AiMessage::KeywordsPending,"stopping voice overwrote unrelated pending status");
+ Check(!cancelVoice.Summarize(),"late voice response or repeated stop unlocked newer text job");
+ keywordRelease=true;Check(Wait([&]{return cancelVoice.Status()==AiMessage::KeywordsReady;}),"newer text action failed");
+ Check(cancelVoice.Speak()&&Wait([&]{return cancelVoice.Status()==AiMessage::VoiceReady;}),"new voice rejected after cancellation");
+ cancelVoice.StopSpeech();Check(cancelVoice.TakeSpeech().empty()&&cancelVoice.Status()==AiMessage::VoiceStopped,"canceling ready voice retained audio");
+ Check(cancelVoice.Speak()&&Wait([&]{return cancelVoice.Status()==AiMessage::VoiceReady;}),"second new voice failed");
+ Check(cancelVoice.TakeSpeech()=="CURRENT VOICE"&&voiceCalls==3,"new voice epoch failed");
+
+ // Queued voice jobs must be removed before the provider sees them.
+ std::atomic<int> queuedAsrCalls{0},queuedVoiceCalls{0};std::atomic<bool> queuedAsrEntered{false},queuedAsrRelease{false};
+ SessionAi queuedVoice([&](const std::wstring& route,const std::string&,const std::wstring&){
+  if(route==L"/transcribe"){if(++queuedAsrCalls==2){queuedAsrEntered=true;gate(queuedAsrRelease);}return SessionAi::Reply{true,"queued voice words"};}
+  if(route==L"/speech"){++queuedVoiceCalls;return SessionAi::Reply{true,"UNEXPECTED VOICE"};}
+  return SessionAi::Reply{true,"queued voice summary"};
+ });
+ queuedVoice.Enable(true);queuedVoice.Submit("alex",audio);
+ Check(Wait([&]{return queuedVoice.Status()==AiMessage::Transcribing;}),"queued voice transcript missing");
+ Check(queuedVoice.Summarize()&&Wait([&]{return queuedVoice.Status()==AiMessage::SummaryReady;}),"queued voice summary missing");
+ queuedVoice.Submit("alex",audio);Check(Wait([&]{return queuedAsrEntered.load();}),"queued voice blocker missing");
+ Check(queuedVoice.Speak(),"voice job failed to queue");queuedVoice.StopSpeech();queuedAsrRelease=true;
+ Check(queuedVoice.Summarize()&&Wait([&]{return queuedVoice.Status()==AiMessage::SummaryReady;}),"queued cancellation left actions busy");
+ Check(queuedVoiceCalls==0&&queuedVoice.TakeSpeech().empty(),"canceled queued voice reached provider");
  std::atomic<int> chunks{0};std::atomic<bool> cappedEntered{false},cappedRelease{false};
  SessionAi capped([&](const std::wstring& route,const std::string&,const std::wstring&){
   if(route==L"/keywords")return SessionAi::Reply{true,"remaining keywords"};
@@ -74,5 +117,5 @@ int main(){try{
  Check(firstReady&&oldReady&&during.original=="second"&&during.translated.empty(),"old translation attached to newer caption");Check(Wait([&]{return overlap.CaptionFor("alex").translated=="new translation";}),"latest translation missing");
  SessionAi silence([](const std::wstring&,const std::string&,const std::wstring&){return SessionAi::Reply{true,"   \n"};});
  silence.Enable(true);silence.Submit("silent",audio);Check(Wait([&]{return silence.Status()==AiMessage::Transcribing;}),"silence not handled");Check(silence.CaptionFor("silent").original.empty()&&silence.Text().find("[silent]")==std::string::npos,"silence produced caption");
- std::cout<<"PASS: default-off, WAV chunks, attributed transcript, summary, keywords, empty states, stop, session fencing and errors\n";return 0;
+ std::cout<<"PASS: default-off, WAV chunks, attributed transcript, summary, keywords, empty states, stop, speech cancellation, session fencing and errors\n";return 0;
  }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
