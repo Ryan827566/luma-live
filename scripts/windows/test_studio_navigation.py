@@ -5,6 +5,7 @@ import subprocess
 import sys
 import os
 import time
+from pathlib import Path
 
 u = c.WinDLL("user32", use_last_error=True)
 callback = c.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
@@ -56,6 +57,16 @@ try:
     traditional = os.environ.get("LUMALIVE_UI_LANGUAGE") in ("zh-TW", "zh-HK")
     if traditional: expected = "啟用字幕"
     assert label.value == expected, "Caption action does not follow Windows display language"
+    accessibility = Path(sys.argv[1]).resolve().parent / "luma_ui_accessibility_tests.exe"
+    expected_name = ("翻譯目標語言" if traditional else "翻译目标语言") if language == 4 else "Translation language"
+    subprocess.run([str(accessibility), str(u.GetDlgItem(child, 5)), expected_name], check=True)
+    language_combo = u.GetDlgItem(child, 5)
+    assert u.SendMessageW(language_combo, 0x146, 0, 0) == 5, "Translation languages missing"
+    u.SendMessageW(language_combo, 0x14E, 0, 0)
+    u.SendMessageW(language_combo, 0x100, 0x28, 0)  # native Down selection
+    assert u.SendMessageW(language_combo, 0x147, 0, 0) == 1, "Styled combo lost keyboard selection"
+    u.SendMessageW(language_combo, 0x100, 0x26, 0)
+    assert u.SendMessageW(language_combo, 0x147, 0, 0) == 0, "Styled combo lost reverse selection"
     assert u.GetDlgItem(child, 9), "Keyword extraction action missing"
     u.GetNextDlgTabItem.argtypes = [w.HWND, w.HWND, w.BOOL]; u.GetNextDlgTabItem.restype = w.HWND
     order = (2, 3, 9, 7, 5, 6, 10, 8, 4)
@@ -76,6 +87,20 @@ try:
     if traditional: guidance = "請先啟用字幕"
     assert label.value.startswith(guidance), "Empty keyword guidance mismatch: " + ascii(label.value) + " expected " + ascii(guidance)
 
+
+    transcript = u.GetDlgItem(child, 4)
+    original = c.create_unicode_buffer(4096)
+    u.SendMessageW(transcript, 0xD, 4096, c.cast(original, c.c_void_p).value)
+    assert not (u.GetWindowLongW(transcript, -16) & 0x200000), "Short transcript has an unnecessary scrollbar"
+    long_record = c.create_unicode_buffer("\r\n".join("Transcript line " + str(i) for i in range(100)))
+    u.SendMessageW(transcript, 0xC, 0, c.cast(long_record, c.c_void_p).value)
+    u.SendMessageW(child, 0x5, 0, 0)
+    assert u.GetWindowLongW(transcript, -16) & 0x200000, "Long transcript cannot be scrolled"
+    u.SendMessageW(transcript, 0x20A, (0xFF88 << 16), 0)  # wheel down
+    assert u.SendMessageW(transcript, 0xCE, 0, 0) > 0, "Native transcript wheel scrolling failed"
+    u.SendMessageW(transcript, 0xC, 0, c.cast(original, c.c_void_p).value)
+    u.SendMessageW(child, 0x5, 0, 0)
+    assert not (u.GetWindowLongW(transcript, -16) & 0x200000), "Scrollbar did not hide after restoring short text"
 
     assert u.GetWindowLongW(child, -16) & 0x10000000
     u.SendMessageW(root, 0x111, 117, 0)
