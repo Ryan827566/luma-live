@@ -48,6 +48,10 @@ try:
     u.SendMessageW(root, 0x111, 127, 0)
     child = u.FindWindowExW(root, None, "LumaSessionAi", None)
     assert child and u.GetAncestor(child, 2) == root, "AI opened outside the studio"
+    u.SendMessageTimeoutW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM, w.UINT, w.UINT, c.POINTER(c.c_size_t)]
+    result = c.c_size_t()
+    assert u.SendMessageTimeoutW(root, 0x111, 100, 0, 2, 2000, c.byref(result)), "Hidden call file action opened a modal dialog from AI"
+
     u.GetWindowTextW.argtypes = [w.HWND, w.LPWSTR, c.c_int]
     label = c.create_unicode_buffer(128)
     u.GetWindowTextW(u.GetDlgItem(child, 2), label, 128)
@@ -111,6 +115,8 @@ try:
     u.SendMessageW(root, 0x111, 126, 0)
     meeting = u.FindWindowExW(root, None, "LumaMeetingPreview", None)
     assert meeting and u.GetAncestor(meeting, 2) == root, "Meeting opened outside the studio"
+    assert u.SendMessageTimeoutW(root, 0x111, 100, 0, 2, 2000, c.byref(result)), "Hidden call file action opened a modal dialog from meeting"
+
     u.SendMessageW(root, 0x111, 117, 0)
     assert not (u.GetWindowLongW(meeting, -16) & 0x10000000)
     u.SendMessageW(root, 0x111, 126, 0)

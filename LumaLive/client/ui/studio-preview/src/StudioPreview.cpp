@@ -129,7 +129,8 @@ class StudioWindow {
         EnableWindow(Control(MicList),!capture_->IsMicrophoneCapturing()&&!microphones_.devices.empty());EnableWindow(Control(Monitor),capture_->IsMicrophoneCapturing());InvalidateRect(window_,nullptr,FALSE);
     }
     void OpenFile(){
-        wchar_t path[32768]{};OPENFILENAMEW ofn{sizeof(ofn)};ofn.hwndOwner=window_;ofn.lpstrFilter=ChineseUi()?L"视频与音频\0*.mp4;*.mov;*.wmv;*.avi;*.m4v;*.mp3;*.wav;*.m4a;*.wma\0所有文件\0*.*\0":L"Video and audio\0*.mp4;*.mov;*.wmv;*.avi;*.m4v;*.mp3;*.wav;*.m4a;*.wma\0All files\0*.*\0";ofn.lpstrFile=path;ofn.nMaxFile=32768;ofn.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
+        if(aiView_||meetingView_)return;
+        wchar_t path[32768]{};OPENFILENAMEW ofn{sizeof(ofn)};ofn.hwndOwner=window_;std::wstring filter=UiLabel(L"视频与音频",L"Video and audio");filter.push_back(L'\0');filter+=L"*.mp4;*.mov;*.wmv;*.avi;*.m4v;*.mp3;*.wav;*.m4a;*.wma";filter.push_back(L'\0');filter+=UiLabel(L"所有文件",L"All files");filter.push_back(L'\0');filter+=L"*.*";filter.push_back(L'\0');ofn.lpstrFilter=filter.c_str();ofn.lpstrFile=path;ofn.nMaxFile=32768;ofn.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
         if(!GetOpenFileNameW(&ofn))return;
         OpenMedia(path);
     }
@@ -260,7 +261,7 @@ class StudioWindow {
     }
     void Command(int id){
         if(id==Advanced){connectionSettings_=!connectionSettings_;Layout();return;}
-        if(meetingPage_&&meetingPage_->Active()&&(id==Camera||id==Microphone||id==ShareScreen||id==Join)){status_=L"\u8bf7\u5148\u79bb\u5f00\u4f1a\u8bae\uff0c\u518d\u5f00\u59cb\u901a\u8bdd\u6216\u672c\u5730\u91c7\u96c6";InvalidateRect(window_,nullptr,FALSE);return;}
+        if(meetingPage_&&meetingPage_->Active()&&(id==Camera||id==Microphone||id==ShareScreen||id==Join)){status_=UiLabel(L"请先离开会议，再开始通话或本地采集",L"Leave the meeting before starting a call or local capture.");InvalidateRect(window_,nullptr,FALSE);return;}
         switch(id){
         case Ai:if(fullscreen_)Fullscreen();aiView_=true;meetingView_=false;Layout();break;
         case Meeting:{if(fullscreen_)Fullscreen();if(!meetingPage_)meetingPage_=CreateHostedMeeting(instance_,window_);if(meetingPage_){meetingView_=true;aiView_=false;meetingAiContext_=true;Layout();}break;}
@@ -363,7 +364,7 @@ public:
         const auto renderPath=Option(L"--render-check");if(!renderPath.empty()){const bool rendered=RenderCheck(renderPath);Shutdown();DestroyWindow(window_);return rendered?0:2;}
         const auto mediaPath=Option(L"--media");if(!mediaPath.empty())OpenMedia(mediaPath.c_str());
         SetTimer(window_,1,33,nullptr);ShowWindow(window_,show);UpdateWindow(window_);
-        MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){if(msg.message==WM_KEYDOWN){if(msg.wParam==VK_F11){Fullscreen();continue;}if(msg.wParam==VK_ESCAPE&&fullscreen_){Fullscreen();continue;}if(msg.wParam=='O'&&(GetKeyState(VK_CONTROL)&0x8000)){OpenFile();continue;}if(msg.wParam==VK_SPACE&&msg.hwnd==window_){Command(Pause);continue;}}if(!IsDialogMessageW(window_,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
+        MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){if(msg.message==WM_KEYDOWN){if(msg.wParam==VK_F11){if(!(msg.lParam&(LPARAM(1)<<30)))Fullscreen();continue;}if(msg.wParam==VK_ESCAPE&&fullscreen_){Fullscreen();continue;}if(msg.wParam=='O'&&(GetKeyState(VK_CONTROL)&0x8000)){if(!(msg.lParam&(LPARAM(1)<<30)))OpenFile();continue;}if(msg.wParam==VK_SPACE&&msg.hwnd==window_){Command(Pause);continue;}}if(!IsDialogMessageW(window_,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
         return static_cast<int>(msg.wParam);
     }
 };
