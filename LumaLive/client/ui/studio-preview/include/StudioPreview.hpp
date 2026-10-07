@@ -12,6 +12,7 @@ public:
     virtual HWND Handle() const = 0;
     virtual void SetDpi(UINT dpi) = 0;
     virtual bool CanClose() = 0;
+    virtual bool CancelPendingAction() = 0;
     virtual bool Active() = 0;
     virtual AiPanel& Assistant() = 0;
 };

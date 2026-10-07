@@ -41,6 +41,13 @@ try:
     time.sleep(2)
     u.GetDpiForWindow.argtypes = [w.HWND]; u.GetDpiForWindow.restype = w.UINT
     scale = u.GetDpiForWindow(root) / 96
+    u.GetNextDlgTabItem.argtypes = [w.HWND, w.HWND, w.BOOL]; u.GetNextDlgTabItem.restype = w.HWND
+    def sidebar_order():
+        assert u.GetNextDlgTabItem(root, None, False) == u.GetDlgItem(root, 117), "Sidebar Tab entry is not Calls"
+        for before, after in ((117, 126), (126, 127)):
+            assert u.GetNextDlgTabItem(root, u.GetDlgItem(root, before), False) == u.GetDlgItem(root, after), "Sidebar Tab order differs from visual order"
+            assert u.GetNextDlgTabItem(root, u.GetDlgItem(root, after), True) == u.GetDlgItem(root, before), "Sidebar reverse Tab order differs"
+    sidebar_order()
     for control_id in (117, 126, 127):
         rect = w.RECT(); assert u.GetWindowRect(u.GetDlgItem(root, control_id), c.byref(rect))
         u.MapWindowPoints(None, root, c.byref(rect), 2)
@@ -58,6 +65,7 @@ try:
     u.SendMessageW(root, 0x111, 127, 0)
     child = u.FindWindowExW(root, None, "LumaSessionAi", None)
     assert child and u.GetAncestor(child, 2) == root, "AI opened outside the studio"
+    sidebar_order()
     u.SendMessageTimeoutW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM, w.UINT, w.UINT, c.POINTER(c.c_size_t)]
     result = c.c_size_t()
     assert u.SendMessageTimeoutW(root, 0x111, 100, 0, 2, 2000, c.byref(result)), "Hidden call file action opened a modal dialog from AI"
@@ -127,6 +135,7 @@ try:
     u.SendMessageW(root, 0x111, 126, 0)
     meeting = u.FindWindowExW(root, None, "LumaMeetingPreview", None)
     assert meeting and u.GetAncestor(meeting, 2) == root, "Meeting opened outside the studio"
+    sidebar_order()
     assert u.SendMessageTimeoutW(root, 0x111, 100, 0, 2, 2000, c.byref(result)), "Hidden call file action opened a modal dialog from meeting"
 
     u.SendMessageW(root, 0x111, 117, 0)
@@ -165,6 +174,9 @@ try:
         assert label.value not in ("\u79bb\u5f00\u623f\u95f4", "Leave room"), "Call joined concurrently with meeting"
         u.SendMessageW(root, 0x111, 126, 0)
         assert u.SendMessageW(u.GetDlgItem(meeting, 210), 0x18B, 0, 0) == 3, "Navigation lost membership"
+        u.SendMessageW(meeting, 0x111, 218, 0)
+        fullscreen_style = u.GetWindowLongW(root, -16)
+        assert fullscreen_style != style, "Meeting did not enter fullscreen"
         u.SendMessageW(u.GetDlgItem(meeting, 212), 0xF5, 0, 0)  # native button click
         u.IsWindowVisible.argtypes = [w.HWND]; u.IsWindowVisible.restype = w.BOOL
         confirmation = u.GetDlgItem(meeting, 223)
@@ -176,6 +188,14 @@ try:
         while u.GetWindowLongW(confirmation, -16) & 0x10000000 and time.monotonic() < until: time.sleep(.05)
         assert not (u.GetWindowLongW(confirmation, -16) & 0x10000000), "Escape did not cancel inline confirmation"
         assert u.SendMessageW(u.GetDlgItem(meeting, 210), 0x18B, 0, 0) == 3, "Cancel ended the meeting"
+        assert u.GetWindowLongW(root, -16) == fullscreen_style, "Escape left fullscreen instead of only cancelling confirmation"
+        u.PostMessageW(u.GetDlgItem(meeting, 205), 0x100, 0x1B, 1 << 30)
+        time.sleep(.1)
+        assert u.GetWindowLongW(root, -16) == fullscreen_style, "Held Escape also exited fullscreen"
+        u.PostMessageW(u.GetDlgItem(meeting, 205), 0x100, 0x1B, 0)
+        until = time.monotonic() + 2
+        while u.GetWindowLongW(root, -16) != style and time.monotonic() < until: time.sleep(.05)
+        assert u.GetWindowLongW(root, -16) == style, "Second Escape did not leave fullscreen"
         u.SendMessageW(u.GetDlgItem(meeting, 212), 0xF5, 0, 0)
         u.SendMessageW(confirmation, 0xF5, 0, 0)
         assert fixture.wait(timeout=8) == 0, "Fixture did not observe meeting end"
