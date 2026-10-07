@@ -89,7 +89,7 @@ class StudioWindow {
     HWND Control(int id)const{return controls_[id-100];}
     int S(int n)const{return MulDiv(n,dpi_,96);}
     void Place(int id,int x,int y,int w,int h){MoveWindow(Control(id),S(x),S(y),S(w),S(h),TRUE);}
-    HWND Make(int id,const wchar_t* cls,const wchar_t* label,DWORD style){auto h=CreateWindowExW(0,cls,label,WS_CHILD|WS_VISIBLE|WS_TABSTOP|style,0,0,1,1,window_,reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),instance_,nullptr);controls_[id-100]=h;SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(body_),TRUE);return h;}
+    HWND Make(int id,const wchar_t* cls,const wchar_t* label,DWORD style){if(lstrcmpW(cls,L"COMBOBOX")==0)style|=CBS_OWNERDRAWFIXED|CBS_HASSTRINGS;auto h=CreateWindowExW(0,cls,label,WS_CHILD|WS_VISIBLE|WS_TABSTOP|style,0,0,1,1,window_,reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),instance_,nullptr);controls_[id-100]=h;SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(body_),TRUE);return h;}
     void Button(int id,const wchar_t* label){UiTheme::InstallHover(Make(id,L"BUTTON",label,BS_OWNERDRAW));}
     void Fonts(){for(auto f:{body_,small_,title_,brand_})if(f)DeleteObject(f);auto make=[&](int size,int weight){return CreateFontW(-S(size),0,0,0,weight,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,ChineseUi()?L"Microsoft YaHei UI":L"Segoe UI");};body_=make(14,400);small_=make(12,400);title_=make(22,600);brand_=make(23,700);for(auto c:controls_)if(c)SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(body_),TRUE);}
     RECT R(int x,int y,int w,int h)const{return {S(x),S(y),S(x+w),S(y+h)};}
@@ -168,7 +168,7 @@ class StudioWindow {
         }
         ai_.Hide();ShowWindow(surface_,SW_SHOW);
         const int x=left_+16, end=width_-right_-16, total=end-x, deck=(total-16)/2;
-        const int deckHeight=std::clamp(deck*9/16,180,std::max(180,height_-534));
+        const int deckHeight=std::clamp(deck*9/16,180,std::max(180,height_-546));
         preview_=R(x,130,deck,deckHeight);remotePreview_=R(x+deck+16,130,deck,deckHeight);
         MoveWindow(surface_,preview_.left,preview_.top,preview_.right-preview_.left,preview_.bottom-preview_.top,TRUE);
         MoveWindow(remoteSurface_,remotePreview_.left,remotePreview_.top,remotePreview_.right-remotePreview_.left,remotePreview_.bottom-remotePreview_.top,TRUE);
@@ -176,13 +176,13 @@ class StudioWindow {
         const int sourceWidth=(total-16)/2,mx=x+sourceWidth+16,rx=width_-right_+16;
         Place(Open,width_-right_-174,52,158,32);Place(CameraMode,x,130+deckHeight+10,94,32);Place(FileMode,x+102,130+deckHeight+10,94,32);
         Place(Pause,x+206,130+deckHeight+10,74,32);Place(Stop,x+288,130+deckHeight+10,74,32);Place(FullScreen,end-112,130+deckHeight+10,112,32);
-        Place(CameraList,x+12,lower_+66,sourceWidth-24,160);Place(Camera,x+12,lower_+104,sourceWidth-128,34);Place(Refresh,x+sourceWidth-108,lower_+104,96,34);
-        Place(MicList,x+12,lower_+182,sourceWidth-24,160);Place(Microphone,x+12,lower_+220,sourceWidth-24,34);Place(ShareScreen,x+12,lower_+262,sourceWidth-24,28);
+        Place(CameraList,x+12,lower_+66,sourceWidth-24,160);Place(Camera,x+12,lower_+114,sourceWidth-128,34);Place(Refresh,x+sourceWidth-108,lower_+114,96,34);
+        Place(MicList,x+12,lower_+182,sourceWidth-24,160);Place(Microphone,x+12,lower_+230,sourceWidth-24,34);Place(ShareScreen,x+12,lower_+272,sourceWidth-24,28);
         Place(Monitor,mx+12,lower_+118,sourceWidth-24,34);Place(Volume,mx+12,lower_+204,sourceWidth-24,30);Place(TestSound,mx+12,lower_+250,sourceWidth-24,34);
         Place(Identity,rx,174,right_-32,34);Place(Room,rx,250,right_-32,34);Place(Advanced,rx,298,right_-32,28);
         ShowWindow(Control(Host),connectionSettings_?SW_SHOW:SW_HIDE);Place(Host,rx,356,right_-32,30);
         const int connectY=connectionSettings_?402:342;Place(Join,rx,connectY,right_-32,38);
-        Place(Peers,rx,connectY+82,right_-32,140);Place(Dial,rx,connectY+126,right_-32,38);
+        Place(Peers,rx,connectY+82,right_-32,140);Place(Dial,rx,connectY+130,right_-32,34);
         Place(AcceptCall,rx,connectY+172,(right_-40)/2,34);Place(RejectCall,rx+(right_-40)/2+8,connectY+172,(right_-40)/2,34);
         Place(EndCall,rx,connectY+216,(right_-40)/2,34);Place(Reconnect,rx+(right_-40)/2+8,connectY+216,(right_-40)/2,34);
         ShowWindow(Control(Pause),!cameraView_?SW_SHOW:SW_HIDE);ShowWindow(Control(Stop),!cameraView_?SW_SHOW:SW_HIDE);
@@ -210,7 +210,7 @@ class StudioWindow {
         Label(dc,UiLabel(L"视频通话",L"Video calls"),x,50,total-194,36,body_);
         Label(dc,UiLabel(L"我的画面",L"Your preview"),x,100,deck,28,small_,Mint);Label(dc,UiLabel(L"对方画面",L"Other participant"),x+deck+16,100,deck,28,small_,call_.Active()?Mint:Muted);
         RECT border=preview_;InflateRect(&border,1,1);Fill(dc,border,Mint);border=remotePreview_;InflateRect(&border,1,1);Fill(dc,border,call_.Active()?Mint:Border);
-        card(x,lower_,sourceWidth,std::max(292,height_-lower_-48));card(mx,lower_,sourceWidth,std::max(292,height_-lower_-48));
+        card(x,lower_,sourceWidth,std::max(302,height_-lower_-48));card(mx,lower_,sourceWidth,std::max(302,height_-lower_-48));
         Label(dc,UiLabel(L"输入设备",L"Input devices"),x+12,lower_+8,sourceWidth-24,28,small_,Muted);
         Label(dc,UiLabel(L"摄像头",L"Camera"),x+12,lower_+40,sourceWidth-24,22,small_);Label(dc,UiLabel(L"麦克风",L"Microphone"),x+12,lower_+154,sourceWidth-24,24,small_);
         Label(dc,UiLabel(L"音频",L"Audio"),mx+12,lower_+8,sourceWidth-24,28,small_,Muted);
@@ -252,6 +252,7 @@ class StudioWindow {
         while(at<command.size()){if(token()==name)return token();}return {};
     }
     void DrawButton(const DRAWITEMSTRUCT& d){
+        if(d.CtlType==ODT_COMBOBOX){UiTheme::DrawComboItem(d,body_);return;}
         bool primary=d.CtlID==Open||d.CtlID==Join,selected=(d.CtlID==Ai&&aiView_)||(d.CtlID==RemoteMode&&!aiView_&&!meetingView_)||(d.CtlID==Meeting&&meetingView_)||(d.CtlID==CameraMode&&cameraView_)||(d.CtlID==FileMode&&!cameraView_);bool disabled=(d.itemState&ODS_DISABLED)!=0;
         UiTheme::DrawButton(d,body_,primary,selected,d.CtlID==EndCall||d.CtlID==RejectCall);
     }
@@ -317,6 +318,7 @@ class StudioWindow {
         case WM_PRINTCLIENT:Paint(reinterpret_cast<HDC>(wp));return 0;
         case WM_ERASEBKGND:return 1;
         case WM_PAINT:{PAINTSTRUCT ps;auto dc=BeginPaint(window_,&ps);RECT r;GetClientRect(window_,&r);auto mem=CreateCompatibleDC(dc);auto bmp=CreateCompatibleBitmap(dc,std::max(1L,r.right),std::max(1L,r.bottom));auto old=SelectObject(mem,bmp);Paint(mem);BitBlt(dc,0,0,r.right,r.bottom,mem,0,0,SRCCOPY);SelectObject(mem,old);DeleteObject(bmp);DeleteDC(mem);EndPaint(window_,&ps);return 0;}
+        case WM_MEASUREITEM:{auto d=reinterpret_cast<MEASUREITEMSTRUCT*>(lp);if(d->CtlType==ODT_COMBOBOX){d->itemHeight=S(30);return TRUE;}break;}
         case WM_DRAWITEM:DrawButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lp));return TRUE;
         case WM_CTLCOLORLISTBOX:case WM_CTLCOLOREDIT:case WM_CTLCOLORSTATIC:SetTextColor(reinterpret_cast<HDC>(wp),Ink);SetBkColor(reinterpret_cast<HDC>(wp),Panel);return reinterpret_cast<LRESULT>(panelBrush_);
         case WM_COMMAND:if(HIWORD(wp)==BN_CLICKED)Command(LOWORD(wp));return 0;
@@ -377,5 +379,3 @@ int RunStudioPreview(HINSTANCE instance,int show){
     int result;{StudioWindow window;result=window.Run(instance,show);}CoUninitialize();return result;
 }
 }
-
-

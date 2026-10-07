@@ -45,6 +45,16 @@ try:
         rect = w.RECT(); assert u.GetWindowRect(u.GetDlgItem(root, control_id), c.byref(rect))
         u.MapWindowPoints(None, root, c.byref(rect), 2)
         assert 0 <= rect.left < rect.right <= 176 * scale, f"Module {control_id} outside sidebar: {rect.left}, {rect.right}, scale={scale}"
+    # Native owner-drawn combos include non-client borders in their outer height.
+    # Validate geometry as well as CB_GETITEMHEIGHT, so taller fields cannot cover actions.
+    for combo_id, button_id in ((107, 101), (108, 102), (119, 120)):
+        combo = u.GetDlgItem(root, combo_id)
+        assert u.SendMessageW(combo, 0x154, c.c_size_t(-1).value, 0) == round(34 * scale)
+        assert u.SendMessageW(combo, 0x154, 0, 0) == round(30 * scale)
+        field, action = w.RECT(), w.RECT()
+        assert u.GetWindowRect(combo, c.byref(field))
+        assert u.GetWindowRect(u.GetDlgItem(root, button_id), c.byref(action))
+        assert action.top - field.bottom >= round(8 * scale), "Call dropdown crowds its action"
     u.SendMessageW(root, 0x111, 127, 0)
     child = u.FindWindowExW(root, None, "LumaSessionAi", None)
     assert child and u.GetAncestor(child, 2) == root, "AI opened outside the studio"
@@ -65,6 +75,8 @@ try:
     expected_name = ("翻譯目標語言" if traditional else "翻译目标语言") if language == 4 else "Translation language"
     subprocess.run([str(accessibility), str(u.GetDlgItem(child, 5)), expected_name], check=True)
     language_combo = u.GetDlgItem(child, 5)
+    assert u.SendMessageW(language_combo, 0x154, c.c_size_t(-1).value, 0) == round(34 * scale), "AI selection height differs from shared metrics"
+    assert u.SendMessageW(language_combo, 0x154, 0, 0) == round(30 * scale), "AI list row height differs from shared metrics"
     assert u.SendMessageW(language_combo, 0x146, 0, 0) == 5, "Translation languages missing"
     u.SendMessageW(language_combo, 0x14E, 0, 0)
     u.SendMessageW(language_combo, 0x100, 0x28, 0)  # native Down selection

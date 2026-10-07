@@ -1,23 +1,34 @@
-"""Rasterize the original LumaLive mark at Windows icon sizes (requires Pillow)."""
+"""Package the approved LumaLive raster master into Windows icon resources.
+
+Requires Pillow. No redraw or design changes: the original alpha and artwork
+are preserved, with standard resampling only for operating-system icon sizes.
+"""
 from pathlib import Path
 from PIL import Image, ImageDraw
 root = Path(__file__).resolve().parents[2]
 assets = root / "LumaLive/client/ui/studio-preview/assets"
-scale = 4
-image = Image.new("RGBA", (256*scale, 256*scale))
-draw = ImageDraw.Draw(image)
-def box(values): return tuple(round(v*scale) for v in values)
-def line(points, color, width):
-    draw.line([box(p) for p in points], fill=color, width=width*scale, joint="curve")
-    radius=width/2
-    for x,y in points: draw.ellipse(box((x-radius,y-radius,x+radius,y+radius)),fill=color)
-draw.rounded_rectangle(box((0,0,256,256)), radius=52*scale, fill="#101720")
-line([(58,54),(58,182),(145,182)], "#2099ee",28)
-line([(111,56),(111,132)],"#91d4ff",22)
-draw.polygon([box(p) for p in [(151,68),(202,102),(151,136)]],fill="#edf7ff")
-line([(171,181),(193,160),(208,138)],"#3d6c88",5)
-for x,y,r,color in [(171,181,9,"#2099ee"),(193,160,9,"#91d4ff"),(208,138,7,"#f28d62")]:draw.ellipse(box((x-r,y-r,x+r,y+r)),fill=color)
-image=image.resize((256,256),Image.Resampling.LANCZOS)
-image.save(assets/"lumalive.png")
-image.save(assets/"lumalive.ico",sizes=[(v,v) for v in (16,24,32,48,64,256)])
-print("Generated PNG and six-size ICO")
+source = Image.open(assets / "lumalive-master.png").convert("RGBA")
+assert source.width == source.height and source.width >= 256
+assert source.getextrema()[3][0] == 0, "Master must retain transparent corners"
+sizes = (16, 20, 24, 32, 40, 48, 64, 128, 256)
+image = source.resize((256, 256), Image.Resampling.LANCZOS)
+image.save(assets / "lumalive.png")
+image.save(assets / "lumalive.ico", sizes=[(v, v) for v in sizes])
+icon = Image.open(assets / "lumalive.ico")
+assert icon.ico.sizes() == {(v, v) for v in sizes}
+# Review artifact only: show real-size taskbar variants on light and dark surfaces.
+board = Image.new("RGB", (640, 230), "#101720")
+draw = ImageDraw.Draw(board)
+draw.rectangle((0, 115, 640, 230), fill="#f0f2f5")
+for row, color in ((0, "#cbd7e5"), (115, "#364354")):
+    x = 24
+    for size in sizes[:7]:
+        variant = icon.ico.getimage((size, size)).convert("RGBA")
+        assert variant.getextrema()[3][0] == 0
+        board.paste(variant, (x, row + 18), variant)
+        draw.text((x, row + 90), str(size) + " px", fill=color)
+        x += 84
+output = root / "output/icon-review"
+output.mkdir(parents=True, exist_ok=True)
+board.save(output / "lumalive-sizes.png")
+print("PASS: packaged nine ICO sizes with transparency; size sheet in output/icon-review")

@@ -35,7 +35,7 @@ inline void InstallHover(HWND h){SetWindowSubclass(h,HoverProc,1,0);}
 // Only its closed field is painted here; parent list painting remains intact.
 inline constexpr int ComboHeight=34;
 inline UINT ComboDpi(HWND h){const auto stored=reinterpret_cast<UINT_PTR>(GetPropW(h,L"LumaComboDpi"));return stored?UINT(stored):GetDpiForWindow(h);}
-inline void SetComboDpi(HWND h,UINT dpi){SetPropW(h,L"LumaComboDpi",reinterpret_cast<HANDLE>(UINT_PTR(dpi)));SendMessageW(h,CB_SETITEMHEIGHT,WPARAM(-1),MulDiv(ComboHeight,int(dpi),96));InvalidateRect(h,nullptr,FALSE);}
+inline void SetComboDpi(HWND h,UINT dpi){SetPropW(h,L"LumaComboDpi",reinterpret_cast<HANDLE>(UINT_PTR(dpi)));SendMessageW(h,CB_SETITEMHEIGHT,WPARAM(-1),MulDiv(ComboHeight,int(dpi),96));SendMessageW(h,CB_SETITEMHEIGHT,0,MulDiv(30,int(dpi),96));InvalidateRect(h,nullptr,FALSE);}
 inline void DrawCombo(HWND h,HDC dc){
  const int saved=SaveDC(dc);RECT r{};GetClientRect(h,&r);const auto dpi=ComboDpi(h);auto px=[&](int value){return MulDiv(value,int(dpi),96);};
  const bool enabled=IsWindowEnabled(h),focused=GetFocus()==h||SendMessageW(h,CB_GETDROPPEDSTATE,0,0);
@@ -57,6 +57,12 @@ inline LRESULT CALLBACK ComboProc(HWND h,UINT message,WPARAM w,LPARAM l,UINT_PTR
  return result;
 }
 inline void InstallCombo(HWND h){SetWindowSubclass(h,ComboProc,2,0);SetComboDpi(h,GetDpiForWindow(h));}
+
+inline void DrawComboItem(const DRAWITEMSTRUCT& d,HFONT font){
+ const int saved=SaveDC(d.hDC);Fill(d.hDC,d.rcItem,(d.itemState&ODS_SELECTED)?AccentSoft:Surface);
+ if(d.itemID!=UINT(-1)){const auto length=SendMessageW(d.hwndItem,CB_GETLBTEXTLEN,d.itemID,0);if(length>=0){std::wstring label(size_t(length)+1,L'\0');SendMessageW(d.hwndItem,CB_GETLBTEXT,d.itemID,reinterpret_cast<LPARAM>(label.data()));SelectObject(d.hDC,font);SetBkMode(d.hDC,TRANSPARENT);SetTextColor(d.hDC,(d.itemState&ODS_DISABLED)?Muted:Text);auto r=d.rcItem;const int inset=MulDiv(12,int(ComboDpi(d.hwndItem)),96);r.left+=inset;r.right-=inset;DrawTextW(d.hDC,label.c_str(),-1,&r,DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX);}}
+ if(d.itemState&ODS_FOCUS){auto r=d.rcItem;InflateRect(&r,-2,-2);DrawFocusRect(d.hDC,&r);}RestoreDC(d.hDC,saved);
+}
 
 inline void DrawButton(const DRAWITEMSTRUCT& d,HFONT font,bool primary=false,bool selected=false,bool danger=false){
  const int saved=SaveDC(d.hDC);const bool disabled=d.itemState&ODS_DISABLED;
