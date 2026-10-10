@@ -49,7 +49,7 @@ def main():
         print("PASS:", name, flush=True)
     save()
     try:
-        targets = ["luma_studio", "luma_signaling_server", "luma_meeting_ui_fixture", "luma_session_ai_tests", "luma_session_ai_gateway_tests", "luma_caption_overlay_tests", "luma_ui_locale_tests", "luma_ui_accessibility_tests"]
+        targets = ["luma_studio", "luma_signaling_server", "luma_meeting_ui_fixture", "luma_session_ai_tests", "luma_session_ai_gateway_tests", "luma_caption_overlay_tests", "luma_ui_locale_tests", "luma_ui_accessibility_tests", "luma_transcript_view_tests"]
         run("build", [cmake, "--build", str(build), "--config", "Release", "--target", *targets, "--parallel", "1", "--", "/nr:false"], 1800)
         # The configured output must also be newer than the linked preview library.
         executable = binary / "luma_studio.exe"
@@ -58,6 +58,7 @@ def main():
             raise RuntimeError("Client executable is missing or older than the preview library; check the CMake runtime output directory.")
         record["client"] = {"path": str(executable), "sha256": hashlib.sha256(executable.read_bytes()).hexdigest()}
         run("accessibility", [str(binary / "luma_ui_accessibility_tests.exe")], 20)
+        run("transcript-view", [str(binary / "luma_transcript_view_tests.exe")], 20)
         run("locale", [str(binary / "luma_ui_locale_tests.exe")], 20)
         run("ai-state", [str(binary / "luma_session_ai_tests.exe")], 30)
         run("captions", [str(binary / "luma_caption_overlay_tests.exe"), str(root / "output/caption-overlay.bmp")], 20)

@@ -104,3 +104,11 @@ Do not mark product UI complete based on compilation, synthetic media tests or t
 2026-10-10 screen-sharing status localization:
 - Call-page screen-sharing startup and interruption failures now use system-language UI messages instead of raw English capture errors. Raw details remain in debug output. Remembering a startup failure also prevents the polling loop from replacing it immediately with an interruption message.
 - Actual client rebuilt and all nine verifier checks passed. Physical screen-capture failure/recovery was not injected in this run and remains a device acceptance item. EXE SHA-256: af75cc92a3eda107611bff27ec335394d1099747555d5f787761b499e52ed888.
+
+
+2026-10-11 transcript reading checkpoint:
+- Incoming captions now preserve the viewport after wheel scrolling up, even when the caret remains at the end. Selected text and its reading position survive updates. Returning to the tail resumes automatic following.
+- Corrected the former EM_SETSEL(-1,-1) assumption: that message deselects, rather than positioning the caret at the new end. The shared transcript helper now sets explicit end offsets and scrolls native lines; this also works while the AI workspace is hidden. Native regression verifies hidden-page updates and reveal without losing the newest captions.
+- Scrollbar visibility uses the EDIT formatting rectangle and actual font line height. Native tests cover overflow and replacement with short text. Scrollbar colors are unchanged and remain a separate visual item.
+- All ten actual-client verifier checks passed, including the new native transcript view regression, existing three-member navigation and DPI diagnostics. Algorithm-only independent review found no blocking issue; its filesystem review was unavailable. EXE SHA-256: d751019fd557463df569b58065263b4666a02ad5313f4c9590519e500a464cef.
+- This is a development checkpoint, not final UI or real-provider/media acceptance. Windows message semantics reference: https://learn.microsoft.com/en-us/windows/win32/controls/em-setsel .
