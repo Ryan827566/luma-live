@@ -93,3 +93,9 @@ Do not mark product UI complete based on compilation, synthetic media tests or t
 - Hosted regression queries the actual client GUI thread focus. Closing while on Calls or AI reveals the meeting and focuses Cancel; cancellation retains all three members. Escape from End confirmation returns focus to End while retaining fullscreen.
 - Call/meeting text inputs and the AI transcript now share dark borders and a blue focused border while keeping native editing/selection/IME/scroll behavior. The subclass handles native EDIT client painting as well as non-client painting because Windows consumes the original WS_BORDER style. Actual focused captures in output/ui-focus-final confirm the frame is visible. Native overflow scrollbar styling and full IME/Narrator workflows are still pending.
 - Latest actual executable passed all nine verify_client.py checks. Compact zh-CN/en-US/zh-TW focus/navigation checks passed before the final paint-only correction; the full verifier and focused compact screenshots passed again after that correction. EXE SHA-256: 3155cb49aebc26f9ea6a38bfe60dfadee30ccd9dfb8e097636dd18df0ac79003. No physical multi-monitor or real-provider/media acceptance is implied.
+
+
+2026-10-10 native volume control checkpoint:
+- Native trackbar channel/thumb custom drawing now uses the shared dark/blue palette. The native trackbar still owns range, position, mouse/keyboard handling and accessibility.
+- Hosted regression verifies Right increments volume and Left restores it. All nine actual-EXE checks passed; the compact call capture in output/ui-slider-final confirms the blue level segment and dark remaining track render correctly. Physical drag and screen-reader workflows remain separate manual acceptance items.
+- Tested EXE SHA-256: 1e6d571bfb37cdbbd16a7c9e4abb3e0f36c40d6673e1a2c16259124261106e9e. Native overflow scrollbar styling, broader device/localization/accessibility and full UI acceptance remain open.

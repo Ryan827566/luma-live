@@ -80,6 +80,26 @@ inline void DrawComboItem(const DRAWITEMSTRUCT& d,HFONT font){
  if(d.itemState&ODS_FOCUS){auto r=d.rcItem;InflateRect(&r,-2,-2);DrawFocusRect(d.hDC,&r);}RestoreDC(d.hDC,saved);
 }
 
+inline LRESULT DrawTrackbar(const NMCUSTOMDRAW& d){
+ if(d.dwDrawStage==CDDS_PREPAINT)return CDRF_NOTIFYITEMDRAW;
+ if(d.dwDrawStage!=CDDS_ITEMPREPAINT)return CDRF_DODEFAULT;
+ if(d.dwItemSpec!=TBCD_CHANNEL&&d.dwItemSpec!=TBCD_THUMB)return CDRF_DODEFAULT;
+ const auto h=d.hdr.hwndFrom;const int saved=SaveDC(d.hdc);const bool enabled=IsWindowEnabled(h);
+ auto px=[&](int value){return std::max(1,MulDiv(value,int(GetDpiForWindow(h)),96));};
+ RECT thumb{};SendMessageW(h,TBM_GETTHUMBRECT,0,reinterpret_cast<LPARAM>(&thumb));
+ if(d.dwItemSpec==TBCD_CHANNEL){
+  RECT r{};SendMessageW(h,TBM_GETCHANNELRECT,0,reinterpret_cast<LPARAM>(&r));
+  const int center=(thumb.top+thumb.bottom)/2;r.top=center-px(2);r.bottom=r.top+px(4);Fill(d.hdc,r,Border);
+  r.right=std::clamp(int((thumb.left+thumb.right)/2),int(r.left),int(r.right));Fill(d.hdc,r,enabled?Accent:Muted);
+ }else{
+  const int cx=(thumb.left+thumb.right)/2,cy=(thumb.top+thumb.bottom)/2;
+  auto brush=CreateSolidBrush(enabled?Text:Muted);auto pen=CreatePen(PS_SOLID,px(1),enabled&&GetFocus()==h?Accent:Border);
+  SelectObject(d.hdc,brush);SelectObject(d.hdc,pen);RoundRect(d.hdc,cx-px(6),cy-px(9),cx+px(6),cy+px(9),px(6),px(6));
+  RestoreDC(d.hdc,saved);DeleteObject(brush);DeleteObject(pen);return CDRF_SKIPDEFAULT;
+ }
+ RestoreDC(d.hdc,saved);return CDRF_SKIPDEFAULT;
+}
+
 inline void DrawButton(const DRAWITEMSTRUCT& d,HFONT font,bool primary=false,bool selected=false,bool danger=false){
  const int saved=SaveDC(d.hDC);const bool disabled=d.itemState&ODS_DISABLED;
  COLORREF fill=disabled?Surface:(selected?AccentSoft:(primary?Accent:Elevated));

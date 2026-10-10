@@ -324,6 +324,7 @@ class StudioWindow {
         case WM_MEASUREITEM:{auto d=reinterpret_cast<MEASUREITEMSTRUCT*>(lp);if(d->CtlType==ODT_COMBOBOX){d->itemHeight=S(30);return TRUE;}break;}
         case WM_DRAWITEM:DrawButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lp));return TRUE;
         case WM_CTLCOLORLISTBOX:case WM_CTLCOLOREDIT:case WM_CTLCOLORSTATIC:SetTextColor(reinterpret_cast<HDC>(wp),Ink);SetBkColor(reinterpret_cast<HDC>(wp),Panel);return reinterpret_cast<LRESULT>(panelBrush_);
+        case WM_NOTIFY:{auto n=reinterpret_cast<NMHDR*>(lp);if(n->hwndFrom==Control(Volume)&&n->code==NM_CUSTOMDRAW)return UiTheme::DrawTrackbar(*reinterpret_cast<NMCUSTOMDRAW*>(lp));break;}
         case WM_COMMAND:if(HIWORD(wp)==BN_CLICKED)Command(LOWORD(wp));return 0;
         case WM_HSCROLL:if(reinterpret_cast<HWND>(lp)==Control(Volume)){volume_=static_cast<int>(SendMessageW(Control(Volume),TBM_GETPOS,0,0));audio_.SetVolume(volume_/100.f);remoteAudio_.SetVolume(volume_/100.f);if(player_)player_->SetVolume(volume_/100.f);InvalidateRect(window_,nullptr,FALSE);}return 0;
         case WM_TIMER:{

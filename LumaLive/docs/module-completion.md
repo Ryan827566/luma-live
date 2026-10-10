@@ -4,9 +4,9 @@
 
 User priority is product UI first, then remaining call/meeting/shared-AI capabilities, broadcasting last. Use product-ui-acceptance.md for the newest UI evidence; dated entries below are historical and must not be interpreted as current pending-work lists.
 
-Implemented and locally verified: single main window, far-left navigation, isolated call/meeting AI contexts, new nine-size icon, dark AI surface/native combo and edit borders, inline meeting confirmations, native navigation order, cancellation focus restoration, 1024x700 compact layouts and reduced-motion-aware button hover. Simplified Chinese, traditional Chinese conversion and English are supported; other display languages fall back to English. This is not final product UI acceptance.
+Implemented and locally verified: single main window, far-left navigation, isolated call/meeting AI contexts, new nine-size icon, dark AI surface/native combo and edit borders, themed native volume slider, inline meeting confirmations, native navigation order, cancellation focus restoration, 1024x700 compact layouts and reduced-motion-aware button hover. Simplified Chinese, traditional Chinese conversion and English are supported; other display languages fall back to English. This is not final product UI acceptance.
 
-Still open in UI: native overflow scrollbar/slider polish, complete localization and Narrator/IME workflows, physical multi-monitor DPI changes, smaller-screen handling and final visual acceptance. Current actual EXE verification and hashes are in product-ui-acceptance.md and output/client-verification.json.
+Still open in UI: native overflow scrollbar polish, complete localization and Narrator/IME workflows, physical multi-monitor DPI changes, smaller-screen handling and final visual acceptance. Current actual EXE verification and hashes are in product-ui-acceptance.md and output/client-verification.json.
 
 Still open in capabilities: account/contact call entry, streaming ASR, model speaker diarization, continuous low-latency interpretation, full voiceover, client-facing provider configuration, durable transcript archive and global AI orchestration/adapters beyond calls/meetings. Existing five-second ASR/translation, summaries/actions, keywords and TTS are configurable integrations; real-provider accuracy/latency/cost and physical playback are not accepted.
 

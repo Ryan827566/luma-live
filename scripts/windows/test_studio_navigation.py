@@ -58,6 +58,12 @@ try:
             u.MapWindowPoints(None, parent, c.byref(rect), 2)
             assert 0 <= rect.left < rect.right <= bounds.right and 0 <= rect.top < rect.bottom <= bounds.bottom, f"Control {control_id} clipped: {(rect.left, rect.top, rect.right, rect.bottom)} in {(bounds.right, bounds.bottom)}"
     fits(root, range(100, 129))
+    volume = u.GetDlgItem(root, 104)
+    before_volume = u.SendMessageW(volume, 0x400, 0, 0)
+    u.SendMessageW(volume, 0x100, 0x27, 0)
+    assert u.SendMessageW(volume, 0x400, 0, 0) == before_volume + 1, "Volume lost native Right key adjustment"
+    u.SendMessageW(volume, 0x100, 0x25, 0)
+    assert u.SendMessageW(volume, 0x400, 0, 0) == before_volume, "Volume lost native Left key adjustment"
     u.SendMessageW(root, 0x111, 128, 0)
     fits(root, range(100, 129))
     u.SendMessageW(root, 0x111, 128, 0)
