@@ -16,6 +16,7 @@ int main(){try{
   Check(path==L"/summary"&&body.find("[alex] Project update")!=std::string::npos,"summary missing attributed transcript");return SessionAi::Reply{true,"Action: review the release"};
  });
  luma::client::media::pipeline::AudioFrame audio;audio.sample_rate=48000;audio.channels=1;audio.format=luma::client::media::pipeline::AudioSampleFormat::S16;audio.data.resize(480000,0);
+ Check(ai.ArchiveText().empty(),"empty session produced an archive");
  ai.Submit("alex",audio);std::this_thread::sleep_for(20ms);Check(calls==0,"default-off uploaded audio");
  Check(!ai.Keywords()&&ai.Status()==AiMessage::NoTranscript,"empty keywords lacks guidance");
  Check(!ai.Speak()&&ai.Status()==AiMessage::NoSummary,"missing summary lacks guidance");
@@ -23,8 +24,9 @@ int main(){try{
  Check(Wait([&]{return ai.Text().find("[alex] Project update")!=std::string::npos;}),"transcript missing");
  Check(ai.Summarize(),"summary rejected");Check(Wait([&]{return ai.Text().find("Action: review")!=std::string::npos;}),"summary missing");
  Check(ai.Keywords(),"keywords rejected");Check(Wait([&]{return ai.Text().find("Project, release")!=std::string::npos;}),"keywords missing");
- ai.Enable(false);int before=calls;ai.Submit("alex",audio);std::this_thread::sleep_for(20ms);Check(calls==before,"stop uploaded audio");
- ai.Reset();Check(ai.Text().find("Project update")==std::string::npos&&ai.Text().find("Project, release")==std::string::npos,"new call retained transcript");
+ auto archive=ai.ArchiveText();Check(archive.find("[alex] Project update")!=std::string::npos&&archive.find("Action: review")!=std::string::npos&&archive.find("Project, release")!=std::string::npos,"archive omitted generated content");Check(archive.find(AiMessageText(ai.Status()))==std::string::npos,"archive retained transient UI status");
+ ai.Enable(false);Check(ai.ArchiveText()==archive,"stopping captions changed archive content");int before=calls;ai.Submit("alex",audio);std::this_thread::sleep_for(20ms);Check(calls==before,"stop uploaded audio");
+ ai.Reset();Check(ai.ArchiveText().empty(),"new session retained previous archive content");Check(ai.Text().find("Project update")==std::string::npos&&ai.Text().find("Project, release")==std::string::npos,"new call retained transcript");
  std::atomic<bool> entered{false},release{false};
  SessionAi stale([&](const std::wstring&,const std::string&,const std::wstring&){entered=true;while(!release)std::this_thread::sleep_for(1ms);return SessionAi::Reply{true,"OLD SESSION"};});
  stale.Enable(true);stale.Submit("old",audio);bool started=Wait([&]{return entered.load();});stale.Reset();release=true;Check(started,"worker did not start");

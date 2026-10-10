@@ -12,6 +12,7 @@ import uuid
 import wave
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from provider_settings import FIELDS, SettingsError, read_settings
 
 AUDIO_LIMIT = 2 * 1024 * 1024
 TEXT_LIMIT = 128 * 1024
@@ -26,20 +27,39 @@ class Config:
     chat_model: str = ''
     tts_model: str = ''
     tts_voice: str = ''
+    settings_issue: str = ''
 
     @classmethod
     def from_env(cls):
         return cls(*(os.environ.get('LUMALIVE_AI_' + n, '').strip() for n in
                      ('BASE_URL', 'API_KEY', 'TRANSCRIBE_MODEL', 'CHAT_MODEL', 'TTS_MODEL', 'TTS_VOICE')))
 
+    @classmethod
+    def from_settings(cls, path=None):
+        # A complete explicit deployment configuration does not depend on the desktop file.
+        required = FIELDS[:4]
+        complete_override = all('LUMALIVE_AI_' + name in os.environ for name in required)
+        issue = ''
+        try:
+            values = {} if complete_override else read_settings(path)
+        except SettingsError as error:
+            values, issue = {}, str(error)
+        fields = [os.environ.get('LUMALIVE_AI_' + name, values.get(name, '')).strip() for name in FIELDS]
+        return cls(*fields, settings_issue=issue)
+
     def problems(self):
-        errors = []
+        errors = [self.settings_issue] if self.settings_issue else []
         for name in ('base_url', 'api_key', 'transcribe_model', 'chat_model'):
             value = getattr(self, name)
             if not value:
                 errors.append('missing_' + name)
             elif any(ord(c) < 32 or ord(c) == 127 for c in value):
                 errors.append('invalid_' + name)
+        for name in ('tts_model', 'tts_voice'):
+            if any(ord(c) < 32 or ord(c) == 127 for c in getattr(self, name)):
+                errors.append('invalid_' + name)
+        if bool(self.tts_model) != bool(self.tts_voice):
+            errors.append('incomplete_tts_settings')
         try:
             p = urllib.parse.urlsplit(self.base_url)
             host = p.hostname or ''
@@ -49,7 +69,8 @@ class Config:
             except ValueError:
                 pass
             if (not host or p.username is not None or p.password is not None or p.query or p.fragment
-                or p.port == 0 or not (p.scheme == 'https' or (p.scheme == 'http' and loopback))):
+                or p.port == 0 or '?' in self.base_url or '#' in self.base_url or '\\' in self.base_url
+                or any(c.isspace() for c in self.base_url) or '%' in host or not (p.scheme == 'https' or (p.scheme == 'http' and loopback))):
                 errors.append('invalid_base_url')
         except ValueError:
             errors.append('invalid_base_url')
@@ -180,11 +201,18 @@ class GatewayServer(ThreadingHTTPServer):
     allow_reuse_address = True
     request_queue_size = 8
 
-    def __init__(self, config, port=19740, max_workers=4):
+    def __init__(self, config, port=19740, max_workers=4, config_loader=None):
+        self.config_loader = config_loader
         self.config = config
         self.provider = Provider(config)
         self.slots = threading.BoundedSemaphore(max_workers)
         super().__init__(('127.0.0.1', port), Handler)
+
+    def configuration_snapshot(self):
+        if self.config_loader is None:
+            return self.config, self.provider
+        config = self.config_loader()
+        return config, Provider(config)
 
     def get_request(self):
         connection, address = super().get_request()
@@ -243,7 +271,8 @@ class Handler(BaseHTTPRequestHandler):
             self.check_local()
             if self.path != '/health':
                 raise GatewayError(404, 'Unknown endpoint')
-            problems = self.server.config.problems()
+            config, _ = self.server.configuration_snapshot()
+            problems = config.problems()
             self.reply(200, json.dumps({'configured': not problems, 'issues': problems,
                        'provider_validated': False}), 'application/json')
         except GatewayError as error:
@@ -269,7 +298,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise GatewayError(413, 'Request exceeds limit')
             if length == 0:
                 raise GatewayError(400, 'Empty request')
-            if self.server.config.problems():
+            config, provider = self.server.configuration_snapshot()
+            if config.problems():
                 raise GatewayError(503, 'AI provider is not configured; inspect /health')
             body = self.rfile.read(length)
             if len(body) != length:
@@ -282,7 +312,7 @@ class Handler(BaseHTTPRequestHandler):
                             raise ValueError()
                 except (wave.Error, EOFError, ValueError):
                     raise GatewayError(400, 'Invalid or empty PCM WAV') from None
-                result = self.server.provider.transcribe(body)
+                result = provider.transcribe(body)
             else:
                 try:
                     transcript = body.decode('utf-8')
@@ -291,14 +321,14 @@ class Handler(BaseHTTPRequestHandler):
                 if not transcript.strip():
                     raise GatewayError(400, 'Empty transcript')
                 if self.path == '/speech':
-                    self.reply(200, self.server.provider.speech(transcript), 'audio/wav')
+                    self.reply(200, provider.speech(transcript), 'audio/wav')
                     return
                 if self.path == '/translate':
-                    result = self.server.provider.translate(transcript, self.headers.get('X-Luma-Language', 'en'))
+                    result = provider.translate(transcript, self.headers.get('X-Luma-Language', 'en'))
                 elif self.path == '/keywords':
-                    result = self.server.provider.keywords(transcript)
+                    result = provider.keywords(transcript)
                 else:
-                    result = self.server.provider.summary(transcript)
+                    result = provider.summary(transcript)
             self.reply(200, result)
         except GatewayError as error:
             self.reply(error.status, error.message)
@@ -308,7 +338,7 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
 
 def main():
-    server = GatewayServer(Config.from_env())
+    server = GatewayServer(Config.from_settings(), config_loader=Config.from_settings)
     print('LumaLive AI gateway: http://127.0.0.1:19740 (GET /health for configuration status)')
     try:
         server.serve_forever()
