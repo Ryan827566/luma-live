@@ -99,3 +99,8 @@ Do not mark product UI complete based on compilation, synthetic media tests or t
 - Native trackbar channel/thumb custom drawing now uses the shared dark/blue palette. The native trackbar still owns range, position, mouse/keyboard handling and accessibility.
 - Hosted regression verifies Right increments volume and Left restores it. All nine actual-EXE checks passed; the compact call capture in output/ui-slider-final confirms the blue level segment and dark remaining track render correctly. Physical drag and screen-reader workflows remain separate manual acceptance items.
 - Tested EXE SHA-256: 1e6d571bfb37cdbbd16a7c9e4abb3e0f36c40d6673e1a2c16259124261106e9e. Native overflow scrollbar styling, broader device/localization/accessibility and full UI acceptance remain open.
+
+
+2026-10-10 screen-sharing status localization:
+- Call-page screen-sharing startup and interruption failures now use system-language UI messages instead of raw English capture errors. Raw details remain in debug output. Remembering a startup failure also prevents the polling loop from replacing it immediately with an interruption message.
+- Actual client rebuilt and all nine verifier checks passed. Physical screen-capture failure/recovery was not injected in this run and remains a device acceptance item. EXE SHA-256: af75cc92a3eda107611bff27ec335394d1099747555d5f787761b499e52ed888.
