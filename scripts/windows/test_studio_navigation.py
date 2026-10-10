@@ -41,6 +41,26 @@ try:
     time.sleep(2)
     u.GetDpiForWindow.argtypes = [w.HWND]; u.GetDpiForWindow.restype = w.UINT
     scale = u.GetDpiForWindow(root) / 96
+    if os.environ.get("LUMALIVE_TEST_WINDOW"):
+        width, height = map(int, os.environ["LUMALIVE_TEST_WINDOW"].split("x"))
+        u.SetWindowPos.argtypes = [w.HWND, w.HWND, c.c_int, c.c_int, c.c_int, c.c_int, w.UINT]
+        assert u.SetWindowPos(root, None, 0, 0, round(width * scale), round(height * scale), 0x16)
+    u.GetClientRect.argtypes = [w.HWND, c.POINTER(w.RECT)]
+    if os.environ.get("LUMALIVE_TEST_WINDOW"):
+        actual = w.RECT(); assert u.GetClientRect(root, c.byref(actual))
+        assert actual.right <= round(width * scale) and actual.bottom <= round(height * scale), "Window minimum prevented compact verification"
+    def fits(parent, ids):
+        bounds = w.RECT(); assert u.GetClientRect(parent, c.byref(bounds))
+        for control_id in ids:
+            h = u.GetDlgItem(parent, control_id)
+            if not h or not (u.GetWindowLongW(h, -16) & 0x10000000): continue
+            rect = w.RECT(); assert u.GetWindowRect(h, c.byref(rect))
+            u.MapWindowPoints(None, parent, c.byref(rect), 2)
+            assert 0 <= rect.left < rect.right <= bounds.right and 0 <= rect.top < rect.bottom <= bounds.bottom, f"Control {control_id} clipped: {(rect.left, rect.top, rect.right, rect.bottom)} in {(bounds.right, bounds.bottom)}"
+    fits(root, range(100, 129))
+    u.SendMessageW(root, 0x111, 128, 0)
+    fits(root, range(100, 129))
+    u.SendMessageW(root, 0x111, 128, 0)
     u.GetNextDlgTabItem.argtypes = [w.HWND, w.HWND, w.BOOL]; u.GetNextDlgTabItem.restype = w.HWND
     def sidebar_order():
         assert u.GetNextDlgTabItem(root, None, False) == u.GetDlgItem(root, 117), "Sidebar Tab entry is not Calls"
@@ -66,6 +86,7 @@ try:
     child = u.FindWindowExW(root, None, "LumaSessionAi", None)
     assert child and u.GetAncestor(child, 2) == root, "AI opened outside the studio"
     sidebar_order()
+    fits(child, range(1, 11))
     u.SendMessageTimeoutW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM, w.UINT, w.UINT, c.POINTER(c.c_size_t)]
     result = c.c_size_t()
     assert u.SendMessageTimeoutW(root, 0x111, 100, 0, 2, 2000, c.byref(result)), "Hidden call file action opened a modal dialog from AI"
@@ -136,6 +157,10 @@ try:
     meeting = u.FindWindowExW(root, None, "LumaMeetingPreview", None)
     assert meeting and u.GetAncestor(meeting, 2) == root, "Meeting opened outside the studio"
     sidebar_order()
+    fits(meeting, range(200, 225))
+    u.SendMessageW(meeting, 0x111, 222, 0)
+    fits(meeting, range(200, 225))
+    u.SendMessageW(meeting, 0x111, 222, 0)
     assert u.SendMessageTimeoutW(root, 0x111, 100, 0, 2, 2000, c.byref(result)), "Hidden call file action opened a modal dialog from meeting"
 
     u.SendMessageW(root, 0x111, 117, 0)
@@ -174,6 +199,7 @@ try:
         assert label.value not in ("\u79bb\u5f00\u623f\u95f4", "Leave room"), "Call joined concurrently with meeting"
         u.SendMessageW(root, 0x111, 126, 0)
         assert u.SendMessageW(u.GetDlgItem(meeting, 210), 0x18B, 0, 0) == 3, "Navigation lost membership"
+        fits(meeting, range(200, 225))
         u.SendMessageW(meeting, 0x111, 218, 0)
         fullscreen_style = u.GetWindowLongW(root, -16)
         assert fullscreen_style != style, "Meeting did not enter fullscreen"

@@ -2,11 +2,12 @@
 import ctypes as c
 from ctypes import wintypes as w
 from pathlib import Path
-import struct, subprocess, sys, time
+import struct, subprocess, sys, time, os
 u=c.WinDLL("user32",use_last_error=True);g=c.WinDLL("gdi32",use_last_error=True)
 cbtype=c.WINFUNCTYPE(w.BOOL,w.HWND,w.LPARAM)
 u.EnumWindows.argtypes=[cbtype,w.LPARAM];u.GetWindowThreadProcessId.argtypes=[w.HWND,c.POINTER(w.DWORD)]
 u.GetDlgItem.argtypes=[w.HWND,c.c_int];u.GetDlgItem.restype=w.HWND
+u.FindWindowExW.argtypes=[w.HWND,w.HWND,w.LPCWSTR,w.LPCWSTR];u.FindWindowExW.restype=w.HWND
 u.SendMessageW.argtypes=[w.HWND,w.UINT,w.WPARAM,w.LPARAM];u.SendMessageW.restype=c.c_ssize_t
 u.PostMessageW.argtypes=[w.HWND,w.UINT,w.WPARAM,w.LPARAM]
 u.GetClientRect.argtypes=[w.HWND,c.POINTER(w.RECT)];u.GetDC.argtypes=[w.HWND];u.GetDC.restype=w.HDC
@@ -30,9 +31,21 @@ try:
         if found:root=found[0]
         time.sleep(.1)
     assert root,"No test client"
+    if os.environ.get("LUMALIVE_TEST_WINDOW"):
+        width,height=map(int,os.environ["LUMALIVE_TEST_WINDOW"].split("x"))
+        u.GetDpiForWindow.argtypes=[w.HWND];u.GetDpiForWindow.restype=w.UINT
+        scale=u.GetDpiForWindow(root)/96
+        u.SetWindowPos.argtypes=[w.HWND,w.HWND,c.c_int,c.c_int,c.c_int,c.c_int,w.UINT]
+        assert u.SetWindowPos(root,None,0,0,round(width*scale),round(height*scale),0x16)
     directory=Path(sys.argv[2]);directory.mkdir(parents=True,exist_ok=True)
     for name,control in [("calls",117),("meetings",126),("assistant",127)]:
         u.SendMessageW(root,0x111,control,0);time.sleep(.5)
+        if os.environ.get("LUMALIVE_TEST_ADVANCED"):
+            if name=="calls":u.SendMessageW(root,0x111,128,0)
+            if name=="meetings":
+                meeting=u.FindWindowExW(root,None,"LumaMeetingPreview",None)
+                u.SendMessageW(meeting,0x111,222,0)
+            time.sleep(.1)
         rect=w.RECT();u.GetClientRect(root,c.byref(rect));width,height=rect.right,rect.bottom
         reference=u.GetDC(root);dc=g.CreateCompatibleDC(reference)
         header=struct.pack("<IiiHHIIiiII",40,width,-height,1,32,0,width*height*4,0,0,0,0)

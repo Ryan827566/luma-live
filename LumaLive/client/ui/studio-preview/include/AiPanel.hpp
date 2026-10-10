@@ -48,7 +48,30 @@ private:
  HWND window_{},note_{},toggle_{},summary_{},text_{},language_{},translate_{},speak_{},stopSpeech_{},keywords_{},autoTranslate_{};HFONT font_{};std::string shown_,speech_;
  static std::wstring Wide(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),nullptr,0);std::wstring out(n,L' ');MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),out.data(),n);return out;}
  void UpdateTranscriptScroll(){if(!text_)return;auto dc=GetDC(text_);if(!dc)return;auto old=SelectObject(dc,font_);TEXTMETRICW metrics{};GetTextMetricsW(dc,&metrics);SelectObject(dc,old);ReleaseDC(text_,dc);RECT r{};GetClientRect(text_,&r);const int lines=int(SendMessageW(text_,EM_GETLINECOUNT,0,0));const int visible=std::max(1,int(r.bottom)/std::max(1,int(metrics.tmHeight)));ShowScrollBar(text_,SB_VERT,lines>visible);}
- void Layout(){if(!text_)return;RECT r;GetClientRect(window_,&r);const int width=MulDiv(r.right,96,int(dpi_)),height=MulDiv(r.bottom,96,int(dpi_));const int cols=width>=940?4:3;const int gap=12,cell=(width-56-gap*(cols-1))/cols;auto move=[&](HWND h,int x,int y,int w,int ht){MoveWindow(h,S(x),S(y),S(std::max(1,w)),S(std::max(1,ht)),TRUE);};move(note_,28,102,width-56,64);HWND actions[]={toggle_,summary_,keywords_,speak_,language_,translate_,autoTranslate_,stopSpeech_};for(int i=0;i<8;++i)move(actions[i],28+(i%cols)*(cell+gap),184+(i/cols)*48,cell,i==4?180:36);transcriptY_=184+((8+cols-1)/cols)*48+38;move(text_,28,transcriptY_,width-56,height-transcriptY_-28);UpdateTranscriptScroll();InvalidateRect(window_,nullptr,FALSE);}
+ void Layout(){
+  if(!text_)return;RECT r{};GetClientRect(window_,&r);
+  const int width=MulDiv(r.right,96,int(dpi_)),height=MulDiv(r.bottom,96,int(dpi_));
+  const int margin=28,gap=8,rowPitch=48,contentWidth=std::max(1,width-2*margin);
+  HWND actions[]={toggle_,summary_,keywords_,speak_,language_,translate_,autoTranslate_,stopSpeech_};
+  int noteHeight=64,minCell=180;
+  if(auto dc=GetDC(window_)){
+   const auto old=SelectObject(dc,font_);auto logicalCeil=[&](int pixels){return (pixels*96+int(dpi_)-1)/int(dpi_);};
+   const int length=GetWindowTextLengthW(note_);std::wstring note(size_t(length)+1,L'\0');GetWindowTextW(note_,note.data(),length+1);
+   RECT measured{0,0,S(contentWidth),0};DrawTextW(dc,note.c_str(),-1,&measured,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX);noteHeight=logicalCeil(measured.bottom)+2;
+   int widest=0;auto measure=[&](const wchar_t* label){SIZE extent{};GetTextExtentPoint32W(dc,label,int(wcslen(label)),&extent);widest=std::max(widest,int(extent.cx));};
+   for(auto action:actions){wchar_t label[256]{};GetWindowTextW(action,label,256);measure(label);}
+   measure(UiLabel(L"停止自动翻译",L"Stop auto translation"));measure(UiLabel(L"开启自动翻译",L"Start auto translation"));measure(UiLabel(L"停止字幕",L"Stop captions"));
+   minCell=logicalCeil(widest)+32;SelectObject(dc,old);ReleaseDC(window_,dc);
+  }
+  const int cols=std::clamp((contentWidth+gap)/(minCell+gap),2,4),cell=(contentWidth-gap*(cols-1))/cols;
+  const int actionsY=102+noteHeight+16,rows=(8+cols-1)/cols;
+  auto move=[&](HWND h,int x,int y,int w,int ht){MoveWindow(h,S(x),S(y),S(std::max(1,w)),S(std::max(1,ht)),TRUE);};
+  move(note_,margin,102,contentWidth,noteHeight);UiTheme::SetComboDpi(language_,dpi_);
+  for(int i=0;i<8;++i)move(actions[i],margin+(i%cols)*(cell+gap),actionsY+(i/cols)*rowPitch,cell,i==4?180:36);
+  transcriptY_=actionsY+rows*rowPitch+30;move(text_,margin,transcriptY_,contentWidth,height-transcriptY_-20);
+  UpdateTranscriptScroll();InvalidateRect(window_,nullptr,FALSE);
+ }
+
  void Refresh(){EnableWindow(language_,!session.AutoTranslating());SetWindowTextW(autoTranslate_,session.AutoTranslating()?UiLabel(L"\u505c\u6b62\u81ea\u52a8\u7ffb\u8bd1",L"Stop auto translation"):UiLabel(L"\u5f00\u542f\u81ea\u52a8\u7ffb\u8bd1",L"Start auto translation"));auto voice=session.TakeSpeechPacket();if(!speech_.empty()&&speechRevision_!=voice.revision){PlaySoundW(nullptr,nullptr,0);speech_.clear();}speechRevision_=voice.revision;if(!voice.audio.empty()){PlaySoundW(nullptr,nullptr,0);speech_=std::move(voice.audio);PlaySoundW(reinterpret_cast<LPCWSTR>(speech_.data()),nullptr,SND_MEMORY|SND_ASYNC|SND_NODEFAULT);}SetWindowTextW(toggle_,session.Enabled()?UiLabel(L"\u505c\u6b62\u5b57\u5e55",L"Stop captions"):UiLabel(L"\u542f\u7528\u5b57\u5e55",L"Start captions"));auto value=session.Text();if(value!=shown_){DWORD start=0,end=0;SendMessageW(text_,EM_GETSEL,reinterpret_cast<WPARAM>(&start),reinterpret_cast<LPARAM>(&end));const int oldLength=GetWindowTextLengthW(text_);const int firstLine=int(SendMessageW(text_,EM_GETFIRSTVISIBLELINE,0,0));const bool follow=start==end&&end==DWORD(oldLength);shown_=value;SetWindowTextW(text_,Wide(value).c_str());UpdateTranscriptScroll();if(follow){SendMessageW(text_,EM_SETSEL,WPARAM(-1),LPARAM(-1));SendMessageW(text_,EM_SCROLLCARET,0,0);}else{SendMessageW(text_,EM_SETSEL,start,end);SendMessageW(text_,EM_LINESCROLL,0,firstLine);}}}
  static LRESULT CALLBACK Proc(HWND h,UINT message,WPARAM w,LPARAM l){
   auto self=reinterpret_cast<AiPanel*>(GetWindowLongPtrW(h,GWLP_USERDATA));
