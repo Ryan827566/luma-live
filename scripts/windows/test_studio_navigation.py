@@ -200,6 +200,26 @@ try:
         u.SendMessageW(root, 0x111, 126, 0)
         assert u.SendMessageW(u.GetDlgItem(meeting, 210), 0x18B, 0, 0) == 3, "Navigation lost membership"
         fits(meeting, range(200, 225))
+        class GuiThreadInfo(c.Structure):
+            _fields_ = [("cbSize", w.DWORD), ("flags", w.DWORD), ("active", w.HWND), ("focus", w.HWND), ("capture", w.HWND), ("menu", w.HWND), ("moveSize", w.HWND), ("caret", w.HWND), ("caretRect", w.RECT)]
+        u.GetGUIThreadInfo.argtypes = [w.DWORD, c.POINTER(GuiThreadInfo)]
+        u.ShowWindow.argtypes = [w.HWND, c.c_int]
+        u.ShowWindow(root, 4)  # Visible test window without activating it.
+        style = u.GetWindowLongW(root, -16)
+        thread_id = u.GetWindowThreadProcessId(root, None)
+        def focused():
+            info = GuiThreadInfo(); info.cbSize = c.sizeof(info)
+            assert u.GetGUIThreadInfo(thread_id, c.byref(info))
+            return info.focus
+        for source in (117, 127):
+            u.SendMessageW(root, 0x111, source, 0)
+            u.SendMessageW(root, 0x10, 0, 0)
+            try:
+                assert u.GetWindowLongW(meeting, -16) & 0x10000000, "Close did not reveal the meeting"
+                assert focused() == u.GetDlgItem(meeting, 224), "Close confirmation did not focus its visible Cancel action"
+            finally:
+                u.SendMessageW(u.GetDlgItem(meeting, 224), 0xF5, 0, 0)
+            assert u.SendMessageW(u.GetDlgItem(meeting, 210), 0x18B, 0, 0) == 3, "Close cancellation lost membership"
         u.SendMessageW(meeting, 0x111, 218, 0)
         fullscreen_style = u.GetWindowLongW(root, -16)
         assert fullscreen_style != style, "Meeting did not enter fullscreen"
@@ -213,6 +233,7 @@ try:
         until = time.monotonic() + 2
         while u.GetWindowLongW(confirmation, -16) & 0x10000000 and time.monotonic() < until: time.sleep(.05)
         assert not (u.GetWindowLongW(confirmation, -16) & 0x10000000), "Escape did not cancel inline confirmation"
+        assert focused() == u.GetDlgItem(meeting, 212), "Cancelling End did not return focus to its initiating action"
         assert u.SendMessageW(u.GetDlgItem(meeting, 210), 0x18B, 0, 0) == 3, "Cancel ended the meeting"
         assert u.GetWindowLongW(root, -16) == fullscreen_style, "Escape left fullscreen instead of only cancelling confirmation"
         u.PostMessageW(u.GetDlgItem(meeting, 205), 0x100, 0x1B, 1 << 30)

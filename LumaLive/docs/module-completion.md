@@ -1,5 +1,19 @@
 # Video/call/meeting completion ledger
 
+## Current snapshot (2026-10-10)
+
+User priority is product UI first, then remaining call/meeting/shared-AI capabilities, broadcasting last. Use product-ui-acceptance.md for the newest UI evidence; dated entries below are historical and must not be interpreted as current pending-work lists.
+
+Implemented and locally verified: single main window, far-left navigation, isolated call/meeting AI contexts, new nine-size icon, dark AI surface/native combo and edit borders, inline meeting confirmations, native navigation order, cancellation focus restoration, 1024x700 compact layouts and reduced-motion-aware button hover. Simplified Chinese, traditional Chinese conversion and English are supported; other display languages fall back to English. This is not final product UI acceptance.
+
+Still open in UI: native overflow scrollbar/slider polish, complete localization and Narrator/IME workflows, physical multi-monitor DPI changes, smaller-screen handling and final visual acceptance. Current actual EXE verification and hashes are in product-ui-acceptance.md and output/client-verification.json.
+
+Still open in capabilities: account/contact call entry, streaming ASR, model speaker diarization, continuous low-latency interpretation, full voiceover, client-facing provider configuration, durable transcript archive and global AI orchestration/adapters beyond calls/meetings. Existing five-second ASR/translation, summaries/actions, keywords and TTS are configurable integrations; real-provider accuracy/latency/cost and physical playback are not accepted.
+
+Physical device interruption, screen-sharing recovery, audible speaker switching, two-PC media and TURN remain separate acceptance gates. The user confirmed local camera preview works. Do not repeat the historical camera access-denied investigation. Do not merge the entire module to main or begin broadcasting based solely on local mock/synthetic tests.
+
+## Baseline and historical evidence
+
 Product baseline: repository docs/LumaLive_V1.0_AI_Native_完整产品需求文档_PRD.docx (blob 488c548b2d6737c985312f4fc3417e628739932e). This is the full platform PRD, not solely a meeting checklist. User requires call/meeting first, broadcasting later.
 
 ## Verified local functionality

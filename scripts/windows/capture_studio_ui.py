@@ -10,6 +10,7 @@ u.GetDlgItem.argtypes=[w.HWND,c.c_int];u.GetDlgItem.restype=w.HWND
 u.FindWindowExW.argtypes=[w.HWND,w.HWND,w.LPCWSTR,w.LPCWSTR];u.FindWindowExW.restype=w.HWND
 u.SendMessageW.argtypes=[w.HWND,w.UINT,w.WPARAM,w.LPARAM];u.SendMessageW.restype=c.c_ssize_t
 u.PostMessageW.argtypes=[w.HWND,w.UINT,w.WPARAM,w.LPARAM]
+u.GetWindowLongW.argtypes=[w.HWND,c.c_int];u.GetWindowLongW.restype=w.LONG
 u.GetClientRect.argtypes=[w.HWND,c.POINTER(w.RECT)];u.GetDC.argtypes=[w.HWND];u.GetDC.restype=w.HDC
 u.ReleaseDC.argtypes=[w.HWND,w.HDC];u.PrintWindow.argtypes=[w.HWND,w.HDC,w.UINT]
 g.CreateCompatibleDC.argtypes=[w.HDC];g.CreateCompatibleDC.restype=w.HDC
@@ -46,6 +47,19 @@ try:
                 meeting=u.FindWindowExW(root,None,"LumaMeetingPreview",None)
                 u.SendMessageW(meeting,0x111,222,0)
             time.sleep(.1)
+        if os.environ.get("LUMALIVE_TEST_FOCUS"):
+            edit=u.GetDlgItem(root,116) if name=="calls" else None
+            if name=="meetings":edit=u.GetDlgItem(u.FindWindowExW(root,None,"LumaMeetingPreview",None),201)
+            if name=="assistant":
+                panel=u.FindWindowExW(root,None,"LumaSessionAi",None)
+                # The most recently opened panel belongs to the active meeting context.
+                while panel:
+                    if u.GetWindowLongW(panel,-16)&0x10000000:break
+                    panel=u.FindWindowExW(root,panel,"LumaSessionAi",None)
+                if panel:edit=u.GetDlgItem(panel,4)
+            if edit:
+                u.SendMessageW(edit,0x201,1,(8<<16)|8);u.SendMessageW(edit,0x202,0,(8<<16)|8)
+                time.sleep(.1)
         rect=w.RECT();u.GetClientRect(root,c.byref(rect));width,height=rect.right,rect.bottom
         reference=u.GetDC(root);dc=g.CreateCompatibleDC(reference)
         header=struct.pack("<IiiHHIIiiII",40,width,-height,1,32,0,width*height*4,0,0,0,0)

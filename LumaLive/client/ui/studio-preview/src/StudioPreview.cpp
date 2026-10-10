@@ -92,7 +92,7 @@ class StudioWindow {
     int ConnectY()const{return CompactHeight()?(connectionSettings_?328:272):(connectionSettings_?402:342);}
 
     void Place(int id,int x,int y,int w,int h){MoveWindow(Control(id),S(x),S(y),S(w),S(h),TRUE);}
-    HWND Make(int id,const wchar_t* cls,const wchar_t* label,DWORD style){if(lstrcmpW(cls,L"COMBOBOX")==0)style|=CBS_OWNERDRAWFIXED|CBS_HASSTRINGS;auto h=CreateWindowExW(0,cls,label,WS_CHILD|WS_VISIBLE|WS_TABSTOP|style,0,0,1,1,window_,reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),instance_,nullptr);controls_[id-100]=h;SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(body_),TRUE);return h;}
+    HWND Make(int id,const wchar_t* cls,const wchar_t* label,DWORD style){if(lstrcmpW(cls,L"COMBOBOX")==0)style|=CBS_OWNERDRAWFIXED|CBS_HASSTRINGS;auto h=CreateWindowExW(0,cls,label,WS_CHILD|WS_VISIBLE|WS_TABSTOP|style,0,0,1,1,window_,reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),instance_,nullptr);controls_[id-100]=h;if(lstrcmpW(cls,L"EDIT")==0)UiTheme::InstallEdit(h);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(body_),TRUE);return h;}
     void Button(int id,const wchar_t* label){UiTheme::InstallHover(Make(id,L"BUTTON",label,BS_OWNERDRAW));}
     void Fonts(){for(auto f:{body_,small_,title_,brand_})if(f)DeleteObject(f);auto make=[&](int size,int weight){return CreateFontW(-S(size),0,0,0,weight,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,ChineseUi()?L"Microsoft YaHei UI":L"Segoe UI");};body_=make(14,400);small_=make(12,400);title_=make(22,600);brand_=make(23,700);for(auto c:controls_)if(c)SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(body_),TRUE);}
     RECT R(int x,int y,int w,int h)const{return {S(x),S(y),S(x+w),S(y+h)};}
