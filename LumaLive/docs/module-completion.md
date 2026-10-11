@@ -8,6 +8,8 @@ Implemented and locally verified: single main window, far-left navigation, isola
 
 AI workspace checkpoint: inline Session, History and Service settings pages now work inside the main window. Provider configuration is saved using current-user Windows DPAPI encryption and reloaded by the gateway on each request. Explicit Save record persists a Markdown snapshot in separate call/meeting folders; History lists and opens those records without replacing the live session. These paths passed native, Python interoperability and actual-client UI tests. The gateway still runs separately; no real provider was contacted.
 
+Local service checks now distinguish missing service/configuration from readiness, invalidate stale results and do not imply provider validation. Live and archived AI text preserve line breaks. All 15 actual-EXE checks passed; see latest UI/AI acceptance entries.
+
 Still open in UI: native overflow scrollbar polish, complete localization and Narrator/IME workflows, physical multi-monitor DPI changes, smaller-screen handling and final visual acceptance. Current actual EXE verification and hashes are in product-ui-acceptance.md and output/client-verification.json.
 
 Still open in capabilities: account/contact call entry, streaming ASR, model speaker diarization, continuous low-latency interpretation, full voiceover, global AI orchestration/adapters beyond calls/meetings, packaged gateway lifecycle and extended archive management (search/delete/export UI). Existing five-second ASR/translation, summaries/actions, keywords and TTS are configurable integrations; real-provider accuracy/latency/cost and physical playback are not accepted.
