@@ -7,7 +7,16 @@ import os
 import time
 import uuid
 import shutil
+import threading
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "LumaLive/server/ai-gateway/python"))
+from gateway import Config, GatewayServer, Handler
+
+class HealthHandler(Handler):
+    def do_GET(self):
+        self.server.health_checks += 1
+        super().do_GET()
 
 u = c.WinDLL("user32", use_last_error=True)
 callback = c.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
@@ -29,6 +38,12 @@ profile.mkdir()
 env = {key.upper(): value for key, value in os.environ.items()}; env["LOCALAPPDATA"] = str(profile)
 archive_fixture = Path(sys.argv[1]).resolve().parent / "luma_session_archive_tests.exe"
 subprocess.run([str(archive_fixture), "--write-fixture", str(profile / "LumaLive/records")], env=env, check=True)
+health_server = GatewayServer(Config(), port=0)
+health_server.RequestHandlerClass = HealthHandler
+health_server.health_checks = 0
+health_thread = threading.Thread(target=health_server.serve_forever, kwargs={"poll_interval": .01}, daemon=True)
+health_thread.start()
+env["LUMALIVE_AI_GATEWAY_PORT"] = str(health_server.server_port)
 process = subprocess.Popen([sys.argv[1]], startupinfo=startup, env=env)
 root = None
 fixture = None
@@ -183,6 +198,19 @@ try:
     assert text_of(archived) == saved_text, "Live refresh overwrote historical record"
     u.SendMessageW(child, 0x111, 13, 0)
     fits(child, range(1, 36))
+    health_label = u.GetDlgItem(child, 29)
+    def check_health(english, chinese):
+        u.SendMessageW(child, 0x111, 28, 0)
+        deadline = time.monotonic() + 7
+        while time.monotonic() < deadline:
+            message = text_of(health_label)
+            if english in message or chinese in message:
+                fits(child, range(1, 36))
+                return message
+            time.sleep(.05)
+        raise AssertionError("Local service state was not displayed: " + text_of(health_label))
+    check_health('incomplete', '\u4e0d\u5b8c\u6574')
+    assert health_server.health_checks == 1, "Local check did not reach the fixture gateway"
     assert u.GetWindowLongW(u.GetDlgItem(child, 21), -16) & 0x20, "Provider key is not masked"
     values = ("https://example.invalid/v1", "ui-fixture-secret", "asr-fixture", "chat-fixture", "", "")
     for control_id, value in zip(range(20, 26), values): set_text(u.GetDlgItem(child, control_id), value)
@@ -191,11 +219,22 @@ try:
     assert config_path.is_file(), "Settings page did not save configuration"
     encrypted_config = config_path.read_bytes()
     assert b"ui-fixture-secret" not in encrypted_config, "Provider key saved as plaintext"
+    health_server.config = Config('https://example.invalid/v1', 'fixture-key', 'asr', 'chat')
+    ready_text = check_health('not verified', '\u5c1a\u672a')
+    assert 'ui-fixture-secret' not in ready_text
     set_text(u.GetDlgItem(child, 20), "http://example.invalid/v1")
+    assert text_of(health_label) != ready_text, "Editing settings retained stale readiness"
+    checks_before_edit = health_server.health_checks
+    u.SendMessageW(child, 0x111, 28, 0)
+    time.sleep(.4)
+    assert health_server.health_checks == checks_before_edit, "Unsaved settings triggered a stale-config check"
     u.SendMessageW(child, 0x111, 26, 0)
     assert config_path.read_bytes() == encrypted_config, "Invalid URL replaced saved settings"
     set_text(u.GetDlgItem(child, 20), values[0])
     u.SendMessageW(child, 0x111, 26, 0)
+    health_server.shutdown(); health_server.server_close(); health_thread.join(2)
+    check_health('unavailable', '\u4e0d\u53ef\u7528')
+    print("PASS: inline local AI service status, dirty-state invalidation and offline guidance")
     u.SendMessageW(child, 0x111, 11, 0)
     fits(child, range(1, 36))
     assert text_of(transcript) == original.value, "Subpage navigation changed active session"
@@ -304,6 +343,7 @@ try:
         print("PASS: three real participants retained across tabs, call exclusivity and end flow")
     print("PASS: left sidebar, embedded call/meeting AI, retained meeting page and isolated contexts")
 finally:
+    health_server.shutdown(); health_server.server_close(); health_thread.join(2)
     if fixture and fixture.poll() is None: fixture.terminate(); fixture.wait()
     if root: u.PostMessageW(root, 0x10, 0, 0)
     try: process.wait(timeout=15)

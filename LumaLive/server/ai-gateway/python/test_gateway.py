@@ -124,6 +124,24 @@ class Tests(unittest.TestCase):
         self.assertIn('missing_api_key', health['issues'])
         self.assertEqual(self.upstream.received, [])
 
+    def test_native_health_contract(self):
+        for config, expected in ((self.config, 'ready'), (gateway.Config(), 'configuration-required')):
+            self.server.config = config
+            conn = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=3)
+            try:
+                conn.request('GET', '/health')
+                response = conn.getresponse()
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.getheader('X-Luma-AI-Protocol'), '1')
+                self.assertEqual(response.getheader('X-Luma-AI-Health'), expected)
+                body = json.loads(response.read())
+                self.assertEqual(body['configured'], expected == 'ready')
+                self.assertFalse(body['provider_validated'])
+                self.assertNotIn('test-secret', str(response.getheaders()) + str(body))
+            finally:
+                conn.close()
+        self.assertEqual(self.upstream.received, [], 'Health must not contact the model provider')
+
     def test_request_validation(self):
         cases = [('/summary', b'x', {'Content-Type': 'application/json'}, 415),
                  ('/summary', b'\xff', None, 400), ('/summary', b' ', None, 400),

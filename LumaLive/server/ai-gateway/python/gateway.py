@@ -248,7 +248,7 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
-    def reply(self, status, text, content_type='text/plain; charset=utf-8'):
+    def reply(self, status, text, content_type='text/plain; charset=utf-8', headers=None):
         body = text if isinstance(text, bytes) else text.encode('utf-8')
         self.send_response(status)
         self.send_header('Content-Type', content_type)
@@ -256,6 +256,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-store')
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Connection', 'close')
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.close_connection = True
         self.wfile.write(body)
@@ -274,7 +276,9 @@ class Handler(BaseHTTPRequestHandler):
             config, _ = self.server.configuration_snapshot()
             problems = config.problems()
             self.reply(200, json.dumps({'configured': not problems, 'issues': problems,
-                       'provider_validated': False}), 'application/json')
+                       'provider_validated': False}), 'application/json', {
+                       'X-Luma-AI-Protocol': '1',
+                       'X-Luma-AI-Health': 'configuration-required' if problems else 'ready'})
         except GatewayError as error:
             self.reply(error.status, error.message)
 
