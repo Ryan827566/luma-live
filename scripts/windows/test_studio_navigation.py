@@ -196,6 +196,34 @@ try:
     assert u.SendMessageW(archived, 0xBA, 0, 0) >= 3, "Archive line breaks were collapsed"
     time.sleep(.4)
     assert text_of(archived) == saved_text, "Live refresh overwrote historical record"
+    call_records = profile / 'LumaLive/records/call'
+    meeting_records = profile / 'LumaLive/records/meeting'
+    saved_call_files = {p.name: p.read_bytes() for p in call_records.glob('*.md')}
+    saved_meeting_files = {p.name: p.read_bytes() for p in meeting_records.glob('*.md')}
+    u.SendMessageW(u.GetDlgItem(child, 36), 0xF5, 0, 0)
+    confirmation = u.GetDlgItem(child, 38)
+    assert u.GetWindowLongW(confirmation, -16) & 0x10000000, 'Archive confirmation is not inline'
+    assert u.GetAncestor(confirmation, 2) == root, 'Archive deletion opened another window'
+    fits(child, range(1, 40))
+    u.PostMessageW(u.GetDlgItem(child, 39), 0x100, 0x1B, 0)
+    deadline = time.monotonic() + 2
+    while u.GetWindowLongW(confirmation, -16) & 0x10000000 and time.monotonic() < deadline: time.sleep(.05)
+    assert not (u.GetWindowLongW(confirmation, -16) & 0x10000000), 'Escape did not cancel archive deletion'
+    assert {p.name: p.read_bytes() for p in call_records.glob('*.md')} == saved_call_files
+    u.SendMessageW(u.GetDlgItem(child, 36), 0xF5, 0, 0)
+    u.SendMessageW(child, 0x111, 11, 0)
+    u.SendMessageW(child, 0x111, 12, 0)
+    assert not (u.GetWindowLongW(confirmation, -16) & 0x10000000), 'Navigation retained stale deletion confirmation'
+    u.SendMessageW(child, 0x111, 38, 0)
+    assert {p.name: p.read_bytes() for p in call_records.glob('*.md')} == saved_call_files, 'Hidden confirmation deleted a record'
+    u.SendMessageW(u.GetDlgItem(child, 36), 0xF5, 0, 0)
+    u.SendMessageW(confirmation, 0xF5, 0, 0)
+    assert not list(call_records.glob('*.md')), 'Confirmed archive was not deleted'
+    assert {p.name: p.read_bytes() for p in meeting_records.glob('*.md')} == saved_meeting_files, 'Call deletion changed meeting archives'
+    assert not text_of(archived), 'Deleted record remains visible'
+    assert text_of(transcript) == original.value, 'Deleting an archive changed the live session'
+    fits(child, range(1, 40))
+    print('PASS: inline archive deletion, Escape/navigation cancellation and context isolation')
     u.SendMessageW(child, 0x111, 13, 0)
     fits(child, range(1, 36))
     health_label = u.GetDlgItem(child, 29)

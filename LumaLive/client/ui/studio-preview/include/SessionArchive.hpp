@@ -123,4 +123,26 @@ inline bool Load(const std::string& context, const std::string& id, std::string&
   return detail::Fail(error, L"\u5f52\u6863\u8bb0\u5f55\u4e0d\u662f\u6709\u6548\u7684 UTF-8 \u6587\u672c\u3002", L"Saved record could not be read as UTF-8 text.");
  text = std::move(loaded); return true;
 }
+inline bool Remove(const std::string& context, const std::string& id, std::wstring& error, const std::filesystem::path& root = {}) {
+ error.clear();
+ if (!detail::ValidId(id)) return detail::Fail(error, L"\u5f52\u6863\u6807\u8bc6\u65e0\u6548\u3002", L"Invalid archive identifier.");
+ std::filesystem::path directory; std::vector<detail::Handle> locks;
+ if (!detail::Directory(context, root, false, directory, locks, error)) { if (error.empty()) detail::Fail(error, L"\u627e\u4e0d\u5230\u5f52\u6863\u8bb0\u5f55\u3002", L"Saved record was not found."); return false; }
+ detail::Handle file(CreateFileW((directory / id).c_str(), DELETE | FILE_READ_ATTRIBUTES, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+  FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr));
+ if (!file) {
+  DWORD code = GetLastError();
+  if (code == ERROR_FILE_NOT_FOUND || code == ERROR_PATH_NOT_FOUND)
+   return detail::Fail(error, L"\u627e\u4e0d\u5230\u5f52\u6863\u8bb0\u5f55\u3002", L"Saved record was not found.");
+  return detail::Fail(error, L"\u65e0\u6cd5\u6253\u5f00\u5f52\u6863\u8bb0\u5f55\u4ee5\u5220\u9664\u3002", L"Could not open saved record for deletion.");
+ }
+ BY_HANDLE_FILE_INFORMATION info{};
+ if (GetFileType(file.value) != FILE_TYPE_DISK || !GetFileInformationByHandle(file.value, &info) ||
+     (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)))
+  return detail::Fail(error, L"\u65e0\u6cd5\u5220\u9664\u8bb0\u5f55\uff1a\u5f52\u6863\u6587\u4ef6\u65e0\u6548\u3002", L"Cannot delete record: archive file is invalid.");
+ FILE_DISPOSITION_INFO disposition{TRUE};
+ if (!SetFileInformationByHandle(file.value, FileDispositionInfo, &disposition, sizeof(disposition)))
+  return detail::Fail(error, L"\u65e0\u6cd5\u5220\u9664\u5f52\u6863\u8bb0\u5f55\u3002", L"Could not delete saved record.");
+ return true;
+}
 } // namespace luma::client::ui::preview::SessionArchive

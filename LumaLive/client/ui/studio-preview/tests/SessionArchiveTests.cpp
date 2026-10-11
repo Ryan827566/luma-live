@@ -36,8 +36,12 @@ int wmain(int argc, wchar_t** argv) {
   Require(Archive::List("meeting", error, root).empty(), "context listing isolation");
   Require(!Archive::Load("meeting", first[0].id, loaded, error, root) && loaded.empty() && !error.empty(), "context load isolation");
   Require(Archive::Save("meeting", "# Meeting\n", error, root) && Archive::List("meeting", error, root).size() == 1, "meeting save");
-  for (const auto& id : {"../record.md", "..\\record.md", "C:\\record.md", "record.md", ""})
+  for (const auto& id : {"../record.md", "..\\record.md", "C:\\record.md", "record.md", ""}) {
    Require(!Archive::Load("call", id, loaded, error, root) && !error.empty(), "invalid id rejected");
+   Require(!Archive::Remove("call", id, error, root) && !error.empty(), "invalid remove id rejected");
+  }
+  Require(!Archive::Remove("../call", first[0].id, error, root) && !error.empty(), "invalid remove context rejected");
+  Require(Archive::Load("call", first[0].id, loaded, error, root) && loaded == unicode, "rejected removal preserves record");
   Require(!Archive::Save("../call", unicode, error, root) && !error.empty(), "invalid context rejected");
   Require(Archive::List("unknown", error, root).empty() && !error.empty(), "invalid list context rejected");
   Require(!Archive::Save("call", "", error, root) && !error.empty(), "empty save rejected");
@@ -50,7 +54,28 @@ int wmain(int argc, wchar_t** argv) {
   Require(!Archive::Load("call", first[0].id, loaded, error, root) && loaded.empty(), "oversize load bounded");
   { std::ofstream file(root / "call" / first[0].id, std::ios::binary | std::ios::trunc); }
   Require(!Archive::Load("call", first[0].id, loaded, error, root), "empty load rejected");
-  std::cout << "PASS: Unicode roundtrip, unique sorted records, context isolation, invalid paths, UTF-8 and size bounds\n";
+  const auto meetingBefore = Archive::List("meeting", error, root);
+  const auto retainedId = records[0].id == first[0].id ? records[1].id : records[0].id;
+  error = L"previous error";
+  Require(Archive::Remove("call", first[0].id, error, root) && error.empty(), "selected record removed");
+  Require(!fs::exists(root / "call" / first[0].id), "selected file no longer exists");
+  const auto remaining = Archive::List("call", error, root);
+  Require(remaining.size() == 1 && remaining[0].id == retainedId, "only selected record removed");
+  Require(Archive::Load("call", retainedId, loaded, error, root) && loaded == unicode, "other record content preserved");
+  const auto meetingAfter = Archive::List("meeting", error, root);
+  Require(meetingBefore.size() == 2 && meetingAfter.size() == meetingBefore.size(), "other context count preserved");
+  for (size_t i = 0; i < meetingBefore.size(); ++i) {
+   Require(meetingAfter[i].id == meetingBefore[i].id, "other context identifiers preserved");
+   Require(Archive::Load("meeting", meetingAfter[i].id, loaded, error, root) &&
+       (loaded == "# Meeting\n" || loaded == boundary), "other context contents preserved");
+  }
+  Require(!Archive::Remove("call", first[0].id, error, root) && error == L"Saved record was not found.", "repeated removal reports missing record");
+  Require(!Archive::Remove("call", retainedId, error, root / "missing") && error == L"Saved record was not found." &&
+      !fs::exists(root / "missing"), "missing directory removal fails without creating it");
+  Require(fs::create_directory(root / "call" / first[0].id), "directory rejection fixture");
+  Require(!Archive::Remove("call", first[0].id, error, root) && !error.empty() &&
+      fs::is_directory(root / "call" / first[0].id), "record-shaped directory cannot be removed");
+  std::cout << "PASS: Unicode roundtrip, unique sorted records, context isolation, invalid paths, UTF-8 and size bounds, safe selected removal\n";
  } catch (const std::exception& failure) { std::cerr << "FAIL: " << failure.what() << '\n'; std::wcerr << error << L'\n'; return 1; }
  return 0;
 }

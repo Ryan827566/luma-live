@@ -47,3 +47,6 @@ python scripts/windows/verify_client.py
 DPI 检查现由 `scripts/windows/test_meeting_ui.py` 直接运行原生诊断程序，不再依赖 PowerShell 脚本执行策略，也不修改系统策略。当前支持跟随系统显示语言选择简体中文、繁体中文转换及英文；其它语言仍回退英文，尚不代表完整多语言交付。
 
 界面截图可以运行 `python scripts/windows/capture_studio_ui.py output/next/Release/luma_studio.exe output/ui-visual-review` 生成。脚本仅启动并绘制自己的测试客户端，不截取其它桌面窗口。关闭测试客户端后查看目录中的 calls.bmp、meetings.bmp、assistant.bmp。
+
+
+在 AI“历史记录”页选择一条记录，点击“删除记录”。确认区域显示在当前页内；Esc、“取消”或切换页面都会取消删除。只有点击“确认删除”才永久删除该条已保存记录，当前会话和另一个工作区的记录不受影响。服务设置中的“检查本地服务”可检查本机网关是否运行、配置是否就绪，不代表真实 AI 模型连接已经验证。

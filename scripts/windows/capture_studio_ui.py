@@ -45,13 +45,15 @@ try:
         u.SetWindowPos.argtypes=[w.HWND,w.HWND,c.c_int,c.c_int,c.c_int,c.c_int,w.UINT]
         assert u.SetWindowPos(root,None,0,0,round(width*scale),round(height*scale),0x16)
     directory=Path(sys.argv[2]);directory.mkdir(parents=True,exist_ok=True)
-    for name,control,subpage in [("calls",117,None),("meetings",126,None),("assistant",127,11),("assistant-history",127,12),("assistant-settings",127,13)]:
+    for name,control,subpage in [("calls",117,None),("meetings",126,None),("assistant",127,11),("assistant-history",127,12),("assistant-history-delete",127,12),("assistant-settings",127,13)]:
         u.SendMessageW(root,0x111,control,0);time.sleep(.5)
         if subpage:
             panel=u.FindWindowExW(root,None,"LumaSessionAi",None)
             while panel and not (u.GetWindowLongW(panel,-16)&0x10000000):panel=u.FindWindowExW(root,panel,"LumaSessionAi",None)
             assert panel and u.GetDlgItem(panel,subpage),"AI subpage not present in this build"
             u.SendMessageW(panel,0x111,subpage,0);time.sleep(.2)
+            if name == 'assistant-history-delete':
+                u.SendMessageW(panel, 0x111, 36, 0);time.sleep(.1)
         if os.environ.get("LUMALIVE_TEST_ADVANCED"):
             if name=="calls":u.SendMessageW(root,0x111,128,0)
             if name=="meetings":

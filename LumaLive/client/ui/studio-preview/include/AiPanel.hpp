@@ -36,6 +36,10 @@ public:
   SetAccessibleName(text_,UiLabel(L"会话记录与生成结果",L"Transcript and generated results"));
   for(auto [id,label]:{std::pair{11,UiLabel(L"当前会话",L"Session")},std::pair{12,UiLabel(L"历史记录",L"History")},std::pair{13,UiLabel(L"服务设置",L"Service settings")},std::pair{14,UiLabel(L"保存记录",L"Save record")},std::pair{18,UiLabel(L"返回会话",L"Back to session")},std::pair{26,UiLabel(L"保存设置",L"Save settings")}})extra_[id]=add(L"BUTTON",label,WS_TABSTOP,id);
   extra_[28]=add(L"BUTTON",UiLabel(L"\u68c0\u67e5\u672c\u5730\u670d\u52a1",L"Check local service"),WS_TABSTOP,28);
+  extra_[36]=add(L"BUTTON",UiLabel(L"\u5220\u9664\u8bb0\u5f55",L"Delete record"),WS_TABSTOP,36);
+  extra_[37]=add(L"STATIC",UiLabel(L"\u5220\u9664\u8fd9\u6761\u5df2\u4fdd\u5b58\u7684\u8bb0\u5f55\uff1f\u5220\u9664\u540e\u65e0\u6cd5\u6062\u590d\u3002",L"Delete this saved record? This cannot be undone."),0,37);
+  extra_[38]=add(L"BUTTON",UiLabel(L"\u786e\u8ba4\u5220\u9664",L"Confirm delete"),WS_TABSTOP,38);
+  extra_[39]=add(L"BUTTON",UiLabel(L"\u53d6\u6d88",L"Cancel"),WS_TABSTOP,39);
   for(int id:{15,19,27,29})extra_[id]=add(L"STATIC",L"",0,id);
   extra_[16]=add(L"COMBOBOX",L"",WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,16);
   extra_[17]=add(L"EDIT",L"",WS_TABSTOP|WS_BORDER|WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY,17);SendMessageW(extra_[17],EM_SETLIMITTEXT,1048576,0);
@@ -47,10 +51,11 @@ public:
   for(int id:{13,12,11})SetWindowPos(extra_[id],HWND_TOP,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
   SetWindowPos(extra_[14],HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
   for(int id:{20,21,22,23,24,25,26,28})SetWindowPos(extra_[id],HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+  for(int id:{16,18,36,38,39,17}){SetWindowPos(extra_[id],HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);SetWindowSubclass(extra_[id],ArchiveKeys,73,reinterpret_cast<DWORD_PTR>(this));}
   SendMessageW(text_,EM_SETLIMITTEXT,200000,0);Layout();SetTimer(window_,1,300,nullptr);Refresh();ShowWindow(window_,SW_SHOW);
  }
  void Place(RECT r){if(window_){UpdateDpi();MoveWindow(window_,r.left,r.top,r.right-r.left,r.bottom-r.top,TRUE);}}
- void Hide(){if(window_)ShowWindow(window_,SW_HIDE);}
+ void Hide(){if(window_){CancelArchiveDelete(false);ShowWindow(window_,SW_HIDE);}}
  void Close(){health_.Invalidate();shownHealth_.clear();session.Enable(false);if(!speech_.empty()){PlaySoundW(nullptr,nullptr,0);speech_.clear();}if(window_)DestroyWindow(window_);}
 private:
  Context context_;
@@ -73,14 +78,27 @@ private:
   if(bool(IsWindowEnabled(extra_[28]))!=enabled)EnableWindow(extra_[28],enabled);
   if(message&&shownHealth_!=message){shownHealth_=message;SetWindowTextW(extra_[29],message);if(page_==13)Layout();}
  }
- int page_{11};bool settingsLoaded_{false},settingsDirty_{false},loadingSettings_{false};std::array<HWND,36> extra_{};std::vector<SessionArchive::Entry> archives_;
+ int page_{11};bool settingsLoaded_{false},settingsDirty_{false},loadingSettings_{false};std::array<HWND,40> extra_{};std::vector<SessionArchive::Entry> archives_;std::string archiveDeleteId_;
+ void CancelArchiveDelete(bool focus){if(archiveDeleteId_.empty())return;archiveDeleteId_.clear();Layout();if(focus)SetFocus(extra_[36]);}
+ static LRESULT CALLBACK ArchiveKeys(HWND h,UINT message,WPARAM w,LPARAM l,UINT_PTR id,DWORD_PTR data){
+  auto self=reinterpret_cast<AiPanel*>(data);
+  if(message==WM_NCDESTROY){RemoveWindowSubclass(h,ArchiveKeys,id);return DefSubclassProc(h,message,w,l);}
+  if(!self->archiveDeleteId_.empty()){
+   if(message==WM_GETDLGCODE&&l&&reinterpret_cast<MSG*>(l)->message==WM_KEYDOWN&&reinterpret_cast<MSG*>(l)->wParam==VK_ESCAPE)return DefSubclassProc(h,message,w,l)|DLGC_WANTMESSAGE;
+   if(message==WM_KEYDOWN&&w==VK_ESCAPE){if(!(l&(LPARAM(1)<<30)))self->CancelArchiveDelete(true);return 0;}
+  }
+  return DefSubclassProc(h,message,w,l);
+ }
  std::string ArchiveContext()const{return context_==Context::Meeting?"meeting":"call";}
  std::wstring Field(int id){const int n=GetWindowTextLengthW(extra_[id]);std::wstring s(size_t(n)+1,L'\0');GetWindowTextW(extra_[id],s.data(),n+1);s.resize(n);return s;}
  void LoadSettings(){if(settingsDirty_)return;health_.Invalidate();AiProviderSettings config;std::wstring error;loadingSettings_=true;bool ok=LoadAiProviderSettings(config,error);auto fields=ProviderSettingsDetail::Fields(config);for(int i=0;i<6;++i)SetWindowTextW(extra_[20+i],fields[i]->c_str());loadingSettings_=false;settingsLoaded_=true;SetWindowTextW(extra_[27],ok?UiLabel(L"密钥将加密保存在当前 Windows 用户下。保存后，本地 AI 服务将在下一次请求时读取。",L"The key is encrypted for this Windows user. The local AI service reads saved settings on its next request."):error.c_str());}
  void LoadArchive(){auto index=SendMessageW(extra_[16],CB_GETCURSEL,0,0);std::string text;std::wstring error;if(index>=0&&size_t(index)<archives_.size()&&SessionArchive::Load(ArchiveContext(),archives_[index].id,text,error)){SetWindowTextW(extra_[17],DisplayLines(Wide(text)).c_str());SetWindowTextW(extra_[19],UiLabel(L"已保存到本机，仅当前工作区的记录显示在这里。",L"Saved on this computer. Only records from this workspace are listed."));}else{SetWindowTextW(extra_[17],L"");SetWindowTextW(extra_[19],error.empty()?UiLabel(L"暂无记录。在当前会话中选择“保存记录”后，可在这里重新查看。",L"No saved records. Choose Save record in a session to find it here later."):error.c_str());}UpdateTranscriptScrollbar(extra_[17]);}
  void RefreshArchives(){std::wstring error;archives_=SessionArchive::List(ArchiveContext(),error);SendMessageW(extra_[16],CB_RESETCONTENT,0,0);for(const auto& entry:archives_)SendMessageW(extra_[16],CB_ADDSTRING,0,reinterpret_cast<LPARAM>(entry.title.c_str()));EnableWindow(extra_[16],!archives_.empty());if(!archives_.empty())SendMessageW(extra_[16],CB_SETCURSEL,0,0);LoadArchive();if(!error.empty())SetWindowTextW(extra_[19],error.c_str());}
- void SwitchPage(int page){page_=page;if(page==12)RefreshArchives();if(page==13){LoadSettings();RefreshHealth();}Layout();SetFocus(extra_[page]);}
- bool ExtraCommand(WPARAM w){const int id=LOWORD(w);if(id>=11&&id<=13){SwitchPage(id);return true;}if(id==18){SwitchPage(11);return true;}if(id==16&&HIWORD(w)==CBN_SELCHANGE){LoadArchive();return true;}
+ void SwitchPage(int page){archiveDeleteId_.clear();page_=page;if(page==12)RefreshArchives();if(page==13){LoadSettings();RefreshHealth();}Layout();SetFocus(extra_[page]);}
+ bool ExtraCommand(WPARAM w){const int id=LOWORD(w);if(id>=11&&id<=13){SwitchPage(id);return true;}if(id==18){SwitchPage(11);return true;}if(id==16&&HIWORD(w)==CBN_SELCHANGE){CancelArchiveDelete(false);LoadArchive();return true;}
+  if(id==36){if(page_!=12)return true;const auto index=SendMessageW(extra_[16],CB_GETCURSEL,0,0);if(index>=0&&size_t(index)<archives_.size()){archiveDeleteId_=archives_[index].id;Layout();SetFocus(extra_[39]);}return true;}
+  if(id==39){CancelArchiveDelete(true);return true;}
+  if(id==38){if(page_!=12||archiveDeleteId_.empty())return true;std::wstring error;bool removed=SessionArchive::Remove(ArchiveContext(),archiveDeleteId_,error);archiveDeleteId_.clear();RefreshArchives();Layout();if(removed)SetWindowTextW(extra_[19],UiLabel(L"\u8bb0\u5f55\u5df2\u5220\u9664\uff0c\u5f53\u524d\u4f1a\u8bdd\u4e0d\u53d7\u5f71\u54cd\u3002",L"Record deleted. The current session is unchanged."));else SetWindowTextW(extra_[19],error.c_str());SetFocus(archives_.empty()?extra_[18]:extra_[16]);return true;}
   if(id>=20&&id<=25&&HIWORD(w)==EN_CHANGE){if(settingsLoaded_&&!loadingSettings_){settingsDirty_=true;health_.Invalidate();SetWindowTextW(extra_[27],UiLabel(L"有未保存的修改。",L"Unsaved changes."));RefreshHealth();}return true;}
   if(id==14){if(page_!=11)return true;std::wstring error;auto value=session.ArchiveText();if(value.empty())error=UiLabel(L"当前没有可保存的记录。请先启用字幕并产生内容。",L"No content to save. Start captions and collect a transcript first.");else if(SessionArchive::Save(ArchiveContext(),value,error))error=UiLabel(L"记录已保存，可在“历史记录”中查看。",L"Record saved. Open History to view it.");SetWindowTextW(extra_[15],error.c_str());return true;}
   if(id==26){if(page_!=13)return true;AiProviderSettings config;auto fields=ProviderSettingsDetail::Fields(config);for(int i=0;i<6;++i)*fields[i]=Field(20+i);std::wstring error;if(SaveAiProviderSettings(config,error)){settingsDirty_=false;health_.Invalidate();error=UiLabel(L"设置已保存。尚未验证真实服务连接；请确认本地 AI 服务已运行。",L"Settings saved. Connection is not yet verified; ensure the local AI service is running.");}SetWindowTextW(extra_[27],error.c_str());RefreshHealth();Layout();return true;}if(id==28){if(page_!=13)return true;if(!settingsDirty_)health_.Check();RefreshHealth();return true;}return false;
@@ -104,9 +122,16 @@ private:
   const int margin=28,gap=8,rowPitch=48,contentWidth=std::max(1,width-2*margin);
   auto position=[&](HWND h,int x,int y,int w,int ht){MoveWindow(h,S(x),S(y),S(std::max(1,w)),S(std::max(1,ht)),TRUE);};
   for(int id=1;id<=10;++id)ShowWindow(GetDlgItem(window_,id),page_==11?SW_SHOW:SW_HIDE);
-  for(int id=11;id<36;++id){if(!extra_[id])continue;const bool show=id<=13||(page_==11&&(id==14||id==15))||(page_==12&&id>=16&&id<=19)||(page_==13&&id>=20);ShowWindow(extra_[id],show?SW_SHOW:SW_HIDE);}
+  for(int id=11;id<40;++id){if(!extra_[id])continue;const bool show=id<=13||(page_==11&&(id==14||id==15))||(page_==12&&((id>=16&&id<=19)||(id>=36)))||(page_==13&&id>=20&&id<=35);ShowWindow(extra_[id],show?SW_SHOW:SW_HIDE);}
   for(int i=0;i<3;++i)position(extra_[11+i],margin+i*156,102,148,36);
-  if(page_==12){position(extra_[16],margin,166,contentWidth-164,220);UiTheme::SetComboDpi(extra_[16],dpi_);position(extra_[18],width-margin-148,166,148,40);position(extra_[19],margin,218,contentWidth,48);position(extra_[17],margin,276,contentWidth,height-296);UpdateTranscriptScrollbar(extra_[17]);InvalidateRect(window_,nullptr,FALSE);return;}
+  if(page_==12){
+   const bool confirming=!archiveDeleteId_.empty();
+   position(extra_[16],margin,166,contentWidth-164,220);UiTheme::SetComboDpi(extra_[16],dpi_);EnableWindow(extra_[16],!confirming&&!archives_.empty());position(extra_[18],width-margin-148,166,148,40);
+   position(extra_[19],margin,218,contentWidth-164,48);position(extra_[36],width-margin-148,218,148,40);EnableWindow(extra_[36],!archives_.empty());
+   position(extra_[37],margin,218,contentWidth-316,48);position(extra_[38],width-margin-304,218,148,40);position(extra_[39],width-margin-148,218,148,40);
+   for(int id:{19,36})ShowWindow(extra_[id],confirming?SW_HIDE:SW_SHOW);for(int id:{37,38,39})ShowWindow(extra_[id],confirming?SW_SHOW:SW_HIDE);
+   position(extra_[17],margin,276,contentWidth,height-296);UpdateTranscriptScrollbar(extra_[17]);InvalidateRect(window_,nullptr,FALSE);return;
+  }
   if(page_==13){
    const int cellWidth=(contentWidth-24)/2,fieldPitch=height<580?72:80;
    for(int i=0;i<6;++i){int x=margin+(i%2)*(cellWidth+24),y=160+(i/2)*fieldPitch;position(extra_[30+i],x,y,cellWidth,24);position(extra_[20+i],x,y+28,cellWidth,38);}
@@ -156,14 +181,14 @@ private:
    case WM_PAINT:{PAINTSTRUCT ps;auto dc=BeginPaint(h,&ps);self->Paint(dc);EndPaint(h,&ps);return 0;}
    case WM_PRINTCLIENT:self->Paint(reinterpret_cast<HDC>(w));return 0;
    case WM_MEASUREITEM:{auto d=reinterpret_cast<MEASUREITEMSTRUCT*>(l);if(d->CtlType==ODT_COMBOBOX){d->itemHeight=self->S(30);return TRUE;}break;}
-   case WM_DRAWITEM:{auto d=reinterpret_cast<DRAWITEMSTRUCT*>(l);if(d->CtlType==ODT_COMBOBOX){UiTheme::DrawComboItem(*d,self->font_);return TRUE;}UiTheme::DrawButton(*d,self->font_,d->CtlID==2||d->CtlID==26,d->CtlID==self->page_,d->CtlID==8);return TRUE;}
+   case WM_DRAWITEM:{auto d=reinterpret_cast<DRAWITEMSTRUCT*>(l);if(d->CtlType==ODT_COMBOBOX){UiTheme::DrawComboItem(*d,self->font_);return TRUE;}UiTheme::DrawButton(*d,self->font_,d->CtlID==2||d->CtlID==26,d->CtlID==self->page_,d->CtlID==8||d->CtlID==36||d->CtlID==38);return TRUE;}
    case WM_CTLCOLORSTATIC:case WM_CTLCOLOREDIT:case WM_CTLCOLORLISTBOX:{auto dc=reinterpret_cast<HDC>(w);SetTextColor(dc,reinterpret_cast<HWND>(l)==self->note_?UiTheme::Muted:UiTheme::Text);const int id=GetDlgCtrlID(reinterpret_cast<HWND>(l));const bool edit=!(id==1||id==15||id==19||id==27||id==29||id>=30);SetBkColor(dc,edit?UiTheme::Surface:UiTheme::Background);return reinterpret_cast<LRESULT>(edit?self->editBackground_:self->background_);}
 
    case WM_GETMINMAXINFO:reinterpret_cast<MINMAXINFO*>(l)->ptMinTrackSize={self->S(640),self->S(600)};return 0;
    case WM_TIMER:self->Refresh();return 0;
    case WM_COMMAND:if(self->ExtraCommand(w))return 0;if(self->page_!=11)return 0;if(LOWORD(w)==10){const char* langs[]={"en","zh","ja","ko","es"};auto index=SendMessageW(self->language_,CB_GETCURSEL,0,0);if(self->session.AutoTranslating())self->session.AutoTranslate("");else if(index>=0&&index<5)self->session.AutoTranslate(langs[index]);self->Refresh();}else if(LOWORD(w)==9){self->session.Keywords();self->Refresh();}else if(LOWORD(w)==7){self->session.Speak();}else if(LOWORD(w)==8){self->session.StopSpeech();PlaySoundW(nullptr,nullptr,0);self->speech_.clear();self->Refresh();}else if(LOWORD(w)==6){const char* langs[]={"en","zh","ja","ko","es"};auto index=SendMessageW(self->language_,CB_GETCURSEL,0,0);if(index>=0&&index<5)self->session.Translate(langs[index]);self->Refresh();}else if(LOWORD(w)==2){self->session.Enable(!self->session.Enabled());self->Refresh();}else if(LOWORD(w)==3){self->session.Summarize();self->Refresh();}return 0;
    case WM_CLOSE:self->Close();return 0;
-   case WM_DESTROY:self->health_.Invalidate();self->shownHealth_.clear();if(!self->speech_.empty()){PlaySoundW(nullptr,nullptr,0);self->speech_.clear();}KillTimer(h,1);self->window_=nullptr;self->text_=nullptr;self->shown_.clear();self->page_=11;self->settingsLoaded_=false;self->settingsDirty_=false;self->loadingSettings_=false;self->archives_.clear();self->extra_={};if(self->font_){DeleteObject(self->font_);self->font_=nullptr;}if(self->title_){DeleteObject(self->title_);self->title_=nullptr;}return 0;
+   case WM_DESTROY:self->health_.Invalidate();self->shownHealth_.clear();if(!self->speech_.empty()){PlaySoundW(nullptr,nullptr,0);self->speech_.clear();}KillTimer(h,1);self->window_=nullptr;self->text_=nullptr;self->shown_.clear();self->page_=11;self->settingsLoaded_=false;self->settingsDirty_=false;self->loadingSettings_=false;self->archives_.clear();self->archiveDeleteId_.clear();self->extra_={};if(self->font_){DeleteObject(self->font_);self->font_=nullptr;}if(self->title_){DeleteObject(self->title_);self->title_=nullptr;}return 0;
   }
   return DefWindowProcW(h,message,w,l);
  }
