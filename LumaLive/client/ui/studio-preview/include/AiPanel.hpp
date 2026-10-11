@@ -10,6 +10,9 @@
 #include "UiAccessibility.hpp"
 #include <mmsystem.h>
 #include <shlobj.h>
+#include <optional>
+#include <thread>
+#include <mutex>
 namespace luma::client::ui::preview {
 class AiPanel {
 public:
@@ -119,6 +122,14 @@ private:
   if(bool(IsWindowEnabled(extra_[28]))!=enabled)EnableWindow(extra_[28],enabled);
   if(message&&shownHealth_!=message){shownHealth_=message;SetWindowTextW(extra_[29],message);if(page_==13)Layout();}
  }
+ struct ExportState{std::mutex mutex;bool busy=false;std::optional<std::wstring> result;};
+ std::shared_ptr<ExportState> exportState_=std::make_shared<ExportState>();
+ bool ExportBusy(){std::lock_guard lock(exportState_->mutex);return exportState_->busy;}
+ void RefreshExport(){
+  std::optional<std::wstring> result;
+  {std::lock_guard lock(exportState_->mutex);result=std::move(exportState_->result);exportState_->result.reset();}
+  if(result&&extra_[45]){SetWindowTextW(extra_[45],result->c_str());Layout();}
+ }
  int page_{11};bool settingsLoaded_{false},settingsDirty_{false},loadingSettings_{false};std::array<HWND,47> extra_{};std::vector<SessionArchive::Entry> archives_;std::string archiveDeleteId_;
  void CancelArchiveDelete(bool focus){if(archiveDeleteId_.empty())return;archiveDeleteId_.clear();Layout();if(focus)SetFocus(extra_[36]);}
  static LRESULT CALLBACK ArchiveKeys(HWND h,UINT message,WPARAM w,LPARAM l,UINT_PTR id,DWORD_PTR data){
@@ -141,16 +152,24 @@ private:
    if(page_!=12||!archiveDeleteId_.empty()||!IsWindowEnabled(extra_[44]))return true;
    const auto index=SendMessageW(extra_[16],CB_GETCURSEL,0,0);
    if(index<0||size_t(index)>=archives_.size())return true;
-   std::wstring error;std::filesystem::path exported;
-   if(SessionArchive::Export(ArchiveContext(),archives_[index].id,std::filesystem::path(Field(43)),exported,error))
-    error=std::wstring(UiLabel(L"已导出，可选择并复制路径：",L"Exported. Select and copy the path:"))+L"\r\n"+exported.wstring();
-   SetWindowTextW(extra_[45],error.c_str());return true;
+   if(ExportBusy())return true;
+   const auto state=exportState_;const auto context=ArchiveContext();const auto record=archives_[index].id;const auto folder=std::filesystem::path(Field(43));
+   {std::lock_guard lock(state->mutex);state->busy=true;state->result.reset();}
+   SetWindowTextW(extra_[45],UiLabel(L"正在导出，可继续切换页面。",L"Exporting. You can continue using other pages."));Layout();
+   try{std::thread([state,context,record,folder]{
+    std::wstring message;std::filesystem::path exported;
+    try{if(SessionArchive::Export(context,record,folder,exported,message))
+     message=std::wstring(UiLabel(L"已导出，可选择并复制路径：",L"Exported. Select and copy the path:"))+L"\r\n"+exported.wstring();}
+    catch(...){message=UiLabel(L"导出失败，请检查目标文件夹后重试。",L"Export failed. Check the destination folder and retry.");}
+    std::lock_guard lock(state->mutex);state->result=std::move(message);state->busy=false;
+   }).detach();}catch(...){std::lock_guard lock(state->mutex);state->busy=false;state->result=UiLabel(L"无法开始导出，请重试。",L"Could not start export. Please retry.");}
+   return true;
   }
   if(id==40||id==41){if(page_!=13||!IsWindowEnabled(extra_[id]))return true;
    if(id==40)LocalAiService::Instance().Start();else LocalAiService::Instance().Stop();
    health_.Invalidate();RefreshService();RefreshHealth();return true;}
 if(id>=11&&id<=13){SwitchPage(id);return true;}if(id==18){SwitchPage(11);return true;}if(id==16&&HIWORD(w)==CBN_SELCHANGE){CancelArchiveDelete(false);LoadArchive();return true;}
-  if(id==36){if(page_!=12)return true;const auto index=SendMessageW(extra_[16],CB_GETCURSEL,0,0);if(index>=0&&size_t(index)<archives_.size()){archiveDeleteId_=archives_[index].id;Layout();SetFocus(extra_[39]);}return true;}
+  if(id==36){if(page_!=12||ExportBusy())return true;const auto index=SendMessageW(extra_[16],CB_GETCURSEL,0,0);if(index>=0&&size_t(index)<archives_.size()){archiveDeleteId_=archives_[index].id;Layout();SetFocus(extra_[39]);}return true;}
   if(id==39){CancelArchiveDelete(true);return true;}
   if(id==38){if(page_!=12||archiveDeleteId_.empty())return true;std::wstring error;bool removed=SessionArchive::Remove(ArchiveContext(),archiveDeleteId_,error);archiveDeleteId_.clear();RefreshArchives();Layout();if(removed)SetWindowTextW(extra_[19],UiLabel(L"\u8bb0\u5f55\u5df2\u5220\u9664\uff0c\u5f53\u524d\u4f1a\u8bdd\u4e0d\u53d7\u5f71\u54cd\u3002",L"Record deleted. The current session is unchanged."));else SetWindowTextW(extra_[19],error.c_str());SetFocus(archives_.empty()?extra_[18]:extra_[16]);return true;}
   if(id>=20&&id<=25&&HIWORD(w)==EN_CHANGE){if(settingsLoaded_&&!loadingSettings_){settingsDirty_=true;health_.Invalidate();SetWindowTextW(extra_[27],UiLabel(L"有未保存的修改。",L"Unsaved changes."));RefreshHealth();}return true;}
@@ -181,7 +200,7 @@ if(id>=11&&id<=13){SwitchPage(id);return true;}if(id==18){SwitchPage(11);return 
   if(page_==12){
    const bool confirming=!archiveDeleteId_.empty();
    position(extra_[16],margin,166,contentWidth-164,220);UiTheme::SetComboDpi(extra_[16],dpi_);EnableWindow(extra_[16],!confirming&&!archives_.empty());position(extra_[18],width-margin-148,166,148,40);
-   position(extra_[19],margin,218,contentWidth-164,48);position(extra_[36],width-margin-148,218,148,40);EnableWindow(extra_[36],!archives_.empty());
+   position(extra_[19],margin,218,contentWidth-164,48);position(extra_[36],width-margin-148,218,148,40);EnableWindow(extra_[36],!ExportBusy()&&!archives_.empty());
    position(extra_[37],margin,218,contentWidth-316,48);position(extra_[38],width-margin-304,218,148,40);position(extra_[39],width-margin-148,218,148,40);
    for(int id:{19,36})ShowWindow(extra_[id],confirming?SW_HIDE:SW_SHOW);for(int id:{37,38,39})ShowWindow(extra_[id],confirming?SW_SHOW:SW_HIDE);
    position(extra_[17],margin,276,contentWidth,height-430);UpdateTranscriptScrollbar(extra_[17]);
@@ -189,7 +208,7 @@ if(id>=11&&id<=13){SwitchPage(id);return true;}if(id==18){SwitchPage(11);return 
    position(extra_[43],margin,height-110,contentWidth-164,36);
    position(extra_[44],width-margin-148,height-110,148,36);
    position(extra_[45],margin,height-64,contentWidth,44);
-   EnableWindow(extra_[43],!confirming);EnableWindow(extra_[44],!confirming&&!archives_.empty());InvalidateRect(window_,nullptr,FALSE);return;
+   EnableWindow(extra_[43],!confirming&&!ExportBusy());EnableWindow(extra_[44],!confirming&&!ExportBusy()&&!archives_.empty());InvalidateRect(window_,nullptr,FALSE);return;
   }
   if(page_==13){
    const int cellWidth=(contentWidth-24)/2,fieldPitch=height<580?72:80;
@@ -229,7 +248,7 @@ if(id>=11&&id<=13){SwitchPage(id);return true;}if(id==18){SwitchPage(11);return 
   UpdateTranscriptScroll();InvalidateRect(window_,nullptr,FALSE);
  }
 
- void Refresh(){RefreshService();RefreshHealth();EnableWindow(language_,!session.AutoTranslating());SetWindowTextW(autoTranslate_,session.AutoTranslating()?UiLabel(L"\u505c\u6b62\u81ea\u52a8\u7ffb\u8bd1",L"Stop auto translation"):UiLabel(L"\u5f00\u542f\u81ea\u52a8\u7ffb\u8bd1",L"Start auto translation"));auto voice=session.TakeSpeechPacket();if(!speech_.empty()&&speechRevision_!=voice.revision){PlaySoundW(nullptr,nullptr,0);speech_.clear();}speechRevision_=voice.revision;if(!voice.audio.empty()){PlaySoundW(nullptr,nullptr,0);speech_=std::move(voice.audio);PlaySoundW(reinterpret_cast<LPCWSTR>(speech_.data()),nullptr,SND_MEMORY|SND_ASYNC|SND_NODEFAULT);}SetWindowTextW(toggle_,session.Enabled()?UiLabel(L"\u505c\u6b62\u5b57\u5e55",L"Stop captions"):UiLabel(L"\u542f\u7528\u5b57\u5e55",L"Start captions"));auto value=session.Text();if(value!=shown_){shown_=value;ReplaceTranscriptText(text_,DisplayLines(Wide(value)).c_str());}}
+ void Refresh(){RefreshExport();RefreshService();RefreshHealth();EnableWindow(language_,!session.AutoTranslating());SetWindowTextW(autoTranslate_,session.AutoTranslating()?UiLabel(L"\u505c\u6b62\u81ea\u52a8\u7ffb\u8bd1",L"Stop auto translation"):UiLabel(L"\u5f00\u542f\u81ea\u52a8\u7ffb\u8bd1",L"Start auto translation"));auto voice=session.TakeSpeechPacket();if(!speech_.empty()&&speechRevision_!=voice.revision){PlaySoundW(nullptr,nullptr,0);speech_.clear();}speechRevision_=voice.revision;if(!voice.audio.empty()){PlaySoundW(nullptr,nullptr,0);speech_=std::move(voice.audio);PlaySoundW(reinterpret_cast<LPCWSTR>(speech_.data()),nullptr,SND_MEMORY|SND_ASYNC|SND_NODEFAULT);}SetWindowTextW(toggle_,session.Enabled()?UiLabel(L"\u505c\u6b62\u5b57\u5e55",L"Stop captions"):UiLabel(L"\u542f\u7528\u5b57\u5e55",L"Start captions"));auto value=session.Text();if(value!=shown_){shown_=value;ReplaceTranscriptText(text_,DisplayLines(Wide(value)).c_str());}}
  static LRESULT CALLBACK Proc(HWND h,UINT message,WPARAM w,LPARAM l){
   auto self=reinterpret_cast<AiPanel*>(GetWindowLongPtrW(h,GWLP_USERDATA));
   if(message==WM_NCCREATE){self=static_cast<AiPanel*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);self->window_=h;SetWindowLongPtrW(h,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));}
@@ -249,7 +268,7 @@ if(id>=11&&id<=13){SwitchPage(id);return true;}if(id==18){SwitchPage(11);return 
    case WM_TIMER:self->Refresh();return 0;
    case WM_COMMAND:if(self->ExtraCommand(w))return 0;if(self->page_!=11)return 0;if(LOWORD(w)==10){const char* langs[]={"en","zh","ja","ko","es"};auto index=SendMessageW(self->language_,CB_GETCURSEL,0,0);if(self->session.AutoTranslating())self->session.AutoTranslate("");else if(index>=0&&index<5)self->session.AutoTranslate(langs[index]);self->Refresh();}else if(LOWORD(w)==9){self->session.Keywords();self->Refresh();}else if(LOWORD(w)==7){self->session.Speak();}else if(LOWORD(w)==8){self->session.StopSpeech();PlaySoundW(nullptr,nullptr,0);self->speech_.clear();self->Refresh();}else if(LOWORD(w)==6){const char* langs[]={"en","zh","ja","ko","es"};auto index=SendMessageW(self->language_,CB_GETCURSEL,0,0);if(index>=0&&index<5)self->session.Translate(langs[index]);self->Refresh();}else if(LOWORD(w)==2){self->session.Enable(!self->session.Enabled());self->Refresh();}else if(LOWORD(w)==3){self->session.Summarize();self->Refresh();}return 0;
    case WM_CLOSE:self->Close();return 0;
-   case WM_DESTROY:self->health_.Invalidate();self->shownHealth_.clear();self->shownService_.clear();if(!self->speech_.empty()){PlaySoundW(nullptr,nullptr,0);self->speech_.clear();}KillTimer(h,1);self->window_=nullptr;self->text_=nullptr;self->shown_.clear();self->page_=11;self->settingsLoaded_=false;self->settingsDirty_=false;self->loadingSettings_=false;self->archives_.clear();self->archiveDeleteId_.clear();self->extra_={};if(self->font_){DeleteObject(self->font_);self->font_=nullptr;}if(self->title_){DeleteObject(self->title_);self->title_=nullptr;}return 0;
+   case WM_DESTROY:self->exportState_=std::make_shared<ExportState>();self->health_.Invalidate();self->shownHealth_.clear();self->shownService_.clear();if(!self->speech_.empty()){PlaySoundW(nullptr,nullptr,0);self->speech_.clear();}KillTimer(h,1);self->window_=nullptr;self->text_=nullptr;self->shown_.clear();self->page_=11;self->settingsLoaded_=false;self->settingsDirty_=false;self->loadingSettings_=false;self->archives_.clear();self->archiveDeleteId_.clear();self->extra_={};if(self->font_){DeleteObject(self->font_);self->font_=nullptr;}if(self->title_){DeleteObject(self->title_);self->title_=nullptr;}return 0;
   }
   return DefWindowProcW(h,message,w,l);
  }

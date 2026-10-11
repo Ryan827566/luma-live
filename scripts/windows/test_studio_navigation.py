@@ -203,11 +203,17 @@ try:
     export_root = profile / 'export destination'
     set_text(u.GetDlgItem(child, 43), str(export_root))
     u.SendMessageW(child, 0x111, 44, 0)
+    deadline = time.monotonic() + 8
+    while str(export_root) not in text_of(u.GetDlgItem(child, 45)) and time.monotonic() < deadline: time.sleep(.05)
     exported = {p.name: p.read_bytes() for p in (export_root / 'call').glob('*.md')}
     assert exported == saved_call_files, 'Inline export changed saved bytes or context'
     export_result = text_of(u.GetDlgItem(child, 45))
     assert str(export_root) in export_result, 'Export path missing from inline result'
     u.SendMessageW(child, 0x111, 44, 0)
+    deadline = time.monotonic() + 8
+    while text_of(u.GetDlgItem(child, 45)) == export_result or 'Exporting.' in text_of(u.GetDlgItem(child, 45)) or '\u6b63\u5728\u5bfc\u51fa' in text_of(u.GetDlgItem(child, 45)):
+        assert time.monotonic() < deadline, 'Export did not finish'
+        time.sleep(.05)
     assert {p.name: p.read_bytes() for p in (export_root / 'call').glob('*.md')} == exported
     assert text_of(u.GetDlgItem(child, 45)) != export_result, 'Duplicate export was reported as success'
     assert {p.name: p.read_bytes() for p in call_records.glob('*.md')} == saved_call_files
