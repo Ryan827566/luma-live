@@ -5,6 +5,8 @@ import subprocess
 import sys
 import os
 import time
+import uuid
+import shutil
 from pathlib import Path
 
 u = c.WinDLL("user32", use_last_error=True)
@@ -20,7 +22,14 @@ u.PostMessageW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
 u.GetWindowRect.argtypes = [w.HWND, c.POINTER(w.RECT)]
 u.MapWindowPoints.argtypes = [w.HWND, w.HWND, c.c_void_p, w.UINT]
 startup = subprocess.STARTUPINFO(); startup.dwFlags = subprocess.STARTF_USESHOWWINDOW; startup.wShowWindow = 0
-process = subprocess.Popen([sys.argv[1]], startupinfo=startup)
+profile_parent = Path(sys.argv[1]).resolve().parents[2] / "tmp"
+profile_parent.mkdir(parents=True, exist_ok=True)
+profile = profile_parent / ("luma-ui-profile-" + uuid.uuid4().hex)
+profile.mkdir()
+env = {key.upper(): value for key, value in os.environ.items()}; env["LOCALAPPDATA"] = str(profile)
+archive_fixture = Path(sys.argv[1]).resolve().parent / "luma_session_archive_tests.exe"
+subprocess.run([str(archive_fixture), "--write-fixture", str(profile / "LumaLive/records")], env=env, check=True)
+process = subprocess.Popen([sys.argv[1]], startupinfo=startup, env=env)
 root = None
 fixture = None
 try:
@@ -153,6 +162,45 @@ try:
     u.SendMessageW(child, 0x5, 0, 0)
     assert not (u.GetWindowLongW(transcript, -16) & 0x200000), "Scrollbar did not hide after restoring short text"
 
+    # Exercise actual hosted settings and archive views in an isolated Windows profile.
+    def text_of(hwnd):
+        value = c.create_unicode_buffer(16384)
+        u.SendMessageW(hwnd, 0xD, len(value), c.cast(value, c.c_void_p).value)
+        return value.value
+    def set_text(hwnd, value):
+        buffer = c.create_unicode_buffer(value)
+        u.SendMessageW(hwnd, 0xC, 0, c.cast(buffer, c.c_void_p).value)
+    u.SendMessageW(child, 0x111, 14, 0)
+    assert text_of(u.GetDlgItem(child, 15)), "Empty record save lacks inline guidance"
+    u.SendMessageW(child, 0x111, 12, 0)
+    fits(child, range(1, 36))
+    assert not (u.GetWindowLongW(transcript, -16) & 0x10000000), "Live transcript overlaps history"
+    archived = u.GetDlgItem(child, 17)
+    saved_text = text_of(archived)
+    assert saved_text, "Saved fixture record was not loaded"
+    assert u.SendMessageW(archived, 0xBA, 0, 0) >= 3, "Archive line breaks were collapsed"
+    time.sleep(.4)
+    assert text_of(archived) == saved_text, "Live refresh overwrote historical record"
+    u.SendMessageW(child, 0x111, 13, 0)
+    fits(child, range(1, 36))
+    assert u.GetWindowLongW(u.GetDlgItem(child, 21), -16) & 0x20, "Provider key is not masked"
+    values = ("https://example.invalid/v1", "ui-fixture-secret", "asr-fixture", "chat-fixture", "", "")
+    for control_id, value in zip(range(20, 26), values): set_text(u.GetDlgItem(child, control_id), value)
+    u.SendMessageW(child, 0x111, 26, 0)
+    config_path = profile / "LumaLive/ai-provider.dat"
+    assert config_path.is_file(), "Settings page did not save configuration"
+    encrypted_config = config_path.read_bytes()
+    assert b"ui-fixture-secret" not in encrypted_config, "Provider key saved as plaintext"
+    set_text(u.GetDlgItem(child, 20), "http://example.invalid/v1")
+    u.SendMessageW(child, 0x111, 26, 0)
+    assert config_path.read_bytes() == encrypted_config, "Invalid URL replaced saved settings"
+    set_text(u.GetDlgItem(child, 20), values[0])
+    u.SendMessageW(child, 0x111, 26, 0)
+    u.SendMessageW(child, 0x111, 11, 0)
+    fits(child, range(1, 36))
+    assert text_of(transcript) == original.value, "Subpage navigation changed active session"
+    print("PASS: inline AI settings, encrypted save, archive viewer and session preservation")
+
     assert u.GetWindowLongW(child, -16) & 0x10000000
     u.SendMessageW(root, 0x111, 117, 0)
     assert not (u.GetWindowLongW(child, -16) & 0x10000000), "AI page not hidden"
@@ -261,5 +309,7 @@ finally:
     try: process.wait(timeout=15)
     except subprocess.TimeoutExpired:
         process.terminate(); process.wait(); raise RuntimeError("Studio did not shut down cleanly")
+assert profile.resolve().is_relative_to(profile_parent.resolve())
+shutil.rmtree(profile)
 assert process.returncode == 0, process.returncode
 print("PASS: clean shutdown")

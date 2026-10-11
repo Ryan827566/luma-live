@@ -112,3 +112,10 @@ Do not mark product UI complete based on compilation, synthetic media tests or t
 - Scrollbar visibility uses the EDIT formatting rectangle and actual font line height. Native tests cover overflow and replacement with short text. Scrollbar colors are unchanged and remain a separate visual item.
 - All ten actual-client verifier checks passed, including the new native transcript view regression, existing three-member navigation and DPI diagnostics. Algorithm-only independent review found no blocking issue; its filesystem review was unavailable. EXE SHA-256: d751019fd557463df569b58065263b4666a02ad5313f4c9590519e500a464cef.
 - This is a development checkpoint, not final UI or real-provider/media acceptance. Windows message semantics reference: https://learn.microsoft.com/en-us/windows/win32/controls/em-setsel .
+
+
+2026-10-11 AI workspace delivery checkpoint:
+- Added inline Session / History / Service settings tabs using existing dark controls, system-language labels and accessible field names. Settings has a masked key input and inline validation/save feedback. Tab order follows visible layout; closing and reopening the panel resets cached control state.
+- Explicit Save record persists available transcript and generated content. History has its own readonly view, keeps live session updates separate and normalizes display line endings without changing archive bytes. No extra top-level window is created.
+- All 13 actual-EXE verifier checks passed, including native encrypted settings, archive tests, C++/Python DPAPI interoperability, gateway config reload and hosted UI save/history assertions. Compact English 1024x700 navigation passed; latest default-size screenshots in output/ui-ai-workspace-20261011 include History and Service settings. Capture fixtures are synthetic and use isolated profiles, not user records/credentials.
+- Tested EXE SHA-256: d1f2da2980739dc5afa345ebcf55c48813441e2a380bb3259c90f6ddc0b47cf7. This is local implementation evidence, not real AI provider, physical multi-monitor/device or final visual acceptance. Scrollbar polish, complete localization/Narrator/IME and remaining module functions are still open.

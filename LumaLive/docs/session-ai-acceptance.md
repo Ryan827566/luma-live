@@ -4,16 +4,16 @@ Status: configurable integration, not real-provider acceptance. The GitHub produ
 
 ## Run
 
-Use Python 3.10+ and start `python LumaLive/server/ai-gateway/python/gateway.py` from the repository root. No extra packages are required. Configure these environment variables in the gateway process before starting it:
+Use Python 3.10+ and start `python LumaLive/server/ai-gateway/python/gateway.py` from the repository root. No extra packages are required. Configure the provider in the client AI > Service settings page, save it, and run the gateway under the same Windows user. Required fields are API base URL, API key, transcription model and chat model; speech model and voice are optional but must be supplied together. Saving does not validate a provider connection. Alternatively set these environment variables in the gateway process:
 
 - LUMALIVE_AI_BASE_URL: provider API base including any /v1 prefix. HTTPS required except loopback mock servers.
 - LUMALIVE_AI_API_KEY: provider key, kept out of source control and chat.
 - LUMALIVE_AI_TRANSCRIBE_MODEL: a model supporting the multipart /audio/transcriptions endpoint.
 - LUMALIVE_AI_CHAT_MODEL: a model supporting /chat/completions.
 
-The gateway binds 127.0.0.1:19740. GET /health reports configuration status without secrets. Open the Studio or meeting window, join a call/meeting, open AI subtitles, and explicitly enable transcription after notifying participants. The native client uses this local gateway; it does not store the provider key. The transcript can be selected and copied from the AI panel. Request summary/action items after transcript appears. Closing the panel stops transcription; reopening retains the current session text. Starting a new session clears text and requires enabling again.
+The gateway binds 127.0.0.1:19740. GET /health reports configuration status without secrets. Open the Studio or meeting window, join a call/meeting, open AI subtitles, and explicitly enable transcription after notifying participants. The native client uses this local gateway; it stores saved provider settings encrypted with current-user Windows DPAPI in %LOCALAPPDATA%/LumaLive/ai-provider.dat. No key is sent to the local HTTP gateway. The transcript can be selected and copied from the AI panel. Request summary/action items after transcript appears. Closing the panel stops transcription; reopening retains the current session text. Starting a new session clears text and requires enabling again.
 
-Audio is uploaded in per-speaker five-second WAV batches, not streaming ASR. Silence and chunk boundaries can affect quality; this requires real-provider testing. Queue overload drops segments with a visible status. Pending work is discarded on stop; already transmitted requests cannot be recalled. Results from prior sessions are discarded. Transcript is memory-only and limited to 64 KB. There is no automatic recording archive or speaker diarization model; speaker labels come from media tracks.
+Audio is uploaded in per-speaker five-second WAV batches, not streaming ASR. Silence and chunk boundaries can affect quality; this requires real-provider testing. Queue overload drops segments with a visible status. Pending work is discarded on stop; already transmitted requests cannot be recalled. Results from prior sessions are discarded. The live transcript is limited to 64 KB and stays in memory until the user explicitly chooses Save record. Saved Markdown snapshots persist under %LOCALAPPDATA%/LumaLive/records/call or meeting, including available summaries, translations and keywords. History opens saved content separately from the live transcript. There is no automatic recording archive or speaker diarization model; speaker labels come from media tracks.
 
 ## Verified locally
 
@@ -55,3 +55,12 @@ Stop reading now stops playback, removes queued speech jobs, discards ready audi
 Speech playback lifecycle follow-up: the UI receives audio and its cancellation revision atomically. A session reset, caption stop/restart or transcript limit invalidates already-consumed audio; the panel stops its playback on the next UI refresh (normally within 300 ms), including when its hosted page is hidden. Transcript-limit shutdown also discards buffered speech. This extends cancellation beyond queued requests to playback that has already started. Physical audibility remains a manual check.
 
 Verified 2026-10-03: rebuilt actual luma_studio.exe after user closed the running instance; SessionAi revision/reset tests and three-member hosted navigation/clean shutdown passed. Physical playback cutoff is still a manual check.
+
+
+## Desktop settings and explicit archives (2026-10-11)
+
+The Session, History and Service settings subpages are embedded in the existing AI page. Switching views does not stop captions or overwrite the live transcript. Call and meeting archives are isolated, while provider settings are shared for the current Windows user. The session is not automatically archived on reset or close. Saved Markdown is ordinary local text, not DPAPI-encrypted audio/transcript storage.
+
+The running gateway reads saved settings for each new request. Explicit environment variables take precedence per field; a complete environment configuration bypasses the desktop file. An invalid saved file causes an unconfigured health response instead of silently keeping stale credentials. Health only reports configuration availability, never real-provider validation. The Python gateway remains a separately launched process, not a packaged background service.
+
+Verified: native settings roundtrip/corruption/URL validation, atomic archive save/list/load and context isolation, C++ DPAPI writer to Python reader, request-level config reload through HTTP, session snapshot content, masked key input, invalid-save preservation, actual hosted History/Settings navigation and line breaks. Full verifier: 13 checks passed on EXE SHA-256 d1f2da2980739dc5afa345ebcf55c48813441e2a380bb3259c90f6ddc0b47cf7. Real provider behavior, physical audio/video and final product acceptance remain pending.

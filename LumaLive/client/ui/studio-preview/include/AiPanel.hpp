@@ -1,6 +1,9 @@
 #pragma once
 #include "TranscriptView.hpp"
 #include "SessionAi.hpp"
+#include "AiProviderSettings.hpp"
+#include "SessionArchive.hpp"
+#include <array>
 #include "UiTheme.hpp"
 #include "UiAccessibility.hpp"
 #include <mmsystem.h>
@@ -30,8 +33,17 @@ public:
   text_=add(L"EDIT",L"",WS_TABSTOP|WS_BORDER|WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY,4);
   SetAccessibleName(language_,UiLabel(L"翻译目标语言",L"Translation language"));
   SetAccessibleName(text_,UiLabel(L"会话记录与生成结果",L"Transcript and generated results"));
+  for(auto [id,label]:{std::pair{11,UiLabel(L"当前会话",L"Session")},std::pair{12,UiLabel(L"历史记录",L"History")},std::pair{13,UiLabel(L"服务设置",L"Service settings")},std::pair{14,UiLabel(L"保存记录",L"Save record")},std::pair{18,UiLabel(L"返回会话",L"Back to session")},std::pair{26,UiLabel(L"保存设置",L"Save settings")}})extra_[id]=add(L"BUTTON",label,WS_TABSTOP,id);
+  for(int id:{15,19,27})extra_[id]=add(L"STATIC",L"",0,id);
+  extra_[16]=add(L"COMBOBOX",L"",WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,16);
+  extra_[17]=add(L"EDIT",L"",WS_TABSTOP|WS_BORDER|WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY,17);SendMessageW(extra_[17],EM_SETLIMITTEXT,1048576,0);
+  SetAccessibleName(extra_[16],UiLabel(L"已保存的记录",L"Saved records"));SetAccessibleName(extra_[17],UiLabel(L"历史记录内容",L"Saved record content"));
+  const wchar_t* labels[]={UiLabel(L"服务地址",L"Service URL"),UiLabel(L"访问密钥",L"API key"),UiLabel(L"语音识别模型",L"Transcription model"),UiLabel(L"摘要与翻译模型",L"Summary and translation model"),UiLabel(L"朗读模型（选填）",L"Speech model (optional)"),UiLabel(L"朗读音色（选填）",L"Voice (optional)")};
+  for(int i=0;i<6;++i){extra_[30+i]=add(L"STATIC",labels[i],0,30+i);extra_[20+i]=add(L"EDIT",L"",WS_TABSTOP|WS_BORDER|ES_AUTOHSCROLL|(i==1?ES_PASSWORD:0),20+i);SendMessageW(extra_[20+i],EM_SETLIMITTEXT,8192,0);SetAccessibleName(extra_[20+i],labels[i]);}
   // Tab order follows the row-major sequence used by Layout.
   for(HWND control:{toggle_,summary_,keywords_,speak_,language_,translate_,autoTranslate_,stopSpeech_,text_})SetWindowPos(control,HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+  for(int id:{13,12,11})SetWindowPos(extra_[id],HWND_TOP,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+  SetWindowPos(extra_[14],HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
   SendMessageW(text_,EM_SETLIMITTEXT,200000,0);Layout();SetTimer(window_,1,300,nullptr);Refresh();ShowWindow(window_,SW_SHOW);
  }
  void Place(RECT r){if(window_){UpdateDpi();MoveWindow(window_,r.left,r.top,r.right-r.left,r.bottom-r.top,TRUE);}}
@@ -40,20 +52,42 @@ public:
 private:
  Context context_;
  bool embedded_{false};
+ int page_{11};bool settingsLoaded_{false},settingsDirty_{false},loadingSettings_{false};std::array<HWND,36> extra_{};std::vector<SessionArchive::Entry> archives_;
+ std::string ArchiveContext()const{return context_==Context::Meeting?"meeting":"call";}
+ std::wstring Field(int id){const int n=GetWindowTextLengthW(extra_[id]);std::wstring s(size_t(n)+1,L'\0');GetWindowTextW(extra_[id],s.data(),n+1);s.resize(n);return s;}
+ void LoadSettings(){if(settingsDirty_)return;AiProviderSettings config;std::wstring error;loadingSettings_=true;bool ok=LoadAiProviderSettings(config,error);auto fields=ProviderSettingsDetail::Fields(config);for(int i=0;i<6;++i)SetWindowTextW(extra_[20+i],fields[i]->c_str());loadingSettings_=false;settingsLoaded_=true;SetWindowTextW(extra_[27],ok?UiLabel(L"密钥将加密保存在当前 Windows 用户下。保存后，本地 AI 服务将在下一次请求时读取。",L"The key is encrypted for this Windows user. The local AI service reads saved settings on its next request."):error.c_str());}
+ void LoadArchive(){auto index=SendMessageW(extra_[16],CB_GETCURSEL,0,0);std::string text;std::wstring error;if(index>=0&&size_t(index)<archives_.size()&&SessionArchive::Load(ArchiveContext(),archives_[index].id,text,error)){SetWindowTextW(extra_[17],DisplayLines(Wide(text)).c_str());SetWindowTextW(extra_[19],UiLabel(L"已保存到本机，仅当前工作区的记录显示在这里。",L"Saved on this computer. Only records from this workspace are listed."));}else{SetWindowTextW(extra_[17],L"");SetWindowTextW(extra_[19],error.empty()?UiLabel(L"暂无记录。在当前会话中选择“保存记录”后，可在这里重新查看。",L"No saved records. Choose Save record in a session to find it here later."):error.c_str());}UpdateTranscriptScrollbar(extra_[17]);}
+ void RefreshArchives(){std::wstring error;archives_=SessionArchive::List(ArchiveContext(),error);SendMessageW(extra_[16],CB_RESETCONTENT,0,0);for(const auto& entry:archives_)SendMessageW(extra_[16],CB_ADDSTRING,0,reinterpret_cast<LPARAM>(entry.title.c_str()));EnableWindow(extra_[16],!archives_.empty());if(!archives_.empty())SendMessageW(extra_[16],CB_SETCURSEL,0,0);LoadArchive();if(!error.empty())SetWindowTextW(extra_[19],error.c_str());}
+ void SwitchPage(int page){page_=page;if(page==12)RefreshArchives();if(page==13)LoadSettings();Layout();SetFocus(extra_[page]);}
+ bool ExtraCommand(WPARAM w){const int id=LOWORD(w);if(id>=11&&id<=13){SwitchPage(id);return true;}if(id==18){SwitchPage(11);return true;}if(id==16&&HIWORD(w)==CBN_SELCHANGE){LoadArchive();return true;}
+  if(id>=20&&id<=25&&HIWORD(w)==EN_CHANGE){if(settingsLoaded_&&!loadingSettings_){settingsDirty_=true;SetWindowTextW(extra_[27],UiLabel(L"有未保存的修改。",L"Unsaved changes."));}return true;}
+  if(id==14){if(page_!=11)return true;std::wstring error;auto value=session.ArchiveText();if(value.empty())error=UiLabel(L"当前没有可保存的记录。请先启用字幕并产生内容。",L"No content to save. Start captions and collect a transcript first.");else if(SessionArchive::Save(ArchiveContext(),value,error))error=UiLabel(L"记录已保存，可在“历史记录”中查看。",L"Record saved. Open History to view it.");SetWindowTextW(extra_[15],error.c_str());return true;}
+  if(id==26){if(page_!=13)return true;AiProviderSettings config;auto fields=ProviderSettingsDetail::Fields(config);for(int i=0;i<6;++i)*fields[i]=Field(20+i);std::wstring error;if(SaveAiProviderSettings(config,error)){settingsDirty_=false;error=UiLabel(L"设置已保存。尚未验证真实服务连接；请确认本地 AI 服务已运行。",L"Settings saved. Connection is not yet verified; ensure the local AI service is running.");}SetWindowTextW(extra_[27],error.c_str());return true;}return false;
+ }
+
  UINT dpi_{96};HFONT title_{};HBRUSH background_=CreateSolidBrush(UiTheme::Background),editBackground_=CreateSolidBrush(UiTheme::Surface);int transcriptY_{300};
  int S(int value)const{return MulDiv(value,int(dpi_),96);}
  void UpdateDpi(){const auto next=GetDpiForWindow(window_);if(next==dpi_)return;dpi_=next;auto old=font_;font_=UiTheme::Font(S(14));if(title_)DeleteObject(title_);title_=UiTheme::Font(S(24),600);for(HWND child=GetWindow(window_,GW_CHILD);child;child=GetWindow(child,GW_HWNDNEXT))SendMessageW(child,WM_SETFONT,reinterpret_cast<WPARAM>(font_),TRUE);if(old)DeleteObject(old);Layout();}
- void Paint(HDC dc){RECT r;GetClientRect(window_,&r);UiTheme::Fill(dc,r,UiTheme::Background);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,UiTheme::Text);auto old=SelectObject(dc,title_);RECT label{S(28),S(24),r.right-S(28),S(62)};DrawTextW(dc,UiLabel(L"\u667a\u80fd\u52a9\u624b",L"AI assistant"),-1,&label,DT_SINGLELINE|DT_VCENTER);SelectObject(dc,font_);SetTextColor(dc,UiTheme::Muted);label={S(28),S(65),r.right-S(28),S(90)};DrawTextW(dc,(context_==Context::Meeting?UiLabel(L"当前工作区：视频会议 · 记录与通话工作区独立",L"Meeting workspace · Records are separate from calls"):UiLabel(L"当前工作区：视频通话 · 记录与会议工作区独立",L"Call workspace · Records are separate from meetings")),-1,&label,DT_SINGLELINE|DT_END_ELLIPSIS);label={S(28),S(transcriptY_-30),r.right-S(28),S(transcriptY_-6)};DrawTextW(dc,UiLabel(L"\u4f1a\u8bdd\u8bb0\u5f55\u4e0e\u751f\u6210\u7ed3\u679c",L"Transcript and generated results"),-1,&label,DT_SINGLELINE);SelectObject(dc,old);}
+ void Paint(HDC dc){RECT r;GetClientRect(window_,&r);UiTheme::Fill(dc,r,UiTheme::Background);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,UiTheme::Text);auto old=SelectObject(dc,title_);RECT label{S(28),S(24),r.right-S(28),S(62)};DrawTextW(dc,UiLabel(L"\u667a\u80fd\u52a9\u624b",L"AI assistant"),-1,&label,DT_SINGLELINE|DT_VCENTER);SelectObject(dc,font_);SetTextColor(dc,UiTheme::Muted);label={S(28),S(65),r.right-S(28),S(90)};DrawTextW(dc,(context_==Context::Meeting?UiLabel(L"当前工作区：视频会议 · 记录与通话工作区独立",L"Meeting workspace · Records are separate from calls"):UiLabel(L"当前工作区：视频通话 · 记录与会议工作区独立",L"Call workspace · Records are separate from meetings")),-1,&label,DT_SINGLELINE|DT_END_ELLIPSIS);if(page_==11){label={S(28),S(transcriptY_-30),r.right-S(28),S(transcriptY_-6)};DrawTextW(dc,UiLabel(L"\u4f1a\u8bdd\u8bb0\u5f55\u4e0e\u751f\u6210\u7ed3\u679c",L"Transcript and generated results"),-1,&label,DT_SINGLELINE);}SelectObject(dc,old);}
 
  std::uint64_t speechRevision_{0};
  HWND window_{},note_{},toggle_{},summary_{},text_{},language_{},translate_{},speak_{},stopSpeech_{},keywords_{},autoTranslate_{};HFONT font_{};std::string shown_,speech_;
  static std::wstring Wide(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),nullptr,0);std::wstring out(n,L' ');MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),out.data(),n);return out;}
+ // Native multiline EDIT controls require CRLF; archive bytes remain unchanged.
+ static std::wstring DisplayLines(const std::wstring& text){std::wstring out;out.reserve(text.size());for(size_t i=0;i<text.size();++i){if(text[i]==L'\r'){out+=L"\r\n";if(i+1<text.size()&&text[i+1]==L'\n')++i;}else if(text[i]==L'\n')out+=L"\r\n";else out+=text[i];}return out;}
  void UpdateTranscriptScroll(){if(text_)UpdateTranscriptScrollbar(text_);}
 
  void Layout(){
   if(!text_)return;RECT r{};GetClientRect(window_,&r);
   const int width=MulDiv(r.right,96,int(dpi_)),height=MulDiv(r.bottom,96,int(dpi_));
   const int margin=28,gap=8,rowPitch=48,contentWidth=std::max(1,width-2*margin);
+  auto position=[&](HWND h,int x,int y,int w,int ht){MoveWindow(h,S(x),S(y),S(std::max(1,w)),S(std::max(1,ht)),TRUE);};
+  for(int id=1;id<=10;++id)ShowWindow(GetDlgItem(window_,id),page_==11?SW_SHOW:SW_HIDE);
+  for(int id=11;id<36;++id){if(!extra_[id])continue;const bool show=id<=13||(page_==11&&(id==14||id==15))||(page_==12&&id>=16&&id<=19)||(page_==13&&id>=20);ShowWindow(extra_[id],show?SW_SHOW:SW_HIDE);}
+  for(int i=0;i<3;++i)position(extra_[11+i],margin+i*156,102,148,36);
+  if(page_==12){position(extra_[16],margin,166,contentWidth-164,220);UiTheme::SetComboDpi(extra_[16],dpi_);position(extra_[18],width-margin-148,166,148,40);position(extra_[19],margin,218,contentWidth,48);position(extra_[17],margin,276,contentWidth,height-296);UpdateTranscriptScrollbar(extra_[17]);InvalidateRect(window_,nullptr,FALSE);return;}
+  if(page_==13){const int cellWidth=(contentWidth-24)/2;for(int i=0;i<6;++i){int x=margin+(i%2)*(cellWidth+24),y=160+(i/2)*88;position(extra_[30+i],x,y,cellWidth,24);position(extra_[20+i],x,y+28,cellWidth,38);}position(extra_[26],margin,434,160,38);position(extra_[27],margin,488,contentWidth,height-508);InvalidateRect(window_,nullptr,FALSE);return;}
+  position(extra_[14],margin,height-58,140,36);position(extra_[15],margin+156,height-62,contentWidth-156,48);
   HWND actions[]={toggle_,summary_,keywords_,speak_,language_,translate_,autoTranslate_,stopSpeech_};
   int noteHeight=64,minCell=180;
   if(auto dc=GetDC(window_)){
@@ -66,11 +100,11 @@ private:
    minCell=logicalCeil(widest)+32;SelectObject(dc,old);ReleaseDC(window_,dc);
   }
   const int cols=std::clamp((contentWidth+gap)/(minCell+gap),2,4),cell=(contentWidth-gap*(cols-1))/cols;
-  const int actionsY=102+noteHeight+16,rows=(8+cols-1)/cols;
+  const int actionsY=160+noteHeight+16,rows=(8+cols-1)/cols;
   auto move=[&](HWND h,int x,int y,int w,int ht){MoveWindow(h,S(x),S(y),S(std::max(1,w)),S(std::max(1,ht)),TRUE);};
-  move(note_,margin,102,contentWidth,noteHeight);UiTheme::SetComboDpi(language_,dpi_);
+  move(note_,margin,160,contentWidth,noteHeight);UiTheme::SetComboDpi(language_,dpi_);
   for(int i=0;i<8;++i)move(actions[i],margin+(i%cols)*(cell+gap),actionsY+(i/cols)*rowPitch,cell,i==4?180:36);
-  transcriptY_=actionsY+rows*rowPitch+30;move(text_,margin,transcriptY_,contentWidth,height-transcriptY_-20);
+  transcriptY_=actionsY+rows*rowPitch+30;move(text_,margin,transcriptY_,contentWidth,height-transcriptY_-78);
   UpdateTranscriptScroll();InvalidateRect(window_,nullptr,FALSE);
  }
 
@@ -87,14 +121,14 @@ private:
    case WM_PAINT:{PAINTSTRUCT ps;auto dc=BeginPaint(h,&ps);self->Paint(dc);EndPaint(h,&ps);return 0;}
    case WM_PRINTCLIENT:self->Paint(reinterpret_cast<HDC>(w));return 0;
    case WM_MEASUREITEM:{auto d=reinterpret_cast<MEASUREITEMSTRUCT*>(l);if(d->CtlType==ODT_COMBOBOX){d->itemHeight=self->S(30);return TRUE;}break;}
-   case WM_DRAWITEM:{auto d=reinterpret_cast<DRAWITEMSTRUCT*>(l);if(d->CtlType==ODT_COMBOBOX){UiTheme::DrawComboItem(*d,self->font_);return TRUE;}UiTheme::DrawButton(*d,self->font_,d->CtlID==2,false,d->CtlID==8);return TRUE;}
-   case WM_CTLCOLORSTATIC:case WM_CTLCOLOREDIT:case WM_CTLCOLORLISTBOX:{auto dc=reinterpret_cast<HDC>(w);SetTextColor(dc,reinterpret_cast<HWND>(l)==self->note_?UiTheme::Muted:UiTheme::Text);const bool edit=reinterpret_cast<HWND>(l)!=self->note_;SetBkColor(dc,edit?UiTheme::Surface:UiTheme::Background);return reinterpret_cast<LRESULT>(edit?self->editBackground_:self->background_);}
+   case WM_DRAWITEM:{auto d=reinterpret_cast<DRAWITEMSTRUCT*>(l);if(d->CtlType==ODT_COMBOBOX){UiTheme::DrawComboItem(*d,self->font_);return TRUE;}UiTheme::DrawButton(*d,self->font_,d->CtlID==2||d->CtlID==26,d->CtlID==self->page_,d->CtlID==8);return TRUE;}
+   case WM_CTLCOLORSTATIC:case WM_CTLCOLOREDIT:case WM_CTLCOLORLISTBOX:{auto dc=reinterpret_cast<HDC>(w);SetTextColor(dc,reinterpret_cast<HWND>(l)==self->note_?UiTheme::Muted:UiTheme::Text);const int id=GetDlgCtrlID(reinterpret_cast<HWND>(l));const bool edit=!(id==1||id==15||id==19||id==27||id>=30);SetBkColor(dc,edit?UiTheme::Surface:UiTheme::Background);return reinterpret_cast<LRESULT>(edit?self->editBackground_:self->background_);}
 
    case WM_GETMINMAXINFO:reinterpret_cast<MINMAXINFO*>(l)->ptMinTrackSize={self->S(640),self->S(600)};return 0;
    case WM_TIMER:self->Refresh();return 0;
-   case WM_COMMAND:if(LOWORD(w)==10){const char* langs[]={"en","zh","ja","ko","es"};auto index=SendMessageW(self->language_,CB_GETCURSEL,0,0);if(self->session.AutoTranslating())self->session.AutoTranslate("");else if(index>=0&&index<5)self->session.AutoTranslate(langs[index]);self->Refresh();}else if(LOWORD(w)==9){self->session.Keywords();self->Refresh();}else if(LOWORD(w)==7){self->session.Speak();}else if(LOWORD(w)==8){self->session.StopSpeech();PlaySoundW(nullptr,nullptr,0);self->speech_.clear();self->Refresh();}else if(LOWORD(w)==6){const char* langs[]={"en","zh","ja","ko","es"};auto index=SendMessageW(self->language_,CB_GETCURSEL,0,0);if(index>=0&&index<5)self->session.Translate(langs[index]);self->Refresh();}else if(LOWORD(w)==2){self->session.Enable(!self->session.Enabled());self->Refresh();}else if(LOWORD(w)==3){self->session.Summarize();self->Refresh();}return 0;
+   case WM_COMMAND:if(self->ExtraCommand(w))return 0;if(self->page_!=11)return 0;if(LOWORD(w)==10){const char* langs[]={"en","zh","ja","ko","es"};auto index=SendMessageW(self->language_,CB_GETCURSEL,0,0);if(self->session.AutoTranslating())self->session.AutoTranslate("");else if(index>=0&&index<5)self->session.AutoTranslate(langs[index]);self->Refresh();}else if(LOWORD(w)==9){self->session.Keywords();self->Refresh();}else if(LOWORD(w)==7){self->session.Speak();}else if(LOWORD(w)==8){self->session.StopSpeech();PlaySoundW(nullptr,nullptr,0);self->speech_.clear();self->Refresh();}else if(LOWORD(w)==6){const char* langs[]={"en","zh","ja","ko","es"};auto index=SendMessageW(self->language_,CB_GETCURSEL,0,0);if(index>=0&&index<5)self->session.Translate(langs[index]);self->Refresh();}else if(LOWORD(w)==2){self->session.Enable(!self->session.Enabled());self->Refresh();}else if(LOWORD(w)==3){self->session.Summarize();self->Refresh();}return 0;
    case WM_CLOSE:self->Close();return 0;
-   case WM_DESTROY:if(!self->speech_.empty()){PlaySoundW(nullptr,nullptr,0);self->speech_.clear();}KillTimer(h,1);self->window_=nullptr;self->text_=nullptr;self->shown_.clear();if(self->font_){DeleteObject(self->font_);self->font_=nullptr;}if(self->title_){DeleteObject(self->title_);self->title_=nullptr;}return 0;
+   case WM_DESTROY:if(!self->speech_.empty()){PlaySoundW(nullptr,nullptr,0);self->speech_.clear();}KillTimer(h,1);self->window_=nullptr;self->text_=nullptr;self->shown_.clear();self->page_=11;self->settingsLoaded_=false;self->settingsDirty_=false;self->loadingSettings_=false;self->archives_.clear();self->extra_={};if(self->font_){DeleteObject(self->font_);self->font_=nullptr;}if(self->title_){DeleteObject(self->title_);self->title_=nullptr;}return 0;
   }
   return DefWindowProcW(h,message,w,l);
  }
