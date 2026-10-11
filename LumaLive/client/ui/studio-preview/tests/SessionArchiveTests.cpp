@@ -23,6 +23,17 @@ int wmain(int argc, wchar_t** argv) {
  if (!fs::create_directory(root)) return 1;
  struct Cleanup { fs::path path; ~Cleanup() { std::error_code ec; fs::remove_all(path, ec); } } cleanup{root};
  try {
+  const std::string dated = "20261010T203000123Z_00000000-0000-0000-0000-000000000000.md";
+  TIME_ZONE_INFORMATION east{}; east.Bias = -480;
+  Require(Archive::detail::Title(dated, &east) == L"2026-10-11 04:30:00.123 (local time)", "local timestamp crosses UTC midnight and retains milliseconds");
+  TIME_ZONE_INFORMATION west{}; west.Bias = 480;
+  Require(Archive::detail::Title(dated, &west) == L"2026-10-10 12:30:00.123 (local time)", "western local timestamp");
+  SetEnvironmentVariableW(L"LUMALIVE_UI_LANGUAGE", L"zh-CN");
+  Require(Archive::detail::Title(dated, &east).find(L"\u672c\u5730\u65f6\u95f4") != std::wstring::npos, "simplified local timestamp label");
+  SetEnvironmentVariableW(L"LUMALIVE_UI_LANGUAGE", L"zh-TW");
+  Require(Archive::detail::Title(dated, &east).find(L"\u672c\u5730\u6642\u9593") != std::wstring::npos, "traditional local timestamp label");
+  SetEnvironmentVariableW(L"LUMALIVE_UI_LANGUAGE", L"en-US");
+  Require(Archive::detail::Title("20261340" + dated.substr(8), &east) == L"Date unavailable", "invalid timestamp is not mislabeled as local time");
   Require(Archive::List("call", error, root).empty() && error.empty() && !fs::exists(root / "call"), "empty listing must not create directories");
   const std::string unicode = UiUtf8(L"# \u4f1a\u8bae\u8bb0\u5f55 \U0001f30f\n\n\u4f60\u597d\uff0c\u4e16\u754c\u3002\n");
   Require(Archive::Save("call", unicode, error, root) && error.empty(), "unicode save");

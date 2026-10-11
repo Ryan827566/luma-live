@@ -67,9 +67,20 @@ inline bool Directory(const std::string& context, const std::filesystem::path& r
  }
  return true;
 }
-inline std::wstring Title(const std::string& id) {
- std::wstring value(id.begin(), id.end());
- return value.substr(0,4) + L"-" + value.substr(4,2) + L"-" + value.substr(6,2) + L" " + value.substr(9,2) + L":" + value.substr(11,2) + L":" + value.substr(13,2) + L"." + value.substr(15,3) + L" UTC";
+inline std::wstring Title(const std::string& id, const TIME_ZONE_INFORMATION* timezone = nullptr) {
+ const auto unavailable = UiLabel(L"\u65f6\u95f4\u4e0d\u53ef\u7528", L"Date unavailable");
+ if (!ValidId(id)) return unavailable;
+ auto number = [&](size_t start, size_t count) { WORD value = 0; for (size_t i = start; i < start + count; ++i) value = WORD(value * 10 + id[i] - '0'); return value; };
+ SYSTEMTIME utc{}; utc.wYear = number(0,4); utc.wMonth = number(4,2); utc.wDay = number(6,2);
+ utc.wHour = number(9,2); utc.wMinute = number(11,2); utc.wSecond = number(13,2); utc.wMilliseconds = number(15,3);
+ SYSTEMTIME local{};
+ // Use historical Windows timezone rules for saved records from earlier years.
+ const bool converted = timezone ? SystemTimeToTzSpecificLocalTime(timezone, &utc, &local)
+                                 : SystemTimeToTzSpecificLocalTimeEx(nullptr, &utc, &local);
+ if (!converted) return unavailable;
+ wchar_t stamp[40]{};
+ swprintf_s(stamp, L"%04u-%02u-%02u %02u:%02u:%02u.%03u ", local.wYear, local.wMonth, local.wDay, local.wHour, local.wMinute, local.wSecond, local.wMilliseconds);
+ return std::wstring(stamp) + UiLabel(L"\uff08\u672c\u5730\u65f6\u95f4\uff09", L"(local time)");
 }
 } // namespace detail
 inline std::vector<Entry> List(const std::string& context, std::wstring& error, const std::filesystem::path& root = {}) {
