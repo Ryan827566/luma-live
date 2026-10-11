@@ -134,6 +134,45 @@ inline bool Load(const std::string& context, const std::string& id, std::string&
   return detail::Fail(error, L"\u5f52\u6863\u8bb0\u5f55\u4e0d\u662f\u6709\u6548\u7684 UTF-8 \u6587\u672c\u3002", L"Saved record could not be read as UTF-8 text.");
  text = std::move(loaded); return true;
 }
+inline bool Export(const std::string& context, const std::string& id, const std::filesystem::path& destinationRoot,
+ std::filesystem::path& exportedPath, std::wstring& error, const std::filesystem::path& recordsRoot = {}) {
+ error.clear(); exportedPath.clear();
+ if (destinationRoot.empty() || !destinationRoot.is_absolute() || destinationRoot.native().find(L'\0') != std::wstring::npos)
+  return detail::Fail(error, L"\u8bf7\u9009\u62e9\u6709\u6548\u7684\u7edd\u5bf9\u5bfc\u51fa\u8def\u5f84\u3002", L"Choose a valid absolute export folder.");
+ std::string text;
+ if (!Load(context, id, text, error, recordsRoot)) return false;
+ std::filesystem::path directory; std::vector<detail::Handle> locks;
+ if (!detail::Directory(context, destinationRoot, true, directory, locks, error)) return false;
+ const auto destination = directory / id;
+ auto exists = [&]() { return detail::Fail(error, L"\u5bfc\u51fa\u76ee\u6807\u5df2\u5b58\u5728\uff0c\u8bf7\u9009\u62e9\u5176\u4ed6\u6587\u4ef6\u5939\u3002", L"Export destination already exists. Choose another folder."); };
+ if (GetFileAttributesW(destination.c_str()) != INVALID_FILE_ATTRIBUTES) return exists();
+ GUID guid{}; wchar_t guidText[40]{};
+ if (FAILED(CoCreateGuid(&guid)) || !StringFromGUID2(guid, guidText, 40))
+  return detail::Fail(error, L"\u65e0\u6cd5\u521b\u5efa\u5bfc\u51fa\u6587\u4ef6\u3002", L"Could not create export file.");
+ const auto temporary = directory / (std::wstring(L".export-") + guidText + L".tmp");
+ detail::Handle file(CreateFileW(temporary.c_str(), GENERIC_WRITE | DELETE, 0, nullptr, CREATE_NEW,
+  FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+ if (!file) return detail::Fail(error, L"\u65e0\u6cd5\u521b\u5efa\u5bfc\u51fa\u6587\u4ef6\u3002", L"Could not create export file.");
+ // Delete only the file we created, through its still-exclusive handle, on failure.
+ auto discard = [&]() { FILE_DISPOSITION_INFO info{TRUE}; SetFileInformationByHandle(file.value, FileDispositionInfo, &info, sizeof(info)); };
+ DWORD bytes = 0;
+ if (!WriteFile(file.value, text.data(), static_cast<DWORD>(text.size()), &bytes, nullptr) || bytes != text.size() || !FlushFileBuffers(file.value)) {
+  discard(); return detail::Fail(error, L"\u65e0\u6cd5\u5199\u5165\u5bfc\u51fa\u6587\u4ef6\u3002", L"Could not write export file.");
+ }
+ // Rename without releasing the handle or replacing any existing destination.
+ const auto& name = destination.native();
+ std::vector<BYTE> buffer(sizeof(FILE_RENAME_INFO) + name.size() * sizeof(wchar_t), 0);
+ auto* rename = reinterpret_cast<FILE_RENAME_INFO*>(buffer.data());
+ rename->ReplaceIfExists = FALSE; rename->RootDirectory = nullptr;
+ rename->FileNameLength = static_cast<DWORD>(name.size() * sizeof(wchar_t));
+ std::copy(name.begin(), name.end(), rename->FileName);
+ if (!SetFileInformationByHandle(file.value, FileRenameInfo, rename, static_cast<DWORD>(buffer.size()))) {
+  const DWORD code = GetLastError(); discard();
+  if (code == ERROR_ALREADY_EXISTS || code == ERROR_FILE_EXISTS || GetFileAttributesW(destination.c_str()) != INVALID_FILE_ATTRIBUTES) return exists();
+  return detail::Fail(error, L"\u65e0\u6cd5\u5b8c\u6210\u5f52\u6863\u5bfc\u51fa\u3002", L"Could not complete archive export.");
+ }
+ exportedPath = destination; return true;
+}
 inline bool Remove(const std::string& context, const std::string& id, std::wstring& error, const std::filesystem::path& root = {}) {
  error.clear();
  if (!detail::ValidId(id)) return detail::Fail(error, L"\u5f52\u6863\u6807\u8bc6\u65e0\u6548\u3002", L"Invalid archive identifier.");

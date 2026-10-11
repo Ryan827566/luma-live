@@ -9,6 +9,7 @@
 #include "UiTheme.hpp"
 #include "UiAccessibility.hpp"
 #include <mmsystem.h>
+#include <shlobj.h>
 namespace luma::client::ui::preview {
 class AiPanel {
 public:
@@ -39,6 +40,18 @@ public:
   extra_[40]=add(L"BUTTON",UiLabel(L"启动本地服务",L"Start service"),WS_TABSTOP,40);
   extra_[41]=add(L"BUTTON",UiLabel(L"停止本地服务",L"Stop service"),WS_TABSTOP,41);
   extra_[42]=add(L"STATIC",L"",0,42);
+  extra_[43]=add(L"EDIT",L"",WS_TABSTOP|WS_BORDER|ES_AUTOHSCROLL,43);
+  extra_[44]=add(L"BUTTON",UiLabel(L"导出记录",L"Export record"),WS_TABSTOP,44);
+  extra_[45]=add(L"EDIT",L"",WS_TABSTOP|ES_MULTILINE|ES_READONLY,45);
+  extra_[46]=add(L"STATIC",UiLabel(L"导出文件夹 · 纯文本记录",L"Export folder · Plain-text records"),0,46);
+  SendMessageW(extra_[43],EM_SETLIMITTEXT,32760,0);
+  SetAccessibleName(extra_[43],UiLabel(L"导出文件夹",L"Export folder"));
+  SetAccessibleName(extra_[45],UiLabel(L"导出结果与文件路径",L"Export result and file path"));
+  PWSTR documents=nullptr;
+  if(SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents,KF_FLAG_DONT_VERIFY,nullptr,&documents)))
+   SetWindowTextW(extra_[43],(std::filesystem::path(documents)/L"LumaLive"/L"Exports").c_str());
+  CoTaskMemFree(documents);
+  SetWindowTextW(extra_[45],UiLabel(L"导出所选记录为 Markdown 文件，保留原记录，不覆盖已有文件。",L"Export the selected record as Markdown. Originals are kept; existing files are never replaced."));
   extra_[28]=add(L"BUTTON",UiLabel(L"\u68c0\u67e5\u672c\u5730\u670d\u52a1",L"Check local service"),WS_TABSTOP,28);
   extra_[36]=add(L"BUTTON",UiLabel(L"\u5220\u9664\u8bb0\u5f55",L"Delete record"),WS_TABSTOP,36);
   extra_[37]=add(L"STATIC",UiLabel(L"\u5220\u9664\u8fd9\u6761\u5df2\u4fdd\u5b58\u7684\u8bb0\u5f55\uff1f\u5220\u9664\u540e\u65e0\u6cd5\u6062\u590d\u3002",L"Delete this saved record? This cannot be undone."),0,37);
@@ -55,7 +68,7 @@ public:
   for(int id:{13,12,11})SetWindowPos(extra_[id],HWND_TOP,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
   SetWindowPos(extra_[14],HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
   for(int id:{20,21,22,23,24,25,26,28,40,41})SetWindowPos(extra_[id],HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
-  for(int id:{16,18,36,38,39,17}){SetWindowPos(extra_[id],HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);SetWindowSubclass(extra_[id],ArchiveKeys,73,reinterpret_cast<DWORD_PTR>(this));}
+  for(int id:{16,18,36,38,39,17,43,44,45}){SetWindowPos(extra_[id],HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);SetWindowSubclass(extra_[id],ArchiveKeys,73,reinterpret_cast<DWORD_PTR>(this));}
   SendMessageW(text_,EM_SETLIMITTEXT,200000,0);Layout();SetTimer(window_,1,300,nullptr);Refresh();ShowWindow(window_,SW_SHOW);
  }
  void Place(RECT r){if(window_){UpdateDpi();MoveWindow(window_,r.left,r.top,r.right-r.left,r.bottom-r.top,TRUE);}}
@@ -106,7 +119,7 @@ private:
   if(bool(IsWindowEnabled(extra_[28]))!=enabled)EnableWindow(extra_[28],enabled);
   if(message&&shownHealth_!=message){shownHealth_=message;SetWindowTextW(extra_[29],message);if(page_==13)Layout();}
  }
- int page_{11};bool settingsLoaded_{false},settingsDirty_{false},loadingSettings_{false};std::array<HWND,43> extra_{};std::vector<SessionArchive::Entry> archives_;std::string archiveDeleteId_;
+ int page_{11};bool settingsLoaded_{false},settingsDirty_{false},loadingSettings_{false};std::array<HWND,47> extra_{};std::vector<SessionArchive::Entry> archives_;std::string archiveDeleteId_;
  void CancelArchiveDelete(bool focus){if(archiveDeleteId_.empty())return;archiveDeleteId_.clear();Layout();if(focus)SetFocus(extra_[36]);}
  static LRESULT CALLBACK ArchiveKeys(HWND h,UINT message,WPARAM w,LPARAM l,UINT_PTR id,DWORD_PTR data){
   auto self=reinterpret_cast<AiPanel*>(data);
@@ -124,6 +137,15 @@ private:
  void RefreshArchives(){std::wstring error;archives_=SessionArchive::List(ArchiveContext(),error);SendMessageW(extra_[16],CB_RESETCONTENT,0,0);for(const auto& entry:archives_)SendMessageW(extra_[16],CB_ADDSTRING,0,reinterpret_cast<LPARAM>(entry.title.c_str()));EnableWindow(extra_[16],!archives_.empty());if(!archives_.empty())SendMessageW(extra_[16],CB_SETCURSEL,0,0);LoadArchive();if(!error.empty())SetWindowTextW(extra_[19],error.c_str());}
  void SwitchPage(int page){archiveDeleteId_.clear();page_=page;if(page==12)RefreshArchives();if(page==13){LoadSettings();RefreshService();RefreshHealth();}Layout();SetFocus(extra_[page]);}
  bool ExtraCommand(WPARAM w){const int id=LOWORD(w);
+  if(id==44){
+   if(page_!=12||!archiveDeleteId_.empty()||!IsWindowEnabled(extra_[44]))return true;
+   const auto index=SendMessageW(extra_[16],CB_GETCURSEL,0,0);
+   if(index<0||size_t(index)>=archives_.size())return true;
+   std::wstring error;std::filesystem::path exported;
+   if(SessionArchive::Export(ArchiveContext(),archives_[index].id,std::filesystem::path(Field(43)),exported,error))
+    error=std::wstring(UiLabel(L"已导出，可选择并复制路径：",L"Exported. Select and copy the path:"))+L"\r\n"+exported.wstring();
+   SetWindowTextW(extra_[45],error.c_str());return true;
+  }
   if(id==40||id==41){if(page_!=13||!IsWindowEnabled(extra_[id]))return true;
    if(id==40)LocalAiService::Instance().Start();else LocalAiService::Instance().Stop();
    health_.Invalidate();RefreshService();RefreshHealth();return true;}
@@ -154,7 +176,7 @@ if(id>=11&&id<=13){SwitchPage(id);return true;}if(id==18){SwitchPage(11);return 
   const int margin=28,gap=8,rowPitch=48,contentWidth=std::max(1,width-2*margin);
   auto position=[&](HWND h,int x,int y,int w,int ht){MoveWindow(h,S(x),S(y),S(std::max(1,w)),S(std::max(1,ht)),TRUE);};
   for(int id=1;id<=10;++id)ShowWindow(GetDlgItem(window_,id),page_==11?SW_SHOW:SW_HIDE);
-  for(int id=11;id<43;++id){if(!extra_[id])continue;const bool show=id<=13||(page_==11&&(id==14||id==15))||(page_==12&&((id>=16&&id<=19)||(id>=36&&id<=39)))||(page_==13&&((id>=20&&id<=35)||id>=40));ShowWindow(extra_[id],show?SW_SHOW:SW_HIDE);}
+  for(int id=11;id<47;++id){if(!extra_[id])continue;const bool show=id<=13||(page_==11&&(id==14||id==15))||(page_==12&&((id>=16&&id<=19)||(id>=36&&id<=39)||id>=43))||(page_==13&&((id>=20&&id<=35)||(id>=40&&id<=42)));ShowWindow(extra_[id],show?SW_SHOW:SW_HIDE);}
   for(int i=0;i<3;++i)position(extra_[11+i],margin+i*156,102,148,36);
   if(page_==12){
    const bool confirming=!archiveDeleteId_.empty();
@@ -162,7 +184,12 @@ if(id>=11&&id<=13){SwitchPage(id);return true;}if(id==18){SwitchPage(11);return 
    position(extra_[19],margin,218,contentWidth-164,48);position(extra_[36],width-margin-148,218,148,40);EnableWindow(extra_[36],!archives_.empty());
    position(extra_[37],margin,218,contentWidth-316,48);position(extra_[38],width-margin-304,218,148,40);position(extra_[39],width-margin-148,218,148,40);
    for(int id:{19,36})ShowWindow(extra_[id],confirming?SW_HIDE:SW_SHOW);for(int id:{37,38,39})ShowWindow(extra_[id],confirming?SW_SHOW:SW_HIDE);
-   position(extra_[17],margin,276,contentWidth,height-296);UpdateTranscriptScrollbar(extra_[17]);InvalidateRect(window_,nullptr,FALSE);return;
+   position(extra_[17],margin,276,contentWidth,height-430);UpdateTranscriptScrollbar(extra_[17]);
+   position(extra_[46],margin,height-138,contentWidth,22);
+   position(extra_[43],margin,height-110,contentWidth-164,36);
+   position(extra_[44],width-margin-148,height-110,148,36);
+   position(extra_[45],margin,height-64,contentWidth,44);
+   EnableWindow(extra_[43],!confirming);EnableWindow(extra_[44],!confirming&&!archives_.empty());InvalidateRect(window_,nullptr,FALSE);return;
   }
   if(page_==13){
    const int cellWidth=(contentWidth-24)/2,fieldPitch=height<580?72:80;

@@ -1,6 +1,7 @@
 #include "SessionArchive.hpp"
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 
 namespace Archive = luma::client::ui::preview::SessionArchive;
@@ -35,7 +36,7 @@ int wmain(int argc, wchar_t** argv) {
   SetEnvironmentVariableW(L"LUMALIVE_UI_LANGUAGE", L"en-US");
   Require(Archive::detail::Title("20261340" + dated.substr(8), &east) == L"Date unavailable", "invalid timestamp is not mislabeled as local time");
   Require(Archive::List("call", error, root).empty() && error.empty() && !fs::exists(root / "call"), "empty listing must not create directories");
-  const std::string unicode = UiUtf8(L"# \u4f1a\u8bae\u8bb0\u5f55 \U0001f30f\n\n\u4f60\u597d\uff0c\u4e16\u754c\u3002\n");
+  const std::string unicode = UiUtf8(L"# \u4f1a\u8bae\u8bb0\u5f55 \U0001f30f\r\n\n\u4f60\u597d\uff0c\u4e16\u754c\u3002\n");
   Require(Archive::Save("call", unicode, error, root) && error.empty(), "unicode save");
   auto first = Archive::List("call", error, root);
   Require(first.size() == 1 && !first[0].title.empty() && error.empty(), "first record listing");
@@ -44,6 +45,45 @@ int wmain(int argc, wchar_t** argv) {
   Require(records.size() == 2 && records[0].id != records[1].id && records[0].id > records[1].id, "unique newest-first ids");
   std::string loaded;
   Require(Archive::Load("call", first[0].id, loaded, error, root) && loaded == unicode, "unicode roundtrip");
+  auto readBytes = [](const fs::path& path) { std::ifstream file(path, std::ios::binary); return std::string(std::istreambuf_iterator<char>(file), {}); };
+  const auto source = root / "call" / first[0].id;
+  const auto sourceTime = fs::last_write_time(source);
+  const auto exportRoot = root / L"\u5bfc\u51fa \u8bb0\u5f55";
+  fs::path exported = L"previous-result";
+  error = L"previous error";
+  Require(Archive::Export("call", first[0].id, exportRoot, exported, error, root) && error.empty() &&
+      exported == exportRoot / "call" / first[0].id, "export returns contextual destination and clears error");
+  Require(readBytes(exported) == unicode, "export preserves Unicode and mixed newline bytes exactly");
+  Require(readBytes(source) == unicode && fs::last_write_time(source) == sourceTime, "export does not mutate source bytes or modified time");
+  { std::ofstream file(exported, std::ios::binary | std::ios::trunc); file << "Existing export must survive\r\n"; }
+  Require(!Archive::Export("call", first[0].id, exportRoot, exported, error, root) && exported.empty() &&
+      error == L"Export destination already exists. Choose another folder.", "duplicate export clearly rejected");
+  Require(readBytes(exportRoot / "call" / first[0].id) == "Existing export must survive\r\n", "duplicate export preserves existing destination");
+  Require(std::distance(fs::directory_iterator(exportRoot / "call"), fs::directory_iterator()) == 1, "export leaves no temporary files");
+  for (const auto& invalidRoot : {fs::path(), fs::path("relative-export"), fs::path("D:relative-export")})
+   Require(!Archive::Export("call", first[0].id, invalidRoot, exported, error, root) && exported.empty() && !error.empty(), "export requires explicit absolute folder");
+  for (const auto& id : {"../record.md", "..\\record.md", "record.md", ""})
+   Require(!Archive::Export("call", id, exportRoot, exported, error, root) && exported.empty() && !error.empty(), "export rejects invalid identifiers");
+  Require(!Archive::Export("../call", first[0].id, exportRoot, exported, error, root) && !error.empty(), "export rejects invalid context");
+  const auto blockedRoot = root / "blocked-export";
+  Require(fs::create_directories(blockedRoot / "call" / first[0].id), "export destination directory fixture");
+  Require(!Archive::Export("call", first[0].id, blockedRoot, exported, error, root) &&
+      fs::is_directory(blockedRoot / "call" / first[0].id), "export preserves record-shaped destination directory");
+  const auto fileRoot = root / "file-export-root";
+  { std::ofstream file(fileRoot, std::ios::binary); file << "Not a folder"; }
+  Require(!Archive::Export("call", first[0].id, fileRoot, exported, error, root) && readBytes(fileRoot) == "Not a folder", "export rejects file ancestor");
+  const auto linkRoot = root / "linked-export";
+  const auto outside = root / "link-target"; Require(fs::create_directory(outside), "link destination fixture");
+  if (CreateSymbolicLinkW(linkRoot.c_str(), outside.c_str(), SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE)) {
+   Require(!Archive::Export("call", first[0].id, linkRoot, exported, error, root) && !fs::exists(outside / "call"), "export rejects linked destination ancestor");
+   fs::remove(linkRoot);
+  } else std::cout << "SKIP: destination ancestor symlink fixture requires Windows symlink permission\n";
+  const auto linkedId = records[0].id == first[0].id ? records[1].id : records[0].id;
+  const auto linkedDestination = blockedRoot / "call" / linkedId;
+  if (CreateSymbolicLinkW(linkedDestination.c_str(), source.c_str(), SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE)) {
+   Require(!Archive::Export("call", linkedId, blockedRoot, exported, error, root) && readBytes(source) == unicode, "export rejects linked destination file");
+   fs::remove(linkedDestination);
+  } else std::cout << "SKIP: destination file symlink fixture requires Windows symlink permission\n";
   Require(Archive::List("meeting", error, root).empty(), "context listing isolation");
   Require(!Archive::Load("meeting", first[0].id, loaded, error, root) && loaded.empty() && !error.empty(), "context load isolation");
   Require(Archive::Save("meeting", "# Meeting\n", error, root) && Archive::List("meeting", error, root).size() == 1, "meeting save");
@@ -65,6 +105,9 @@ int wmain(int argc, wchar_t** argv) {
   Require(!Archive::Load("call", first[0].id, loaded, error, root) && loaded.empty(), "oversize load bounded");
   { std::ofstream file(root / "call" / first[0].id, std::ios::binary | std::ios::trunc); }
   Require(!Archive::Load("call", first[0].id, loaded, error, root), "empty load rejected");
+  { std::ofstream file(source, std::ios::binary | std::ios::trunc); file << '\xff'; }
+  Require(!Archive::Export("call", first[0].id, root / "invalid-text-export", exported, error, root) &&
+      exported.empty() && !error.empty() && !fs::exists(root / "invalid-text-export"), "export rejects invalid UTF-8 before creating destination");
   const auto meetingBefore = Archive::List("meeting", error, root);
   const auto retainedId = records[0].id == first[0].id ? records[1].id : records[0].id;
   error = L"previous error";
@@ -86,7 +129,7 @@ int wmain(int argc, wchar_t** argv) {
   Require(fs::create_directory(root / "call" / first[0].id), "directory rejection fixture");
   Require(!Archive::Remove("call", first[0].id, error, root) && !error.empty() &&
       fs::is_directory(root / "call" / first[0].id), "record-shaped directory cannot be removed");
-  std::cout << "PASS: Unicode roundtrip, unique sorted records, context isolation, invalid paths, UTF-8 and size bounds, safe selected removal\n";
+  std::cout << "PASS: Unicode roundtrip, unique sorted records, context isolation, invalid paths, UTF-8 and size bounds, safe selected removal and non-overwriting export\n";
  } catch (const std::exception& failure) { std::cerr << "FAIL: " << failure.what() << '\n'; std::wcerr << error << L'\n'; return 1; }
  return 0;
 }

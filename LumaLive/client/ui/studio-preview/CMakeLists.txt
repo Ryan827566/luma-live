@@ -123,7 +123,7 @@ target_link_libraries(luma_transcript_view_tests PRIVATE user32 gdi32)
 add_test(NAME luma_transcript_view_tests COMMAND luma_transcript_view_tests)
 
 # User-owned local AI settings and explicit session archives.
-target_link_libraries(luma_studio_preview PRIVATE crypt32 ws2_32)
+target_link_libraries(luma_studio_preview PRIVATE crypt32 ws2_32 shell32)
 add_executable(luma_ai_provider_settings_tests tests/AiProviderSettingsTests.cpp)
 target_include_directories(luma_ai_provider_settings_tests PRIVATE include)
 target_compile_features(luma_ai_provider_settings_tests PRIVATE cxx_std_20)
