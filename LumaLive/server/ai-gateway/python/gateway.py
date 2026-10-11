@@ -341,9 +341,21 @@ class Handler(BaseHTTPRequestHandler):
         except (ConnectionError, OSError):
             self.close_connection = True
 
+def gateway_port():
+    raw = os.environ.get('LUMALIVE_AI_GATEWAY_PORT', '19740')
+    # Match the native client: decimal ASCII only, no sign/whitespace, 1..65535.
+    if not raw or len(raw) >= 16 or not raw.isascii() or not raw.isdigit():
+        raise ValueError('LUMALIVE_AI_GATEWAY_PORT must be an integer from 1 to 65535')
+    port = int(raw)
+    if not 1 <= port <= 65535:
+        raise ValueError('LUMALIVE_AI_GATEWAY_PORT must be an integer from 1 to 65535')
+    return port
+
+
 def main():
-    server = GatewayServer(Config.from_settings(), config_loader=Config.from_settings)
-    print('LumaLive AI gateway: http://127.0.0.1:19740 (GET /health for configuration status)')
+    port = gateway_port()
+    server = GatewayServer(Config.from_settings(), port=port, config_loader=Config.from_settings)
+    print(f'LumaLive AI gateway: http://127.0.0.1:{port} (GET /health for configuration status)')
     try:
         server.serve_forever()
     except KeyboardInterrupt:

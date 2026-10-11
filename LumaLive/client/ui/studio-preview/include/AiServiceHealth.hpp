@@ -18,6 +18,16 @@ public:
  enum class State { Idle, Checking, Unavailable, ConfigurationRequired, Ready, InvalidResponse };
  using Transport = std::function<State(const std::atomic<bool>& canceled)>;
 
+ // Synchronous, bounded probes for background lifecycle workers only.
+ static State Probe(const std::atomic<bool>& canceled) { return Http(canceled); }
+ static State Probe(const std::atomic<bool>& canceled, INTERNET_PORT port) {
+  return port ? HttpAtPort(canceled, port) : State::InvalidResponse;
+ }
+ static bool ReadGatewayPort(INTERNET_PORT& port) {
+  port = 19740;
+  return GatewayPort(port);
+ }
+
  explicit AiServiceHealth(Transport transport = Http)
   : shared_(std::make_shared<Shared>(std::move(transport))) {}
  ~AiServiceHealth() {
@@ -127,6 +137,9 @@ private:
  static State Http(const std::atomic<bool>& canceled) {
   INTERNET_PORT port = 19740;
   if (!GatewayPort(port)) return State::InvalidResponse;
+  return HttpAtPort(canceled, port);
+ }
+ static State HttpAtPort(const std::atomic<bool>& canceled, INTERNET_PORT port) {
   if (canceled.load()) return State::Unavailable;
   Handle session{WinHttpOpen(L"LumaLive/1", WINHTTP_ACCESS_TYPE_NO_PROXY,
    WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0)};

@@ -188,7 +188,7 @@ try:
     u.SendMessageW(child, 0x111, 14, 0)
     assert text_of(u.GetDlgItem(child, 15)), "Empty record save lacks inline guidance"
     u.SendMessageW(child, 0x111, 12, 0)
-    fits(child, range(1, 36))
+    fits(child, range(1, 43))
     assert not (u.GetWindowLongW(transcript, -16) & 0x10000000), "Live transcript overlaps history"
     archived = u.GetDlgItem(child, 17)
     saved_text = text_of(archived)
@@ -204,7 +204,7 @@ try:
     confirmation = u.GetDlgItem(child, 38)
     assert u.GetWindowLongW(confirmation, -16) & 0x10000000, 'Archive confirmation is not inline'
     assert u.GetAncestor(confirmation, 2) == root, 'Archive deletion opened another window'
-    fits(child, range(1, 40))
+    fits(child, range(1, 43))
     u.PostMessageW(u.GetDlgItem(child, 39), 0x100, 0x1B, 0)
     deadline = time.monotonic() + 2
     while u.GetWindowLongW(confirmation, -16) & 0x10000000 and time.monotonic() < deadline: time.sleep(.05)
@@ -222,10 +222,10 @@ try:
     assert {p.name: p.read_bytes() for p in meeting_records.glob('*.md')} == saved_meeting_files, 'Call deletion changed meeting archives'
     assert not text_of(archived), 'Deleted record remains visible'
     assert text_of(transcript) == original.value, 'Deleting an archive changed the live session'
-    fits(child, range(1, 40))
+    fits(child, range(1, 43))
     print('PASS: inline archive deletion, Escape/navigation cancellation and context isolation')
     u.SendMessageW(child, 0x111, 13, 0)
-    fits(child, range(1, 36))
+    fits(child, range(1, 43))
     health_label = u.GetDlgItem(child, 29)
     def check_health(english, chinese):
         u.SendMessageW(child, 0x111, 28, 0)
@@ -233,7 +233,7 @@ try:
         while time.monotonic() < deadline:
             message = text_of(health_label)
             if english in message or chinese in message:
-                fits(child, range(1, 36))
+                fits(child, range(1, 43))
                 return message
             time.sleep(.05)
         raise AssertionError("Local service state was not displayed: " + text_of(health_label))
@@ -264,7 +264,7 @@ try:
     check_health('unavailable', '\u4e0d\u53ef\u7528')
     print("PASS: inline local AI service status, dirty-state invalidation and offline guidance")
     u.SendMessageW(child, 0x111, 11, 0)
-    fits(child, range(1, 36))
+    fits(child, range(1, 43))
     assert text_of(transcript) == original.value, "Subpage navigation changed active session"
     print("PASS: inline AI settings, encrypted save, archive viewer and session preservation")
 

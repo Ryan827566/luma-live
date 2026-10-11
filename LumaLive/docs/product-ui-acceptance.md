@@ -136,3 +136,12 @@ All 15 actual-EXE checks passed, including selected-file deletion, invalid/direc
 
 
 2026-10-11 archive timestamp localization: record labels now convert UTC identifiers to local time using Windows historical timezone rules and localized simplified/traditional Chinese or English time labels. IDs and newest-first UTC sorting are unchanged. Native tests cover midnight rollover, eastern/western offsets, locale labels and invalid date fallback. All 15 actual-client checks passed after the final change. EXE SHA-256: 99decf2680ec1dcd156795d667517a772ec7a3fe8c73723455a352674e4256c7.
+
+
+## Packaged local AI service (2026-10-12)
+
+Service settings now starts/stops the bundled loopback gateway without a terminal or machine-wide Python installation. Startup is asynchronous and bounded. The child runs hidden inside a kill-on-close Windows Job, survives page switches, and closes when its owning client exits. Cancellation, failed startup, early process exit and readiness timeout release owned processes. A compatible externally owned service is reported separately and never stopped by this client. Starting the service does not enable captions or upload audio; provider configuration readiness does not validate the real provider.
+
+The packaging script pins Python 3.14.8 x64, verifies the official archive SHA-256 and writes a distribution manifest while retaining the runtime license. The isolated embedded runtime imports gateway/provider modules from its adjacent bundle. First-time developer packaging requires explicit --download or a supplied archive; end users do not need Python.
+
+All 18 actual-EXE verifier checks passed, including native process ownership/hidden launch/cancellation/timeout/external-service tests and hosted UI start, stop, restart, page-switch retention and owner-exit cleanup against the packaged gateway. Compact English 1024x700 navigation passed; English and Chinese captures are in output/ui-ai-lifecycle-20261012. Tested EXE SHA-256: d31f8e795e138071b59864a85db4e92b998e902ff331ad67fe486ae75ddf2c11. No real provider, physical media/TURN or final module acceptance is implied.

@@ -123,7 +123,7 @@ target_link_libraries(luma_transcript_view_tests PRIVATE user32 gdi32)
 add_test(NAME luma_transcript_view_tests COMMAND luma_transcript_view_tests)
 
 # User-owned local AI settings and explicit session archives.
-target_link_libraries(luma_studio_preview PRIVATE crypt32)
+target_link_libraries(luma_studio_preview PRIVATE crypt32 ws2_32)
 add_executable(luma_ai_provider_settings_tests tests/AiProviderSettingsTests.cpp)
 target_include_directories(luma_ai_provider_settings_tests PRIVATE include)
 target_compile_features(luma_ai_provider_settings_tests PRIVATE cxx_std_20)
@@ -143,3 +143,22 @@ target_compile_features(luma_ai_service_health_tests PRIVATE cxx_std_20)
 target_link_libraries(luma_ai_service_health_tests PRIVATE winhttp)
 add_test(NAME luma_ai_service_health_tests COMMAND luma_ai_service_health_tests)
 set_tests_properties(luma_ai_service_health_tests PROPERTIES TIMEOUT 15)
+
+# Gateway code stays beside the actual executable, never in a user profile.
+if(TARGET luma_studio)
+  add_custom_target(luma_ai_gateway_files
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:luma_studio>/ai-service"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../../server/ai-gateway/python/gateway.py"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../../server/ai-gateway/python/provider_settings.py"
+      "$<TARGET_FILE_DIR:luma_studio>/ai-service"
+    VERBATIM)
+  add_dependencies(luma_studio luma_ai_gateway_files)
+endif()
+add_executable(luma_local_ai_service_tests tests/LocalAiServiceTests.cpp)
+target_include_directories(luma_local_ai_service_tests PRIVATE include)
+target_compile_features(luma_local_ai_service_tests PRIVATE cxx_std_20)
+target_compile_options(luma_local_ai_service_tests PRIVATE /utf-8)
+target_link_libraries(luma_local_ai_service_tests PRIVATE winhttp ws2_32)
+add_test(NAME luma_local_ai_service_tests COMMAND luma_local_ai_service_tests)
+set_tests_properties(luma_local_ai_service_tests PROPERTIES TIMEOUT 35)
