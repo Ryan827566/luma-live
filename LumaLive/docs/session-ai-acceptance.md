@@ -95,3 +95,12 @@ History now exports the selected record as a byte-preserving Markdown file into 
 
 
 2026-10-12 asynchronous export checkpoint: archive writes now run on a worker that owns only copied request data and shared result state, never window pointers. The UI polls results and disables repeat export/edit/delete during the operation; hidden pages retain the result and destroyed panels detach safely. All 18 actual-EXE checks passed after rebuilding. Real slow-network timing and provider/device acceptance remain separate. EXE SHA-256: 5bdf3d583869a9be9bbe8436ec9944787405777cb83f873c1cd0f14f7d3a260e.
+
+
+## Background archive search (2026-10-12)
+
+History searches localized dates and saved UTF-8 content case-insensitively, within the current call/meeting context. Search uses a background worker with cancellation and copied request state; no worker accesses window handles. A pending result remains busy until consumed by the UI, closing a reviewed race between result application and deletion confirmation. Search can survive page changes; Clear cancels/restores records and late canceled results cannot replace the cleared list. Enter searches outside IME composition; composition Enter is left to the input method. Empty results disable delete/export and do not show an old record.
+
+Search is bounded to the latest 1,000 records and a 32 MiB content-read budget; limits and unreadable records are visible, and partial results never imply a complete no-match search. Search preserves stored bytes and ordering. These limits are not unlimited archive indexing.
+
+All 19 actual-EXE verifier checks passed, including new native search Unicode/date/context/cancel/budget/invalid-file tests and actual hosted search, cancellation, page retention and input-method message regression. Compact English navigation passed; English/Chinese 1024x700 captures in output/ui-ai-search-20261012 were inspected. IME message tests do not replace physical typing/Narrator acceptance. EXE SHA-256: 6cf4a30d61c5dda3977cf8fc18e5f261854908efeb7a8f0b18672bdc6e31825b. Real provider/media/TURN, slow network timings and final UI/module acceptance remain open.

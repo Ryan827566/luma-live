@@ -22,6 +22,7 @@ u = c.WinDLL("user32", use_last_error=True)
 callback = c.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
 u.EnumWindows.argtypes = [callback, w.LPARAM]
 u.GetWindowThreadProcessId.argtypes = [w.HWND, c.POINTER(w.DWORD)]
+u.IsWindowEnabled.argtypes = [w.HWND]; u.IsWindowEnabled.restype = w.BOOL
 u.GetDlgItem.argtypes = [w.HWND, c.c_int]; u.GetDlgItem.restype = w.HWND
 u.FindWindowExW.argtypes = [w.HWND, w.HWND, w.LPCWSTR, w.LPCWSTR]; u.FindWindowExW.restype = w.HWND
 u.GetAncestor.argtypes = [w.HWND, w.UINT]; u.GetAncestor.restype = w.HWND
@@ -188,7 +189,7 @@ try:
     u.SendMessageW(child, 0x111, 14, 0)
     assert text_of(u.GetDlgItem(child, 15)), "Empty record save lacks inline guidance"
     u.SendMessageW(child, 0x111, 12, 0)
-    fits(child, range(1, 47))
+    fits(child, range(1, 51))
     assert not (u.GetWindowLongW(transcript, -16) & 0x10000000), "Live transcript overlaps history"
     archived = u.GetDlgItem(child, 17)
     saved_text = text_of(archived)
@@ -196,6 +197,45 @@ try:
     assert u.SendMessageW(archived, 0xBA, 0, 0) >= 3, "Archive line breaks were collapsed"
     time.sleep(.4)
     assert text_of(archived) == saved_text, "Live refresh overwrote historical record"
+    def wait_search():
+        deadline = time.monotonic() + 8
+        while not u.IsWindowEnabled(u.GetDlgItem(child, 48)):
+            assert time.monotonic() < deadline, 'Archive search did not finish'
+            time.sleep(.05)
+    search_edit = u.GetDlgItem(child, 47)
+    record_picker = u.GetDlgItem(child, 16)
+    set_text(search_edit, "\u4f60\u597d")
+    u.SendMessageW(child, 0x111, 48, 0)
+    wait_search()
+    assert u.SendMessageW(record_picker, 0x146, 0, 0) == 1, 'Unicode content search missed call record'
+    assert text_of(archived) == saved_text, 'Search altered archived content'
+    set_text(search_edit, "Participants agreed")
+    u.SendMessageW(search_edit, 0x10D, 0, 0)  # WM_IME_STARTCOMPOSITION
+    u.SendMessageW(search_edit, 0x100, 0x0D, 0)
+    time.sleep(.35)
+    assert u.SendMessageW(record_picker, 0x146, 0, 0) == 1, 'IME composition Enter submitted search'
+    u.SendMessageW(search_edit, 0x10E, 0, 0)  # WM_IME_ENDCOMPOSITION
+    u.SendMessageW(search_edit, 0x100, 0x0D, 0)
+    wait_search()
+    assert u.SendMessageW(record_picker, 0x146, 0, 0) == 0, 'Call search exposed meeting content'
+    assert not text_of(archived) and not u.IsWindowEnabled(u.GetDlgItem(child, 44)) and not u.IsWindowEnabled(u.GetDlgItem(child, 36)), 'No matches left stale destructive/export actions'
+    u.SendMessageW(child, 0x111, 49, 0)
+    assert not text_of(search_edit) and text_of(archived) == saved_text, 'Clear did not restore full record list'
+    set_text(search_edit, 'SYNTHETIC CALL')
+    u.SendMessageW(child, 0x111, 48, 0)
+    u.SendMessageW(child, 0x111, 13, 0)
+    time.sleep(.5)
+    u.SendMessageW(child, 0x111, 12, 0)
+    wait_search()
+    assert u.SendMessageW(record_picker, 0x146, 0, 0) == 1 and text_of(search_edit) == 'SYNTHETIC CALL', 'Search was lost across page navigation'
+    for _ in range(5):
+        u.SendMessageW(child, 0x111, 48, 0)
+        u.SendMessageW(child, 0x111, 49, 0)
+        wait_search()
+        time.sleep(.35)
+        assert not text_of(search_edit) and text_of(archived) == saved_text, 'Canceled search replaced cleared results'
+    print('PASS: Unicode archive search, context isolation, empty results, navigation and cancellation')
+    fits(child, range(1, 51))
     call_records = profile / 'LumaLive/records/call'
     meeting_records = profile / 'LumaLive/records/meeting'
     saved_call_files = {p.name: p.read_bytes() for p in call_records.glob('*.md')}
@@ -230,7 +270,7 @@ try:
     confirmation = u.GetDlgItem(child, 38)
     assert u.GetWindowLongW(confirmation, -16) & 0x10000000, 'Archive confirmation is not inline'
     assert u.GetAncestor(confirmation, 2) == root, 'Archive deletion opened another window'
-    fits(child, range(1, 47))
+    fits(child, range(1, 51))
     u.PostMessageW(u.GetDlgItem(child, 39), 0x100, 0x1B, 0)
     deadline = time.monotonic() + 2
     while u.GetWindowLongW(confirmation, -16) & 0x10000000 and time.monotonic() < deadline: time.sleep(.05)
@@ -248,10 +288,10 @@ try:
     assert {p.name: p.read_bytes() for p in meeting_records.glob('*.md')} == saved_meeting_files, 'Call deletion changed meeting archives'
     assert not text_of(archived), 'Deleted record remains visible'
     assert text_of(transcript) == original.value, 'Deleting an archive changed the live session'
-    fits(child, range(1, 47))
+    fits(child, range(1, 51))
     print('PASS: inline archive deletion, Escape/navigation cancellation and context isolation')
     u.SendMessageW(child, 0x111, 13, 0)
-    fits(child, range(1, 47))
+    fits(child, range(1, 51))
     health_label = u.GetDlgItem(child, 29)
     def check_health(english, chinese):
         u.SendMessageW(child, 0x111, 28, 0)
@@ -259,7 +299,7 @@ try:
         while time.monotonic() < deadline:
             message = text_of(health_label)
             if english in message or chinese in message:
-                fits(child, range(1, 47))
+                fits(child, range(1, 51))
                 return message
             time.sleep(.05)
         raise AssertionError("Local service state was not displayed: " + text_of(health_label))
@@ -290,7 +330,7 @@ try:
     check_health('unavailable', '\u4e0d\u53ef\u7528')
     print("PASS: inline local AI service status, dirty-state invalidation and offline guidance")
     u.SendMessageW(child, 0x111, 11, 0)
-    fits(child, range(1, 47))
+    fits(child, range(1, 51))
     assert text_of(transcript) == original.value, "Subpage navigation changed active session"
     print("PASS: inline AI settings, encrypted save, archive viewer and session preservation")
 

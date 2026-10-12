@@ -49,7 +49,7 @@ def main():
         print("PASS:", name, flush=True)
     save()
     try:
-        targets = ["luma_studio", "luma_signaling_server", "luma_meeting_ui_fixture", "luma_session_ai_tests", "luma_session_ai_gateway_tests", "luma_caption_overlay_tests", "luma_ui_locale_tests", "luma_ui_accessibility_tests", "luma_transcript_view_tests", "luma_ai_provider_settings_tests", "luma_session_archive_tests", "luma_ai_service_health_tests", "luma_local_ai_service_tests"]
+        targets = ["luma_studio", "luma_signaling_server", "luma_meeting_ui_fixture", "luma_session_ai_tests", "luma_session_ai_gateway_tests", "luma_caption_overlay_tests", "luma_ui_locale_tests", "luma_ui_accessibility_tests", "luma_transcript_view_tests", "luma_ai_provider_settings_tests", "luma_session_archive_tests", "luma_session_archive_search_tests", "luma_ai_service_health_tests", "luma_local_ai_service_tests"]
         run("build", [cmake, "--build", str(build), "--config", "Release", "--target", *targets, "--parallel", "1", "--", "/nr:false"], 1800)
         # The configured output must also be newer than the linked preview library.
         executable = binary / "luma_studio.exe"
@@ -64,6 +64,7 @@ def main():
         run("transcript-view", [str(binary / "luma_transcript_view_tests.exe")], 20)
         run("provider-settings", [str(binary / "luma_ai_provider_settings_tests.exe")], 30)
         run("session-archive", [str(binary / "luma_session_archive_tests.exe")], 30)
+        run("archive-search", [str(binary / "luma_session_archive_search_tests.exe")], 20)
         run("service-health", [str(binary / "luma_ai_service_health_tests.exe")], 20)
         run("locale", [str(binary / "luma_ui_locale_tests.exe")], 20)
         run("ai-state", [str(binary / "luma_session_ai_tests.exe")], 30)

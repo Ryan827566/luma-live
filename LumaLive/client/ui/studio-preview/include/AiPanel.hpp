@@ -5,6 +5,7 @@
 #include "AiServiceHealth.hpp"
 #include "LocalAiService.hpp"
 #include "SessionArchive.hpp"
+#include "SessionArchiveSearch.hpp"
 #include <array>
 #include "UiTheme.hpp"
 #include "UiAccessibility.hpp"
@@ -47,6 +48,12 @@ public:
   extra_[44]=add(L"BUTTON",UiLabel(L"导出记录",L"Export record"),WS_TABSTOP,44);
   extra_[45]=add(L"EDIT",L"",WS_TABSTOP|ES_MULTILINE|ES_READONLY,45);
   extra_[46]=add(L"STATIC",UiLabel(L"导出文件夹 · 纯文本记录",L"Export folder · Plain-text records"),0,46);
+  extra_[47]=add(L"EDIT",L"",WS_TABSTOP|WS_BORDER|ES_AUTOHSCROLL,47);
+  extra_[48]=add(L"BUTTON",UiLabel(L"搜索",L"Search"),WS_TABSTOP,48);
+  extra_[49]=add(L"BUTTON",UiLabel(L"清除",L"Clear"),WS_TABSTOP,49);
+  extra_[50]=add(L"STATIC",UiLabel(L"搜索内容或日期 · 最近 1000 条记录",L"Search content or date · Latest 1,000 records"),0,50);
+  SendMessageW(extra_[47],EM_SETLIMITTEXT,256,0);
+  SetAccessibleName(extra_[47],UiLabel(L"搜索历史记录",L"Search saved records"));
   SendMessageW(extra_[43],EM_SETLIMITTEXT,32760,0);
   SetAccessibleName(extra_[43],UiLabel(L"导出文件夹",L"Export folder"));
   SetAccessibleName(extra_[45],UiLabel(L"导出结果与文件路径",L"Export result and file path"));
@@ -71,7 +78,7 @@ public:
   for(int id:{13,12,11})SetWindowPos(extra_[id],HWND_TOP,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
   SetWindowPos(extra_[14],HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
   for(int id:{20,21,22,23,24,25,26,28,40,41})SetWindowPos(extra_[id],HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
-  for(int id:{16,18,36,38,39,17,43,44,45}){SetWindowPos(extra_[id],HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);SetWindowSubclass(extra_[id],ArchiveKeys,73,reinterpret_cast<DWORD_PTR>(this));}
+  for(int id:{47,48,49,16,18,36,38,39,17,43,44,45}){SetWindowPos(extra_[id],HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);SetWindowSubclass(extra_[id],ArchiveKeys,73,reinterpret_cast<DWORD_PTR>(this));}
   SendMessageW(text_,EM_SETLIMITTEXT,200000,0);Layout();SetTimer(window_,1,300,nullptr);Refresh();ShowWindow(window_,SW_SHOW);
  }
  void Place(RECT r){if(window_){UpdateDpi();MoveWindow(window_,r.left,r.top,r.right-r.left,r.bottom-r.top,TRUE);}}
@@ -124,17 +131,69 @@ private:
  }
  struct ExportState{std::mutex mutex;bool busy=false;std::optional<std::wstring> result;};
  std::shared_ptr<ExportState> exportState_=std::make_shared<ExportState>();
- bool ExportBusy(){std::lock_guard lock(exportState_->mutex);return exportState_->busy;}
+ bool ExportBusy(){std::lock_guard lock(exportState_->mutex);return exportState_->busy||exportState_->result.has_value();}
  void RefreshExport(){
   std::optional<std::wstring> result;
   {std::lock_guard lock(exportState_->mutex);result=std::move(exportState_->result);exportState_->result.reset();}
   if(result&&extra_[45]){SetWindowTextW(extra_[45],result->c_str());Layout();}
  }
- int page_{11};bool settingsLoaded_{false},settingsDirty_{false},loadingSettings_{false};std::array<HWND,47> extra_{};std::vector<SessionArchive::Entry> archives_;std::string archiveDeleteId_;
+ struct SearchState{std::mutex mutex;std::atomic<bool> canceled{false};bool busy=false;std::optional<SessionArchiveSearch::Result> result;};
+ std::shared_ptr<SearchState> searchState_=std::make_shared<SearchState>();
+ bool archiveFiltered_=false,clearSearchRequested_=false,searchComposing_=false;
+ std::wstring archiveSearchStatus_;
+ bool SearchBusy(){std::lock_guard lock(searchState_->mutex);return searchState_->busy||searchState_->result.has_value();}
+ void PopulateArchives(){
+  SendMessageW(extra_[16],CB_RESETCONTENT,0,0);
+  for(const auto& entry:archives_)SendMessageW(extra_[16],CB_ADDSTRING,0,reinterpret_cast<LPARAM>(entry.title.c_str()));
+  if(!archives_.empty())SendMessageW(extra_[16],CB_SETCURSEL,0,0);
+  LoadArchive();Layout();
+ }
+ void StartArchiveSearch(){
+  if(page_!=12||SearchBusy()||ExportBusy()||!archiveDeleteId_.empty())return;
+  const auto state=searchState_;const auto context=ArchiveContext();const auto query=Field(47);
+  {std::lock_guard lock(state->mutex);state->busy=true;state->canceled=false;state->result.reset();}
+  clearSearchRequested_=false;
+  SetWindowTextW(extra_[19],UiLabel(L"正在搜索本机记录…",L"Searching saved records…"));Layout();SetFocus(extra_[49]);
+  try{std::thread([state,context,query]{
+   SessionArchiveSearch::Result result;
+   try{result=SessionArchiveSearch::Search(context,query,state->canceled);}
+   catch(...){result.error=UiLabel(L"搜索失败，请重试。",L"Search failed. Please retry.");}
+   std::lock_guard lock(state->mutex);state->result=std::move(result);state->busy=false;
+  }).detach();}catch(...){std::lock_guard lock(state->mutex);state->busy=false;SessionArchiveSearch::Result result;result.error=UiLabel(L"无法开始搜索，请重试。",L"Could not start search. Please retry.");state->result=std::move(result);}
+ }
+ void ClearArchiveSearch(){
+  if(page_!=12||ExportBusy()||!archiveDeleteId_.empty())return;
+  {std::lock_guard lock(searchState_->mutex);
+   if(searchState_->busy){clearSearchRequested_=true;searchState_->canceled=true;SetWindowTextW(extra_[19],UiLabel(L"正在取消搜索…",L"Canceling search…"));return;}
+   searchState_->result.reset();
+  }
+  SetWindowTextW(extra_[47],L"");archiveFiltered_=false;archiveSearchStatus_.clear();RefreshArchives();Layout();
+ }
+ void RefreshArchiveSearch(){
+  std::optional<SessionArchiveSearch::Result> result;
+  {std::lock_guard lock(searchState_->mutex);result=std::move(searchState_->result);searchState_->result.reset();}
+  if(!result)return;
+  if(clearSearchRequested_||result->cancelled){clearSearchRequested_=false;SetWindowTextW(extra_[47],L"");archiveFiltered_=false;archiveSearchStatus_.clear();RefreshArchives();Layout();return;}
+  if(!result->error.empty()){SetWindowTextW(extra_[19],result->error.c_str());Layout();return;}
+  archiveFiltered_=true;archives_=std::move(result->entries);
+  archiveSearchStatus_=std::to_wstring(archives_.size())+UiLabel(L" 条匹配记录",L" matching records");
+  if(result->limited)archiveSearchStatus_+=UiLabel(L" · 仅搜索了部分已保存记录。",L" · Partial results; only part of saved history was searched.");
+  if(result->skipped)archiveSearchStatus_+=L" · "+std::to_wstring(result->skipped)+UiLabel(L" 条记录无法读取",L" unreadable records skipped");
+  PopulateArchives();
+ }
+ int page_{11};bool settingsLoaded_{false},settingsDirty_{false},loadingSettings_{false};std::array<HWND,51> extra_{};std::vector<SessionArchive::Entry> archives_;std::string archiveDeleteId_;
  void CancelArchiveDelete(bool focus){if(archiveDeleteId_.empty())return;archiveDeleteId_.clear();Layout();if(focus)SetFocus(extra_[36]);}
  static LRESULT CALLBACK ArchiveKeys(HWND h,UINT message,WPARAM w,LPARAM l,UINT_PTR id,DWORD_PTR data){
   auto self=reinterpret_cast<AiPanel*>(data);
   if(message==WM_NCDESTROY){RemoveWindowSubclass(h,ArchiveKeys,id);return DefSubclassProc(h,message,w,l);}
+  if(h==self->extra_[47]){
+   if(message==WM_IME_STARTCOMPOSITION)self->searchComposing_=true;
+   if(message==WM_IME_ENDCOMPOSITION)self->searchComposing_=false;
+   if(!self->searchComposing_){
+    if(message==WM_GETDLGCODE&&l&&reinterpret_cast<MSG*>(l)->message==WM_KEYDOWN&&(reinterpret_cast<MSG*>(l)->wParam==VK_RETURN||reinterpret_cast<MSG*>(l)->wParam==VK_ESCAPE))return DefSubclassProc(h,message,w,l)|DLGC_WANTMESSAGE;
+    if(message==WM_KEYDOWN&&(w==VK_RETURN||w==VK_ESCAPE)){if(!(l&(LPARAM(1)<<30))){if(w==VK_RETURN)self->StartArchiveSearch();else self->ClearArchiveSearch();}return 0;}
+   }
+  }
   if(!self->archiveDeleteId_.empty()){
    if(message==WM_GETDLGCODE&&l&&reinterpret_cast<MSG*>(l)->message==WM_KEYDOWN&&reinterpret_cast<MSG*>(l)->wParam==VK_ESCAPE)return DefSubclassProc(h,message,w,l)|DLGC_WANTMESSAGE;
    if(message==WM_KEYDOWN&&w==VK_ESCAPE){if(!(l&(LPARAM(1)<<30)))self->CancelArchiveDelete(true);return 0;}
@@ -144,12 +203,13 @@ private:
  std::string ArchiveContext()const{return context_==Context::Meeting?"meeting":"call";}
  std::wstring Field(int id){const int n=GetWindowTextLengthW(extra_[id]);std::wstring s(size_t(n)+1,L'\0');GetWindowTextW(extra_[id],s.data(),n+1);s.resize(n);return s;}
  void LoadSettings(){if(settingsDirty_)return;health_.Invalidate();AiProviderSettings config;std::wstring error;loadingSettings_=true;bool ok=LoadAiProviderSettings(config,error);auto fields=ProviderSettingsDetail::Fields(config);for(int i=0;i<6;++i)SetWindowTextW(extra_[20+i],fields[i]->c_str());loadingSettings_=false;settingsLoaded_=true;SetWindowTextW(extra_[27],ok?UiLabel(L"密钥将加密保存在当前 Windows 用户下。保存后，本地 AI 服务将在下一次请求时读取。",L"The key is encrypted for this Windows user. The local AI service reads saved settings on its next request."):error.c_str());}
- void LoadArchive(){auto index=SendMessageW(extra_[16],CB_GETCURSEL,0,0);std::string text;std::wstring error;if(index>=0&&size_t(index)<archives_.size()&&SessionArchive::Load(ArchiveContext(),archives_[index].id,text,error)){SetWindowTextW(extra_[17],DisplayLines(Wide(text)).c_str());SetWindowTextW(extra_[19],UiLabel(L"已保存到本机，仅当前工作区的记录显示在这里。",L"Saved on this computer. Only records from this workspace are listed."));}else{SetWindowTextW(extra_[17],L"");SetWindowTextW(extra_[19],error.empty()?UiLabel(L"暂无记录。在当前会话中选择“保存记录”后，可在这里重新查看。",L"No saved records. Choose Save record in a session to find it here later."):error.c_str());}UpdateTranscriptScrollbar(extra_[17]);}
+ void LoadArchive(){auto index=SendMessageW(extra_[16],CB_GETCURSEL,0,0);std::string text;std::wstring error;if(index>=0&&size_t(index)<archives_.size()&&SessionArchive::Load(ArchiveContext(),archives_[index].id,text,error)){SetWindowTextW(extra_[17],DisplayLines(Wide(text)).c_str());SetWindowTextW(extra_[19],archiveFiltered_?archiveSearchStatus_.c_str():UiLabel(L"已保存到本机，仅当前工作区的记录显示在这里。",L"Saved on this computer. Only records from this workspace are listed."));}else{SetWindowTextW(extra_[17],L"");SetWindowTextW(extra_[19],error.empty()?(archiveFiltered_?archiveSearchStatus_.c_str():UiLabel(L"暂无记录。在当前会话中选择“保存记录”后，可在这里重新查看。",L"No saved records. Choose Save record in a session to find it here later.")):error.c_str());}UpdateTranscriptScrollbar(extra_[17]);}
  void RefreshArchives(){std::wstring error;archives_=SessionArchive::List(ArchiveContext(),error);SendMessageW(extra_[16],CB_RESETCONTENT,0,0);for(const auto& entry:archives_)SendMessageW(extra_[16],CB_ADDSTRING,0,reinterpret_cast<LPARAM>(entry.title.c_str()));EnableWindow(extra_[16],!archives_.empty());if(!archives_.empty())SendMessageW(extra_[16],CB_SETCURSEL,0,0);LoadArchive();if(!error.empty())SetWindowTextW(extra_[19],error.c_str());}
- void SwitchPage(int page){archiveDeleteId_.clear();page_=page;if(page==12)RefreshArchives();if(page==13){LoadSettings();RefreshService();RefreshHealth();}Layout();SetFocus(extra_[page]);}
+ void SwitchPage(int page){archiveDeleteId_.clear();page_=page;if(page==12&&!archiveFiltered_&&!SearchBusy())RefreshArchives();if(page==13){LoadSettings();RefreshService();RefreshHealth();}Layout();SetFocus(extra_[page]);}
  bool ExtraCommand(WPARAM w){const int id=LOWORD(w);
+  if(id==48){StartArchiveSearch();return true;}if(id==49){ClearArchiveSearch();return true;}
   if(id==44){
-   if(page_!=12||!archiveDeleteId_.empty()||!IsWindowEnabled(extra_[44]))return true;
+   if(page_!=12||SearchBusy()||!archiveDeleteId_.empty()||!IsWindowEnabled(extra_[44]))return true;
    const auto index=SendMessageW(extra_[16],CB_GETCURSEL,0,0);
    if(index<0||size_t(index)>=archives_.size())return true;
    if(ExportBusy())return true;
@@ -169,9 +229,9 @@ private:
    if(id==40)LocalAiService::Instance().Start();else LocalAiService::Instance().Stop();
    health_.Invalidate();RefreshService();RefreshHealth();return true;}
 if(id>=11&&id<=13){SwitchPage(id);return true;}if(id==18){SwitchPage(11);return true;}if(id==16&&HIWORD(w)==CBN_SELCHANGE){CancelArchiveDelete(false);LoadArchive();return true;}
-  if(id==36){if(page_!=12||ExportBusy())return true;const auto index=SendMessageW(extra_[16],CB_GETCURSEL,0,0);if(index>=0&&size_t(index)<archives_.size()){archiveDeleteId_=archives_[index].id;Layout();SetFocus(extra_[39]);}return true;}
+  if(id==36){if(page_!=12||SearchBusy()||ExportBusy())return true;const auto index=SendMessageW(extra_[16],CB_GETCURSEL,0,0);if(index>=0&&size_t(index)<archives_.size()){archiveDeleteId_=archives_[index].id;Layout();SetFocus(extra_[39]);}return true;}
   if(id==39){CancelArchiveDelete(true);return true;}
-  if(id==38){if(page_!=12||archiveDeleteId_.empty())return true;std::wstring error;bool removed=SessionArchive::Remove(ArchiveContext(),archiveDeleteId_,error);archiveDeleteId_.clear();RefreshArchives();Layout();if(removed)SetWindowTextW(extra_[19],UiLabel(L"\u8bb0\u5f55\u5df2\u5220\u9664\uff0c\u5f53\u524d\u4f1a\u8bdd\u4e0d\u53d7\u5f71\u54cd\u3002",L"Record deleted. The current session is unchanged."));else SetWindowTextW(extra_[19],error.c_str());SetFocus(archives_.empty()?extra_[18]:extra_[16]);return true;}
+  if(id==38){if(page_!=12||archiveDeleteId_.empty())return true;std::wstring error;bool removed=SessionArchive::Remove(ArchiveContext(),archiveDeleteId_,error);archiveDeleteId_.clear();if(archiveFiltered_)StartArchiveSearch();else RefreshArchives();Layout();if(removed)SetWindowTextW(extra_[19],UiLabel(L"\u8bb0\u5f55\u5df2\u5220\u9664\uff0c\u5f53\u524d\u4f1a\u8bdd\u4e0d\u53d7\u5f71\u54cd\u3002",L"Record deleted. The current session is unchanged."));else SetWindowTextW(extra_[19],error.c_str());SetFocus(archives_.empty()?extra_[18]:extra_[16]);return true;}
   if(id>=20&&id<=25&&HIWORD(w)==EN_CHANGE){if(settingsLoaded_&&!loadingSettings_){settingsDirty_=true;health_.Invalidate();SetWindowTextW(extra_[27],UiLabel(L"有未保存的修改。",L"Unsaved changes."));RefreshHealth();}return true;}
   if(id==14){if(page_!=11)return true;std::wstring error;auto value=session.ArchiveText();if(value.empty())error=UiLabel(L"当前没有可保存的记录。请先启用字幕并产生内容。",L"No content to save. Start captions and collect a transcript first.");else if(SessionArchive::Save(ArchiveContext(),value,error))error=UiLabel(L"记录已保存，可在“历史记录”中查看。",L"Record saved. Open History to view it.");SetWindowTextW(extra_[15],error.c_str());return true;}
   if(id==26){if(page_!=13)return true;AiProviderSettings config;auto fields=ProviderSettingsDetail::Fields(config);for(int i=0;i<6;++i)*fields[i]=Field(20+i);std::wstring error;if(SaveAiProviderSettings(config,error)){settingsDirty_=false;health_.Invalidate();error=UiLabel(L"设置已保存。尚未验证真实服务连接；请确认本地 AI 服务已运行。",L"Settings saved. Connection is not yet verified; ensure the local AI service is running.");}SetWindowTextW(extra_[27],error.c_str());RefreshHealth();Layout();return true;}if(id==28){if(page_!=13)return true;if(!settingsDirty_)health_.Check();RefreshHealth();return true;}return false;
@@ -195,20 +255,25 @@ if(id>=11&&id<=13){SwitchPage(id);return true;}if(id==18){SwitchPage(11);return 
   const int margin=28,gap=8,rowPitch=48,contentWidth=std::max(1,width-2*margin);
   auto position=[&](HWND h,int x,int y,int w,int ht){MoveWindow(h,S(x),S(y),S(std::max(1,w)),S(std::max(1,ht)),TRUE);};
   for(int id=1;id<=10;++id)ShowWindow(GetDlgItem(window_,id),page_==11?SW_SHOW:SW_HIDE);
-  for(int id=11;id<47;++id){if(!extra_[id])continue;const bool show=id<=13||(page_==11&&(id==14||id==15))||(page_==12&&((id>=16&&id<=19)||(id>=36&&id<=39)||id>=43))||(page_==13&&((id>=20&&id<=35)||(id>=40&&id<=42)));ShowWindow(extra_[id],show?SW_SHOW:SW_HIDE);}
+  for(int id=11;id<51;++id){if(!extra_[id])continue;const bool show=id<=13||(page_==11&&(id==14||id==15))||(page_==12&&((id>=16&&id<=19)||(id>=36&&id<=39)||id>=43))||(page_==13&&((id>=20&&id<=35)||(id>=40&&id<=42)));ShowWindow(extra_[id],show?SW_SHOW:SW_HIDE);}
   for(int i=0;i<3;++i)position(extra_[11+i],margin+i*156,102,148,36);
   if(page_==12){
-   const bool confirming=!archiveDeleteId_.empty();
-   position(extra_[16],margin,166,contentWidth-164,220);UiTheme::SetComboDpi(extra_[16],dpi_);EnableWindow(extra_[16],!confirming&&!archives_.empty());position(extra_[18],width-margin-148,166,148,40);
-   position(extra_[19],margin,218,contentWidth-164,48);position(extra_[36],width-margin-148,218,148,40);EnableWindow(extra_[36],!ExportBusy()&&!archives_.empty());
-   position(extra_[37],margin,218,contentWidth-316,48);position(extra_[38],width-margin-304,218,148,40);position(extra_[39],width-margin-148,218,148,40);
+   const bool confirming=!archiveDeleteId_.empty(),searching=SearchBusy();
+   position(extra_[50],margin,154,contentWidth,22);
+   position(extra_[47],margin,182,contentWidth-224,36);
+   position(extra_[48],width-margin-212,182,104,36);position(extra_[49],width-margin-100,182,100,36);
+   EnableWindow(extra_[47],!searching&&!confirming);EnableWindow(extra_[48],!searching&&!confirming&&!ExportBusy());EnableWindow(extra_[49],!confirming&&!ExportBusy());
+   SetWindowTextW(extra_[49],searching?UiLabel(L"取消",L"Cancel"):UiLabel(L"清除",L"Clear"));
+   position(extra_[16],margin,232,contentWidth-164,220);UiTheme::SetComboDpi(extra_[16],dpi_);EnableWindow(extra_[16],!searching&&!confirming&&!archives_.empty());position(extra_[18],width-margin-148,232,148,40);
+   position(extra_[19],margin,282,contentWidth-164,48);position(extra_[36],width-margin-148,282,148,40);EnableWindow(extra_[36],!searching&&!ExportBusy()&&!archives_.empty());
+   position(extra_[37],margin,282,contentWidth-316,48);position(extra_[38],width-margin-304,282,148,40);position(extra_[39],width-margin-148,282,148,40);
    for(int id:{19,36})ShowWindow(extra_[id],confirming?SW_HIDE:SW_SHOW);for(int id:{37,38,39})ShowWindow(extra_[id],confirming?SW_SHOW:SW_HIDE);
-   position(extra_[17],margin,276,contentWidth,height-430);UpdateTranscriptScrollbar(extra_[17]);
+   position(extra_[17],margin,338,contentWidth,height-492);UpdateTranscriptScrollbar(extra_[17]);
    position(extra_[46],margin,height-138,contentWidth,22);
    position(extra_[43],margin,height-110,contentWidth-164,36);
    position(extra_[44],width-margin-148,height-110,148,36);
    position(extra_[45],margin,height-64,contentWidth,44);
-   EnableWindow(extra_[43],!confirming&&!ExportBusy());EnableWindow(extra_[44],!confirming&&!ExportBusy()&&!archives_.empty());InvalidateRect(window_,nullptr,FALSE);return;
+   EnableWindow(extra_[43],!confirming&&!ExportBusy());EnableWindow(extra_[44],!confirming&&!searching&&!ExportBusy()&&!archives_.empty());InvalidateRect(window_,nullptr,FALSE);return;
   }
   if(page_==13){
    const int cellWidth=(contentWidth-24)/2,fieldPitch=height<580?72:80;
@@ -248,7 +313,7 @@ if(id>=11&&id<=13){SwitchPage(id);return true;}if(id==18){SwitchPage(11);return 
   UpdateTranscriptScroll();InvalidateRect(window_,nullptr,FALSE);
  }
 
- void Refresh(){RefreshExport();RefreshService();RefreshHealth();EnableWindow(language_,!session.AutoTranslating());SetWindowTextW(autoTranslate_,session.AutoTranslating()?UiLabel(L"\u505c\u6b62\u81ea\u52a8\u7ffb\u8bd1",L"Stop auto translation"):UiLabel(L"\u5f00\u542f\u81ea\u52a8\u7ffb\u8bd1",L"Start auto translation"));auto voice=session.TakeSpeechPacket();if(!speech_.empty()&&speechRevision_!=voice.revision){PlaySoundW(nullptr,nullptr,0);speech_.clear();}speechRevision_=voice.revision;if(!voice.audio.empty()){PlaySoundW(nullptr,nullptr,0);speech_=std::move(voice.audio);PlaySoundW(reinterpret_cast<LPCWSTR>(speech_.data()),nullptr,SND_MEMORY|SND_ASYNC|SND_NODEFAULT);}SetWindowTextW(toggle_,session.Enabled()?UiLabel(L"\u505c\u6b62\u5b57\u5e55",L"Stop captions"):UiLabel(L"\u542f\u7528\u5b57\u5e55",L"Start captions"));auto value=session.Text();if(value!=shown_){shown_=value;ReplaceTranscriptText(text_,DisplayLines(Wide(value)).c_str());}}
+ void Refresh(){RefreshArchiveSearch();RefreshExport();RefreshService();RefreshHealth();EnableWindow(language_,!session.AutoTranslating());SetWindowTextW(autoTranslate_,session.AutoTranslating()?UiLabel(L"\u505c\u6b62\u81ea\u52a8\u7ffb\u8bd1",L"Stop auto translation"):UiLabel(L"\u5f00\u542f\u81ea\u52a8\u7ffb\u8bd1",L"Start auto translation"));auto voice=session.TakeSpeechPacket();if(!speech_.empty()&&speechRevision_!=voice.revision){PlaySoundW(nullptr,nullptr,0);speech_.clear();}speechRevision_=voice.revision;if(!voice.audio.empty()){PlaySoundW(nullptr,nullptr,0);speech_=std::move(voice.audio);PlaySoundW(reinterpret_cast<LPCWSTR>(speech_.data()),nullptr,SND_MEMORY|SND_ASYNC|SND_NODEFAULT);}SetWindowTextW(toggle_,session.Enabled()?UiLabel(L"\u505c\u6b62\u5b57\u5e55",L"Stop captions"):UiLabel(L"\u542f\u7528\u5b57\u5e55",L"Start captions"));auto value=session.Text();if(value!=shown_){shown_=value;ReplaceTranscriptText(text_,DisplayLines(Wide(value)).c_str());}}
  static LRESULT CALLBACK Proc(HWND h,UINT message,WPARAM w,LPARAM l){
   auto self=reinterpret_cast<AiPanel*>(GetWindowLongPtrW(h,GWLP_USERDATA));
   if(message==WM_NCCREATE){self=static_cast<AiPanel*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);self->window_=h;SetWindowLongPtrW(h,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));}
@@ -268,7 +333,7 @@ if(id>=11&&id<=13){SwitchPage(id);return true;}if(id==18){SwitchPage(11);return 
    case WM_TIMER:self->Refresh();return 0;
    case WM_COMMAND:if(self->ExtraCommand(w))return 0;if(self->page_!=11)return 0;if(LOWORD(w)==10){const char* langs[]={"en","zh","ja","ko","es"};auto index=SendMessageW(self->language_,CB_GETCURSEL,0,0);if(self->session.AutoTranslating())self->session.AutoTranslate("");else if(index>=0&&index<5)self->session.AutoTranslate(langs[index]);self->Refresh();}else if(LOWORD(w)==9){self->session.Keywords();self->Refresh();}else if(LOWORD(w)==7){self->session.Speak();}else if(LOWORD(w)==8){self->session.StopSpeech();PlaySoundW(nullptr,nullptr,0);self->speech_.clear();self->Refresh();}else if(LOWORD(w)==6){const char* langs[]={"en","zh","ja","ko","es"};auto index=SendMessageW(self->language_,CB_GETCURSEL,0,0);if(index>=0&&index<5)self->session.Translate(langs[index]);self->Refresh();}else if(LOWORD(w)==2){self->session.Enable(!self->session.Enabled());self->Refresh();}else if(LOWORD(w)==3){self->session.Summarize();self->Refresh();}return 0;
    case WM_CLOSE:self->Close();return 0;
-   case WM_DESTROY:self->exportState_=std::make_shared<ExportState>();self->health_.Invalidate();self->shownHealth_.clear();self->shownService_.clear();if(!self->speech_.empty()){PlaySoundW(nullptr,nullptr,0);self->speech_.clear();}KillTimer(h,1);self->window_=nullptr;self->text_=nullptr;self->shown_.clear();self->page_=11;self->settingsLoaded_=false;self->settingsDirty_=false;self->loadingSettings_=false;self->archives_.clear();self->archiveDeleteId_.clear();self->extra_={};if(self->font_){DeleteObject(self->font_);self->font_=nullptr;}if(self->title_){DeleteObject(self->title_);self->title_=nullptr;}return 0;
+   case WM_DESTROY:self->searchState_->canceled=true;self->searchState_=std::make_shared<SearchState>();self->archiveFiltered_=false;self->clearSearchRequested_=false;self->searchComposing_=false;self->archiveSearchStatus_.clear();self->exportState_=std::make_shared<ExportState>();self->health_.Invalidate();self->shownHealth_.clear();self->shownService_.clear();if(!self->speech_.empty()){PlaySoundW(nullptr,nullptr,0);self->speech_.clear();}KillTimer(h,1);self->window_=nullptr;self->text_=nullptr;self->shown_.clear();self->page_=11;self->settingsLoaded_=false;self->settingsDirty_=false;self->loadingSettings_=false;self->archives_.clear();self->archiveDeleteId_.clear();self->extra_={};if(self->font_){DeleteObject(self->font_);self->font_=nullptr;}if(self->title_){DeleteObject(self->title_);self->title_=nullptr;}return 0;
   }
   return DefWindowProcW(h,message,w,l);
  }
