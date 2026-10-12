@@ -4,7 +4,6 @@
 #include <atomic>
 #include <chrono>
 #include <mutex>
-#include <unordered_map>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -31,6 +30,22 @@ using luma::contracts::auth::crypto::sha256;
 using luma::contracts::auth::wire::Packet;
 using luma::contracts::auth::wire::Type;
 
+namespace {
+bool SetSocketTimeouts(Socket socket){
+#ifdef _WIN32
+    const DWORD timeout_ms=5000;
+    return ::setsockopt(socket,SOL_SOCKET,SO_RCVTIMEO,
+        reinterpret_cast<const char*>(&timeout_ms),sizeof(timeout_ms))==0&&
+        ::setsockopt(socket,SOL_SOCKET,SO_SNDTIMEO,
+        reinterpret_cast<const char*>(&timeout_ms),sizeof(timeout_ms))==0;
+#else
+    const timeval timeout{5,0};
+    return ::setsockopt(socket,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout))==0&&
+        ::setsockopt(socket,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof(timeout))==0;
+#endif
+}
+}
+
 
 class AccountService final:public IAccountService{
 public:
@@ -44,6 +59,7 @@ public:
         host_=std::move(host);port_=port;
         Socket s=::socket(AF_INET,SOCK_STREAM,0);
         if(s==kInvalidSocket)return{false,"socket creation failed"};
+        if(!SetSocketTimeouts(s)){close_socket(s);return{false,"unable to configure account connection timeout"};}
         sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(port_);
 #ifdef _WIN32
         if(::InetPtonA(AF_INET,host_.c_str(),&a.sin_addr)!=1){close_socket(s);return{false,"host must be an IPv4 address"};}
@@ -58,14 +74,7 @@ public:
         std::lock_guard lock(mutex_);
         if(socket_!=kInvalidSocket){close_socket(socket_);socket_=kInvalidSocket;}
         running_=false;
-        session_={};
-        security_={};
-        sessions_.clear();
-        events_.clear();
-        pending_phone_verification_={};
-        pending_phone_login_={};
-        pending_phone_login_number_.clear();
-        events_.clear();
+        ClearSessionLocked();
         return{true,"stopped"};
     }
 
@@ -115,6 +124,7 @@ public:
         if(q.type==Type::Error)return Error(q);
         if(q.type!=Type::LoginOk||q.fields.size()!=11)return{false,"invalid login response"};
 
+        ClearSessionLocked();
         session_.token=q.fields[0];
         session_.refresh_token=q.fields[1];
         session_.session_id=q.fields[2];
@@ -139,7 +149,7 @@ public:
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
         if(q.type!=Type::LogoutOk)return{false,"invalid logout response"};
-        session_={};
+        ClearSessionLocked();
         return{true,"logout successful"};
     }
 
@@ -325,6 +335,8 @@ public:
         if(q.type!=Type::LoginOk||q.fields.size()!=11)
             return{false,"invalid phone login response"};
 
+        const auto phone=pending_phone_login_number_;
+        ClearSessionLocked();
         session_.token=q.fields[0];
         session_.refresh_token=q.fields[1];
         session_.session_id=q.fields[2];
@@ -335,7 +347,7 @@ public:
         session_.user.email=q.fields[7];
         session_.user.display_name=q.fields[8];
         session_.user.avatar_url.clear();
-        session_.user.phone=pending_phone_login_number_;
+        session_.user.phone=phone;
         session_.expires_at_epoch_seconds=std::stoll(q.fields[9]);
         session_.refresh_expires_at_epoch_seconds=std::stoll(q.fields[10]);
         pending_phone_login_={};
@@ -379,8 +391,6 @@ public:
         if(q.fields[0].empty()){
             return{true,"if the account exists, a reset message will be available through the configured delivery channel"};
         }
-        pending_reset_challenges_[q.fields[0]]=PendingReset{
-            q.fields[1],std::stoll(q.fields[2]),static_cast<std::uint32_t>(std::stoul(q.fields[3]))};
         return{true,"password reset token="+q.fields[0]+" expires="+q.fields[2]};
     }
 
@@ -389,23 +399,18 @@ public:
         std::lock_guard lock(mutex_);
         if(!running_)return{false,"account service is not connected"};
 
-        auto it=pending_reset_challenges_.find(reset_token);
-        if(it==pending_reset_challenges_.end())return{false,"reset token must be requested through this account service instance"};
-        if(it->second.expires_at<=std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())){
-            pending_reset_challenges_.erase(it);
-            return{false,"reset token expired"};
-        }
-
+        // The token may arrive by email or be entered after restarting the client.
+        // Its validity belongs to the server; a fresh client salt needs no local challenge cache.
+        const auto salt=luma::contracts::auth::crypto::random_bytes(16);
         const auto new_verifier=pbkdf2_hmac_sha256(
-            new_password,from_hex(it->second.salt_hex),it->second.kdf_iterations);
-        if(!Send({Type::ResetPassword,{reset_token,it->second.salt_hex,hex(new_verifier)}}))return{false,"send failed"};
+            new_password,salt,luma::contracts::auth::crypto::kPasswordPbkdf2Iterations);
+        if(!Send({Type::ResetPassword,{reset_token,hex(salt),hex(new_verifier)}}))return{false,"send failed"};
 
         Packet q;
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
         if(q.type!=Type::PasswordResetOk)return{false,"invalid password reset response"};
 
-        pending_reset_challenges_.erase(it);
         session_={};
         security_={};
         sessions_.clear();
@@ -493,7 +498,7 @@ public:
         Packet q;if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
         if(q.type!=Type::SessionRevoked)return{false,"invalid session revoke response"};
-        if(session_id==session_.session_id){session_={};security_={};}
+        if(session_id==session_.session_id)ClearSessionLocked();
         return{true,"session revoked"};
     }
 
@@ -547,6 +552,23 @@ public:
     }
 
 private:
+    void ClearSessionLocked(){
+        session_={};
+        security_={};
+        sessions_.clear();
+        events_.clear();
+        pending_phone_verification_={};
+        pending_phone_login_={};
+        pending_phone_login_number_.clear();
+    }
+
+    bool DisconnectLocked(){
+        if(socket_!=kInvalidSocket){close_socket(socket_);socket_=kInvalidSocket;}
+        running_=false;
+        ClearSessionLocked();
+        return false;
+    }
+
     static bool valid_text(const std::string& value,std::size_t max){
         if(value.empty()||value.size()>max)return false;
         return luma::contracts::auth::wire::valid_field(value);
@@ -582,7 +604,7 @@ private:
         std::size_t off=0;
         while(off<msg.size()){
             int n=::send(socket_,msg.data()+off,static_cast<int>(msg.size()-off),0);
-            if(n<=0)return false;
+            if(n<=0)return DisconnectLocked();
             off+=static_cast<std::size_t>(n);
         }
         return true;
@@ -592,16 +614,20 @@ private:
         std::string line;char c=0;
         while(true){
             const int n=::recv(socket_,&c,1,0);
-            if(n<=0)return false;
+            if(n<=0)return DisconnectLocked();
             if(c=='\n')break;
             line.push_back(c);
-            if(line.size()>64*1024)return false;
+            if(line.size()>64*1024)return DisconnectLocked();
         }
-        try{out=luma::contracts::auth::wire::decode_line(line);return true;}catch(...){return false;}
+        try{out=luma::contracts::auth::wire::decode_line(line);return true;}catch(...){return DisconnectLocked();}
     }
 
     OperationResult Error(const Packet&p){
-        return p.fields.size()>=2?OperationResult{false,p.fields[1]}:OperationResult{false,"authentication server error"};
+        if(!p.fields.empty()){
+            if(p.fields[0]=="invalid_session"||p.fields[0]=="invalid_refresh_token")ClearSessionLocked();
+            else if(p.fields[0]=="access_token_expired")session_.expires_at_epoch_seconds=0;
+        }
+        return p.fields.size()>=2?OperationResult{false,p.fields[1],p.fields[0]}:OperationResult{false,"authentication server error"};
     }
 
     std::string host_{"127.0.0.1"};
@@ -611,18 +637,12 @@ private:
     mutable std::mutex mutex_;
     contracts::auth::AuthSession session_;
     contracts::auth::SecuritySummary security_;
-    struct PendingReset{
-        std::string salt_hex;
-        std::int64_t expires_at{0};
-        std::uint32_t kdf_iterations{luma::contracts::auth::crypto::kPasswordPbkdf2Iterations};
-    };
     struct PendingPhoneChallenge{
         std::string challenge_id;
         std::int64_t expires_at{0};
     };
     std::vector<contracts::auth::DeviceSession> sessions_;
     std::vector<contracts::auth::SecurityEvent> events_;
-    std::unordered_map<std::string,PendingReset> pending_reset_challenges_;
     PendingPhoneChallenge pending_phone_verification_;
     PendingPhoneChallenge pending_phone_login_;
     std::string pending_phone_login_number_;

@@ -3,6 +3,7 @@ name: auth-module-build
 on:
   push:
     branches:
+      - main
       - codex/auth-registration-login
   pull_request:
     branches:

@@ -1,5 +1,6 @@
 add_library(luma_client_account STATIC src/AccountService.cpp)
-target_include_directories(luma_client_account PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/shared)
+target_include_directories(luma_client_account PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(luma_client_account PUBLIC luma_auth_crypto)
 target_compile_features(luma_client_account PUBLIC cxx_std_20)
 if(WIN32)
   target_link_libraries(luma_client_account PUBLIC ws2_32)

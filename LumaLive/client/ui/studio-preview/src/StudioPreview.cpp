@@ -6,6 +6,7 @@
 #include "AudioOutput.hpp"
 #include "PreviewCall.hpp"
 #include "AiPanel.hpp"
+#include "AccountPanel.hpp"
 #include "DeviceCaptureFactory.hpp"
 #include "ScreenCaptureService.hpp"
 #include <commctrl.h>
@@ -27,7 +28,7 @@ namespace luma::client::ui::preview {
 namespace {
 using Microsoft::WRL::ComPtr;
 constexpr COLORREF Bg=RGB(8,10,13), Panel=RGB(16,19,24), Border=RGB(39,45,55), Ink=RGB(232,237,245), Muted=RGB(145,155,171), Mint=RGB(0,145,245);
-enum Id {Open=100,Camera,Microphone,Monitor,Volume,TestSound,Refresh,CameraList,MicList,Pause,Stop,FileMode,CameraMode,FullScreen,Join,Host,Room,RemoteMode,Identity,Peers,Dial,AcceptCall,RejectCall,EndCall,ShareScreen,Reconnect,Meeting,Ai,Advanced};
+enum Id {Open=100,Camera,Microphone,Monitor,Volume,TestSound,Refresh,CameraList,MicList,Pause,Stop,FileMode,CameraMode,FullScreen,Join,Host,Room,RemoteMode,Identity,Peers,Dial,AcceptCall,RejectCall,EndCall,ShareScreen,Reconnect,Meeting,Ai,Advanced,Account};
 std::wstring Wide(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),nullptr,0);std::wstring out(n,L' ');MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),out.data(),n);return out;}
 std::wstring CallMessage(const std::string& value){return LocalizedCallMessage(value);}
 
@@ -72,7 +73,8 @@ class StudioWindow {
     std::shared_ptr<PlaybackState> playback_;
     ComPtr<IMFPMediaPlayer> player_;
     bool connectionSettings_{false};
-    bool aiView_{false},meetingView_{false},meetingAiContext_{false};
+    bool aiView_{false},meetingView_{false},meetingAiContext_{false},accountView_{false};
+    AccountPanel account_;
     std::unique_ptr<HostedMeeting> meetingPage_;
     bool cameraView_{true},paused_{false},fullscreen_{false},closing_{false};
     RECT preview_{},remotePreview_{},savedWindow_{};DWORD savedStyle_{};
@@ -125,7 +127,7 @@ class StudioWindow {
         EnableWindow(Control(MicList),!capture_->IsMicrophoneCapturing()&&!microphones_.devices.empty());EnableWindow(Control(Monitor),capture_->IsMicrophoneCapturing());InvalidateRect(window_,nullptr,FALSE);
     }
     void OpenFile(){
-        if(aiView_||meetingView_)return;
+        if(aiView_||meetingView_||accountView_)return;
         wchar_t path[32768]{};OPENFILENAMEW ofn{sizeof(ofn)};ofn.hwndOwner=window_;std::wstring filter=UiLabel(L"视频与音频",L"Video and audio");filter.push_back(L'\0');filter+=L"*.mp4;*.mov;*.wmv;*.avi;*.m4v;*.mp3;*.wav;*.m4a;*.wma";filter.push_back(L'\0');filter+=UiLabel(L"所有文件",L"All files");filter.push_back(L'\0');filter+=L"*.*";filter.push_back(L'\0');ofn.lpstrFilter=filter.c_str();ofn.lpstrFile=path;ofn.nMaxFile=32768;ofn.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
         if(!GetOpenFileNameW(&ofn))return;
         OpenMedia(path);
@@ -150,15 +152,16 @@ class StudioWindow {
     void Layout(){
         RECT rc;GetClientRect(window_,&rc);width_=MulDiv(rc.right,96,dpi_);height_=MulDiv(rc.bottom,96,dpi_);left_=width_<1280?144:176;right_=width_<1280?248:280;
         if(meetingPage_){meetingPage_->SetDpi(dpi_);ShowWindow(meetingPage_->Handle(),meetingView_?SW_SHOW:SW_HIDE);meetingPage_->Assistant().Hide();}
-        ai_.Hide();
+        ai_.Hide();account_.Hide();
         if(fullscreen_&&meetingView_&&meetingPage_){MoveWindow(meetingPage_->Handle(),0,0,rc.right,rc.bottom,TRUE);ShowWindow(surface_,SW_HIDE);ShowWindow(remoteSurface_,SW_HIDE);for(auto c:controls_)if(c)ShowWindow(c,SW_HIDE);return;}
-        if(fullscreen_&&!aiView_){MoveWindow(surface_,0,0,rc.right,rc.bottom,TRUE);ShowWindow(remoteSurface_,SW_HIDE);for(auto c:controls_)if(c)ShowWindow(c,SW_HIDE);return;}
+        if(fullscreen_&&!aiView_&&!accountView_){MoveWindow(surface_,0,0,rc.right,rc.bottom,TRUE);ShowWindow(remoteSurface_,SW_HIDE);for(auto c:controls_)if(c)ShowWindow(c,SW_HIDE);return;}
         ShowWindow(remoteSurface_,SW_SHOW);for(auto c:controls_)if(c)ShowWindow(c,SW_SHOW);ShowWindow(Control(RemoteMode),SW_SHOW);
-        Place(RemoteMode,12,106,left_-24,42);Place(Meeting,12,158,left_-24,42);Place(Ai,12,210,left_-24,42);
-        if(aiView_||meetingView_){
-            for(int id=Open;id<=Advanced;++id)if(id!=RemoteMode&&id!=Meeting&&id!=Ai)ShowWindow(Control(id),SW_HIDE);
+        Place(RemoteMode,12,106,left_-24,42);Place(Meeting,12,158,left_-24,42);Place(Ai,12,210,left_-24,42);Place(Account,12,262,left_-24,42);
+        if(aiView_||meetingView_||accountView_){
+            for(int id=Open;id<=Account;++id)if(id!=RemoteMode&&id!=Meeting&&id!=Ai&&id!=Account)ShowWindow(Control(id),SW_HIDE);
             ShowWindow(surface_,SW_HIDE);ShowWindow(remoteSurface_,SW_HIDE);
             if(meetingView_&&meetingPage_){auto r=R(left_,40,width_-left_,height_-40);MoveWindow(meetingPage_->Handle(),r.left,r.top,r.right-r.left,r.bottom-r.top,TRUE);}
+            else if(accountView_){account_.Open(window_);account_.Place(R(left_,40,width_-left_,height_-40),dpi_);}
             else{auto& assistant=ActiveAssistant();assistant.Open(window_,true);assistant.Place(R(left_,40,width_-left_,height_-40));}
             InvalidateRect(window_,nullptr,FALSE);return;
         }
@@ -202,7 +205,7 @@ class StudioWindow {
         Label(dc,UiLabel(L"主工作台",L"Workspace"),width_-right_-210,6,110,28,small_,Ink);Label(dc,UiLabel(L"本地连接",L"Local connection"),width_-right_-104,6,104,28,small_,Muted);
         Label(dc,UiLabel(L"工作空间",L"Workspace"),20,60,left_-40,24,small_,Muted);
         if(meetingView_){Fill(dc,R(left_,40,width_-left_,height_-40),Bg);return;}
-        if(aiView_){Fill(dc,R(left_,40,width_-left_,height_-40),Bg);return;}
+        if(aiView_||accountView_){Fill(dc,R(left_,40,width_-left_,height_-40),Bg);return;}
         Label(dc,UiLabel(L"视频通话",L"Video calls"),x,50,total-194,36,body_);
         Label(dc,UiLabel(L"我的画面",L"Your preview"),x,100,deck,28,small_,Mint);Label(dc,UiLabel(L"对方画面",L"Other participant"),x+deck+16,100,deck,28,small_,call_.Active()?Mint:Muted);
         RECT border=preview_;InflateRect(&border,1,1);Fill(dc,border,Mint);border=remotePreview_;InflateRect(&border,1,1);Fill(dc,border,call_.Active()?Mint:Border);
@@ -249,19 +252,20 @@ class StudioWindow {
     }
     void DrawButton(const DRAWITEMSTRUCT& d){
         if(d.CtlType==ODT_COMBOBOX){UiTheme::DrawComboItem(d,body_);return;}
-        bool primary=d.CtlID==Open||d.CtlID==Join,selected=(d.CtlID==Ai&&aiView_)||(d.CtlID==RemoteMode&&!aiView_&&!meetingView_)||(d.CtlID==Meeting&&meetingView_)||(d.CtlID==CameraMode&&cameraView_)||(d.CtlID==FileMode&&!cameraView_);bool disabled=(d.itemState&ODS_DISABLED)!=0;
+        bool primary=d.CtlID==Open||d.CtlID==Join,selected=(d.CtlID==Ai&&aiView_)||(d.CtlID==Account&&accountView_)||(d.CtlID==RemoteMode&&!aiView_&&!meetingView_&&!accountView_)||(d.CtlID==Meeting&&meetingView_)||(d.CtlID==CameraMode&&cameraView_)||(d.CtlID==FileMode&&!cameraView_);bool disabled=(d.itemState&ODS_DISABLED)!=0;
         UiTheme::DrawButton(d,body_,primary,selected,d.CtlID==EndCall||d.CtlID==RejectCall);
     }
     void Fullscreen(){
-        if(aiView_&&!fullscreen_)return;
+        if((aiView_||accountView_)&&!fullscreen_)return;
         fullscreen_=!fullscreen_;if(fullscreen_){GetWindowRect(window_,&savedWindow_);savedStyle_=static_cast<DWORD>(GetWindowLongPtrW(window_,GWL_STYLE));SetWindowLongPtrW(window_,GWL_STYLE,savedStyle_&~WS_OVERLAPPEDWINDOW);MONITORINFO mi{sizeof(mi)};GetMonitorInfoW(MonitorFromWindow(window_,MONITOR_DEFAULTTONEAREST),&mi);SetWindowPos(window_,HWND_TOP,mi.rcMonitor.left,mi.rcMonitor.top,mi.rcMonitor.right-mi.rcMonitor.left,mi.rcMonitor.bottom-mi.rcMonitor.top,SWP_FRAMECHANGED);}else{SetWindowLongPtrW(window_,GWL_STYLE,savedStyle_);SetWindowPos(window_,nullptr,savedWindow_.left,savedWindow_.top,savedWindow_.right-savedWindow_.left,savedWindow_.bottom-savedWindow_.top,SWP_FRAMECHANGED|SWP_NOZORDER);}Layout();
     }
     void Command(int id){
         if(id==Advanced){connectionSettings_=!connectionSettings_;Layout();return;}
         if(meetingPage_&&meetingPage_->Active()&&(id==Camera||id==Microphone||id==ShareScreen||id==Join)){status_=UiLabel(L"请先离开会议，再开始通话或本地采集",L"Leave the meeting before starting a call or local capture.");InvalidateRect(window_,nullptr,FALSE);return;}
         switch(id){
-        case Ai:if(fullscreen_)Fullscreen();aiView_=true;meetingView_=false;Layout();break;
-        case Meeting:{if(fullscreen_)Fullscreen();if(!meetingPage_)meetingPage_=CreateHostedMeeting(instance_,window_);if(meetingPage_){meetingView_=true;aiView_=false;meetingAiContext_=true;Layout();}break;}
+        case Account:if(fullscreen_)Fullscreen();accountView_=true;aiView_=false;meetingView_=false;Layout();break;
+        case Ai:if(fullscreen_)Fullscreen();accountView_=false;aiView_=true;meetingView_=false;Layout();break;
+        case Meeting:{if(fullscreen_)Fullscreen();if(!meetingPage_)meetingPage_=CreateHostedMeeting(instance_,window_);if(meetingPage_){meetingView_=true;aiView_=false;accountView_=false;meetingAiContext_=true;Layout();}break;}
         case Open:OpenFile();break;
         case Camera:ToggleCamera();break;
         case ShareScreen:if(screen_.IsCapturing()){screen_.Stop();call_.SetVideoSource("off");video_.Clear();SetWindowTextW(Control(ShareScreen),UiLabel(L"共享主屏幕",L"Share screen"));status_=UiLabel(L"屏幕共享已停止",L"Screen sharing stopped");}else{expectCamera_=false;capture_->StopCamera();SetWindowTextW(Control(Camera),UiLabel(L"开启摄像头",L"Start camera"));EnableWindow(Control(CameraList),!cameras_.devices.empty());CloseFile();cameraView_=true;videoCount_=0;reportedScreenError_.clear();call_.SetVideoSource("off");if(screen_.Start([this](VideoFrame f){video_.Put(f);call_.Video(f);++videoCount_;})){call_.SetVideoSource("screen");SetWindowTextW(Control(ShareScreen),UiLabel(L"停止共享主屏幕",L"Stop sharing"));status_=UiLabel(L"正在共享主屏幕 · 通话接通后对方可见",L"Sharing your screen with the connected participant");}else{reportedScreenError_=screen_.LastError();OutputDebugStringW((L"LumaLive screen capture: "+Wide(reportedScreenError_)+L"\n").c_str());status_=UiLabel(L"无法启动屏幕共享，请检查显示器连接后重试",L"Cannot start screen sharing. Check the display connection and try again.");}}break;
@@ -271,7 +275,7 @@ class StudioWindow {
         case Refresh:if(capture_->IsCameraCapturing()||capture_->IsMicrophoneCapturing())status_=UiLabel(L"请先关闭采集，再刷新设备列表",L"Stop capture before refreshing devices");else{Enumerate();status_=UiLabel(L"设备列表已刷新",L"Devices refreshed");}break;
         case CameraMode:cameraView_=true;if(player_)player_->Pause();paused_=true;break;
         case FileMode:cameraView_=false;if(!player_)OpenFile();else{auto hr=player_->Play();if(FAILED(hr))status_=UiLabel(L"播放失败：",L"Playback failed: ")+Hr(hr);else{paused_=false;SetWindowTextW(Control(Pause),UiLabel(L"暂停",L"Pause"));}}break;
-        case RemoteMode:if(fullscreen_)Fullscreen();aiView_=false;meetingView_=false;meetingAiContext_=false;Layout();break;
+        case RemoteMode:if(fullscreen_)Fullscreen();aiView_=false;meetingView_=false;accountView_=false;meetingAiContext_=false;Layout();break;
         case Join:{
             if(call_.Active()){call_.Stop();remoteVideo_.Clear();remoteAudio_.Close();remotePeak_=0;remoteVideos_=0;remoteAudios_=0;SetWindowTextW(Control(Join),UiLabel(L"加入房间",L"Join room"));status_=UiLabel(L"已离开房间",L"Left the room");EnableWindow(Control(Host),TRUE);EnableWindow(Control(Room),TRUE);EnableWindow(Control(Identity),TRUE);break;}
             wchar_t host[256]{},room[128]{};GetWindowTextW(Control(Host),host,256);GetWindowTextW(Control(Room),room,128);
@@ -297,7 +301,7 @@ class StudioWindow {
         }
         InvalidateRect(window_,nullptr,FALSE);InvalidateRect(surface_,nullptr,FALSE);for(int i:{CameraMode,FileMode,RemoteMode})InvalidateRect(Control(i),nullptr,TRUE);
     }
-    void Shutdown(){if(closing_)return;closing_=true;aiCallActive_=false;meetingPage_.reset();ai_.Close();KillTimer(window_,1);monitor_=false;screen_.Stop();if(capture_){capture_->StopCamera();capture_->StopMicrophone();capture_->Stop();}call_.Stop();remoteAudio_.Close();CloseFile();audio_.Close();}
+    void Shutdown(){if(closing_)return;closing_=true;aiCallActive_=false;account_.Close();meetingPage_.reset();ai_.Close();KillTimer(window_,1);monitor_=false;screen_.Stop();if(capture_){capture_->StopCamera();capture_->StopMicrophone();capture_->Stop();}call_.Stop();remoteAudio_.Close();CloseFile();audio_.Close();}
     LRESULT Handle(UINT message,WPARAM wp,LPARAM lp){
         switch(message){
         case RequestMeetingMedia:
@@ -353,19 +357,20 @@ public:
         dpi_=GetDpiForWindow(window_);Fonts();BOOL dark=TRUE;DwmSetWindowAttribute(window_,20,&dark,sizeof(dark));
         surface_=CreateWindowExW(0,L"LumaVideoSurface",UiLabel(L"视频预览",L"Video preview"),WS_CHILD|WS_VISIBLE,0,0,1,1,window_,nullptr,instance,this);
         remoteSurface_=CreateWindowExW(0,L"LumaVideoSurface",UiLabel(L"远端视频",L"Remote video"),WS_CHILD|WS_VISIBLE,0,0,1,1,window_,nullptr,instance,this);
-        Button(Advanced,UiLabel(L"连接设置",L"Connection settings"));Button(Ai,UiLabel(L"AI \u52a9\u624b",L"AI assistant"));Button(Meeting,UiLabel(L"\u89c6\u9891\u4f1a\u8bae",L"Meetings"));Button(Open,UiLabel(L"打开媒体文件",L"Open media"));Button(CameraMode,UiLabel(L"摄像头",L"Camera"));Button(FileMode,UiLabel(L"媒体文件",L"Media"));Button(Camera,UiLabel(L"开启摄像头",L"Start camera"));Button(Refresh,UiLabel(L"刷新设备",L"Refresh"));Button(Microphone,UiLabel(L"开启麦克风",L"Start microphone"));Button(Monitor,UiLabel(L"监听：关闭",L"Monitoring off"));Button(TestSound,UiLabel(L"测试扬声器",L"Test speakers"));Button(Pause,UiLabel(L"暂停",L"Pause"));Button(Stop,UiLabel(L"停止播放",L"Stop playback"));Button(FullScreen,UiLabel(L"全屏预览",L"Fullscreen"));
+        Button(Account,UiLabel(L"账户",L"Account"));Button(Advanced,UiLabel(L"连接设置",L"Connection settings"));Button(Ai,UiLabel(L"AI \u52a9\u624b",L"AI assistant"));Button(Meeting,UiLabel(L"\u89c6\u9891\u4f1a\u8bae",L"Meetings"));Button(Open,UiLabel(L"打开媒体文件",L"Open media"));Button(CameraMode,UiLabel(L"摄像头",L"Camera"));Button(FileMode,UiLabel(L"媒体文件",L"Media"));Button(Camera,UiLabel(L"开启摄像头",L"Start camera"));Button(Refresh,UiLabel(L"刷新设备",L"Refresh"));Button(Microphone,UiLabel(L"开启麦克风",L"Start microphone"));Button(Monitor,UiLabel(L"监听：关闭",L"Monitoring off"));Button(TestSound,UiLabel(L"测试扬声器",L"Test speakers"));Button(Pause,UiLabel(L"暂停",L"Pause"));Button(Stop,UiLabel(L"停止播放",L"Stop playback"));Button(FullScreen,UiLabel(L"全屏预览",L"Fullscreen"));
         Button(RemoteMode,UiLabel(L"\u5b9e\u65f6\u8fde\u7ebf",L"Video calls"));Button(Join,UiLabel(L"加入房间",L"Join room"));Make(Host,L"EDIT",L"127.0.0.1:9000",WS_BORDER|ES_AUTOHSCROLL);Make(Room,L"EDIT",L"luma-demo",WS_BORDER|ES_AUTOHSCROLL);
         Make(Identity,L"EDIT",(L"studio-"+std::to_wstring(GetCurrentProcessId())).c_str(),WS_BORDER|ES_AUTOHSCROLL);Make(Peers,L"COMBOBOX",UiLabel(L"通话对象",L"Participant"),CBS_DROPDOWNLIST|WS_VSCROLL);Button(ShareScreen,UiLabel(L"共享主屏幕",L"Share screen"));Button(Dial,UiLabel(L"发起视频通话",L"Start call"));Button(AcceptCall,UiLabel(L"接听",L"Accept"));Button(RejectCall,UiLabel(L"拒绝",L"Decline"));Button(EndCall,UiLabel(L"结束通话",L"End call"));Button(Reconnect,UiLabel(L"重新连接",L"Reconnect"));for(int id:{Dial,AcceptCall,RejectCall,EndCall,Reconnect})EnableWindow(Control(id),FALSE);
         Make(CameraList,L"COMBOBOX",UiLabel(L"摄像头",L"Camera"),CBS_DROPDOWNLIST|WS_VSCROLL);Make(MicList,L"COMBOBOX",UiLabel(L"麦克风",L"Microphone"),CBS_DROPDOWNLIST|WS_VSCROLL);for(int id:{Peers,CameraList,MicList})UiTheme::InstallCombo(Control(id));Make(Volume,TRACKBAR_CLASSW,UiLabel(L"输出音量",L"Output volume"),TBS_HORZ|TBS_NOTICKS);SendMessageW(Control(Volume),TBM_SETRANGE,TRUE,MAKELPARAM(0,100));SendMessageW(Control(Volume),TBM_SETPOS,TRUE,volume_);EnableWindow(Control(Monitor),FALSE);
         // Native dialog traversal follows child Z order: sidebar, media, devices, then connection.
-        for(int id:{RemoteMode,Meeting,Ai,Open,CameraMode,FileMode,Pause,Stop,FullScreen,CameraList,Camera,Refresh,MicList,Microphone,ShareScreen,Monitor,Volume,TestSound,Identity,Room,Advanced,Host,Join,Peers,Dial,AcceptCall,RejectCall,EndCall,Reconnect})SetWindowPos(Control(id),HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+        for(int id:{RemoteMode,Meeting,Ai,Account,Open,CameraMode,FileMode,Pause,Stop,FullScreen,CameraList,Camera,Refresh,MicList,Microphone,ShareScreen,Monitor,Volume,TestSound,Identity,Room,Advanced,Host,Join,Peers,Dial,AcceptCall,RejectCall,EndCall,Reconnect})SetWindowPos(Control(id),HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
         audio_.SetVolume(volume_/100.f);remoteAudio_.SetVolume(volume_/100.f);
         for(auto [id,label]:{std::pair<int,const wchar_t*>{Host,UiLabel(L"信令服务器",L"Signaling server")},{Room,UiLabel(L"房间号",L"Room ID")},{Identity,UiLabel(L"显示名称",L"Display name")},{Peers,UiLabel(L"通话对象",L"Participant")},{CameraList,UiLabel(L"摄像头",L"Camera")},{MicList,UiLabel(L"麦克风",L"Microphone")},{Volume,UiLabel(L"输出音量",L"Output volume")}})SetAccessibleName(Control(id),label);
         capture_=media::CreateDeviceCaptureService();auto result=capture_->Start();if(!result.IsOk()){OutputDebugStringW((L"LumaLive device initialization: "+Wide(result.Message())+L"\n").c_str());status_=UiLabel(L"设备初始化失败。请检查设备连接后重启 LumaLive。",L"Unable to initialize devices. Check device connections, then restart LumaLive.");}Enumerate();Layout();
         const auto renderPath=Option(L"--render-check");if(!renderPath.empty()){const bool rendered=RenderCheck(renderPath);Shutdown();DestroyWindow(window_);return rendered?0:2;}
         const auto mediaPath=Option(L"--media");if(!mediaPath.empty())OpenMedia(mediaPath.c_str());
+        if(std::wstring(GetCommandLineW()).find(L"--account")!=std::wstring::npos)Command(Account);
         SetTimer(window_,1,33,nullptr);ShowWindow(window_,show);UpdateWindow(window_);
-        MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){if(msg.message==WM_KEYDOWN){if(msg.wParam==VK_F11){if(!(msg.lParam&(LPARAM(1)<<30)))Fullscreen();continue;}if(msg.wParam==VK_ESCAPE){if(msg.lParam&(LPARAM(1)<<30))continue;if(meetingView_&&meetingPage_&&meetingPage_->CancelPendingAction())continue;if(fullscreen_){Fullscreen();continue;}}if(msg.wParam=='O'&&(GetKeyState(VK_CONTROL)&0x8000)){if(!(msg.lParam&(LPARAM(1)<<30)))OpenFile();continue;}if(msg.wParam==VK_SPACE&&msg.hwnd==window_){Command(Pause);continue;}}if(!IsDialogMessageW(window_,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
+        MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){if(msg.message==WM_KEYDOWN){if(msg.wParam==VK_F11){if(!(msg.lParam&(LPARAM(1)<<30)))Fullscreen();continue;}if(msg.wParam==VK_ESCAPE){if(msg.lParam&(LPARAM(1)<<30))continue;if(accountView_&&account_.CancelPendingAction())continue;if(meetingView_&&meetingPage_&&meetingPage_->CancelPendingAction())continue;if(fullscreen_){Fullscreen();continue;}}if(msg.wParam=='O'&&(GetKeyState(VK_CONTROL)&0x8000)){if(!(msg.lParam&(LPARAM(1)<<30)))OpenFile();continue;}if(msg.wParam==VK_SPACE&&msg.hwnd==window_){Command(Pause);continue;}}if(!IsDialogMessageW(window_,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
         return static_cast<int>(msg.wParam);
     }
 };

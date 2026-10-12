@@ -2,6 +2,10 @@
 #include "IAuthStore.hpp"
 #include "IAccountService.hpp"
 #include "contracts/auth/AuthCrypto.hpp"
+#include <atomic>
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <cassert>
 #include <chrono>
 #include <cstdint>
@@ -60,7 +64,11 @@ int main() {
         ? luma::server::auth::CreatePostgresAuthStore(database_url)
         : luma::server::auth::CreateInMemoryAuthStore();
 
-    auto server=luma::server::auth::CreateAuthService(std::move(auth_store));
+    std::atomic<std::int64_t> clock_offset{0};
+    auto server=luma::server::auth::CreateAuthService(std::move(auth_store),[&]{
+        return std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count()+clock_offset.load();
+    });
     assert(server->StartOnPort(19121).IsOk());
 
     auto alice=luma::client::account::CreateAccountService();
@@ -120,6 +128,9 @@ int main() {
     assert(!other_session_id.empty());
     assert(alice->RevokeSession(other_session_id).success);
     assert(!alice2->ValidateSession().success);
+    assert(!alice2->IsAuthenticated());
+    assert(alice2->Session().token.empty());
+    assert(alice2->Session().refresh_token.empty());
 
     assert(alice->Login(
         "alice@example.com","correct horse",
@@ -169,6 +180,9 @@ int main() {
     assert(alice->Security().mfa_enabled);
 
     assert(alice->Logout().success);
+    assert(alice->SecurityEvents().empty());
+    assert(alice->Sessions().empty());
+    assert(!alice->Security().mfa_enabled);
     assert(alice->Login(
         "alice.test","correct horse","alice-totp","Alice TOTP",
         luma::contracts::auth::crypto::make_totp_code(
@@ -268,9 +282,16 @@ int main() {
     const auto reset_token=ExtractAfter(
         resetRequest.message,"password reset token="," expires=");
     assert(!reset_token.empty());
+    // A token delivered by email remains usable after the requesting client exits.
+    bobReset->Stop();
+    bobReset=luma::client::account::CreateAccountService();
+    assert(bobReset->Connect("127.0.0.1",19121).success);
     assert(bobReset->ResetPassword(
         reset_token,"reset correct horse").success);
+    assert(!bobReset->ResetPassword(reset_token,"replayed password").success);
     assert(!bob->ValidateSession().success);
+    assert(!bob->IsAuthenticated());
+    assert(bob->Session().token.empty());
 
     auto bobLogin=luma::client::account::CreateAccountService();
     assert(bobLogin->Connect("127.0.0.1",19121).success);
@@ -296,6 +317,35 @@ int main() {
         sawPasswordReset|=event.type=="password_reset_completed";
     }
     assert(sawReset&&sawPasswordReset);
+
+    // Expired access credentials still have their own independently valid refresh lifetime.
+    auto timed=luma::client::account::CreateAccountService();
+    assert(timed->Connect("127.0.0.1",19121).success);
+    assert(timed->Register("refresh.test","refresh@example.com","Refresh Test","correct horse").success);
+    assert(timed->Login("refresh.test","correct horse").success);
+    const auto original_session=timed->Session();
+    clock_offset=24*60*60+1;
+    assert(!timed->ValidateSession().success);
+    assert(!timed->IsAuthenticated());
+    assert(timed->Session().refresh_token==original_session.refresh_token);
+    assert(timed->RefreshSession().success);
+    assert(timed->IsAuthenticated());
+    assert(timed->Session().session_id==original_session.session_id);
+    assert(timed->Session().token!=original_session.token);
+    assert(timed->Session().refresh_token!=original_session.refresh_token);
+    assert(timed->ValidateSession().success);
+
+    // Direct refresh must work too, without an earlier validation request.
+    clock_offset=2*24*60*60+2;
+    assert(timed->RefreshSession().success);
+    assert(timed->ValidateSession().success);
+    clock_offset=31*24*60*60;
+    assert(!timed->RefreshSession().success);
+    assert(!timed->IsAuthenticated());
+    assert(timed->Session().token.empty());
+    assert(timed->Session().refresh_token.empty());
+    timed->Stop();
+    clock_offset=0;
 
     bobLogin->Stop();
     locked->Stop();
@@ -324,6 +374,7 @@ int main() {
     std::cout
         <<"PASS: server-side auth store, email verification, MFA recovery-code login, "
           "non-enumerating login, source-scoped account rate limiting, password change, "
-          "password reset, phone SMS login, session management and security audit events\n";
+          "cross-client password reset, phone SMS login, expired-access refresh, revoked-session "
+          "cache cleanup, session management and security audit events\n";
     return 0;
 }

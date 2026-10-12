@@ -1,6 +1,6 @@
-add_library(luma_auth STATIC src/AuthServiceImpl.cpp src/AuthStore.cpp src/AuthCrypto.cpp src/SmsProvider.cpp src/EmailProvider.cpp)
+add_library(luma_auth STATIC src/AuthServiceImpl.cpp src/AuthStore.cpp src/SmsProvider.cpp src/EmailProvider.cpp)
 target_include_directories(luma_auth PUBLIC include ${CMAKE_SOURCE_DIR}/shared)
-target_link_libraries(luma_auth PUBLIC luma_shared)
+target_link_libraries(luma_auth PUBLIC luma_auth_crypto)
 target_compile_features(luma_auth PUBLIC cxx_std_20)
 if(WIN32)
   target_link_libraries(luma_auth PUBLIC ws2_32)
@@ -32,3 +32,14 @@ add_executable(luma_auth_store_row_mutation_tests tests/AuthStoreRowMutationTest
 target_link_libraries(luma_auth_store_row_mutation_tests PRIVATE luma_auth)
 target_compile_features(luma_auth_store_row_mutation_tests PRIVATE cxx_std_20)
 add_test(NAME luma_auth_store_row_mutation_tests COMMAND luma_auth_store_row_mutation_tests)
+
+# These regression executables use assert for both actions and assertions.
+# Keep them active in Release, where the shipped client is verified.
+foreach(test_target luma_auth_unit_tests luma_auth_integration_tests luma_sms_provider_tests luma_email_provider_tests luma_auth_store_row_mutation_tests)
+  if(MSVC)
+    target_compile_options(${test_target} PRIVATE /UNDEBUG /utf-8)
+  else()
+    target_compile_options(${test_target} PRIVATE -UNDEBUG)
+  endif()
+  set_tests_properties(${test_target} PROPERTIES TIMEOUT 120)
+endforeach()

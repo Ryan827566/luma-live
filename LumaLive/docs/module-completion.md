@@ -1,3 +1,13 @@
+# Current checkpoint: main and hosted account page (2026-10-13)
+
+Both `codex/video-meetings` and `codex/auth-registration-login` are merged into main (merge commits 26b616ba and 9c447563). Local development is now on main, without creating another branch. The former stale local HEAD/index was reconciled after content comparison and backup; preserve the independent legacy SVG difference.
+
+The client now includes a hosted Account page in the left navigation. Registration/login/recovery, profile, security and devices use the account service asynchronously. Authentication expiry, revocation, reset across clients and stalled requests have focused regression fixes. See [login-acceptance.md](login-acceptance.md) for scope, testing and remaining production-provider/transport gates. This does not imply the existing video/AI real-provider or physical-device gates are complete.
+
+The detailed earlier snapshots below are chronological history; their earlier branch/UI instructions are superseded by the user's main-only development request and the latest checkpoint.
+
+---
+
 # Video/call/meeting completion ledger
 
 ## Current snapshot (2026-10-12)

@@ -45,8 +45,8 @@ std::wstring GetText(HWND h) {
     std::wstring out(static_cast<std::size_t>(n)+1,L'\0');
     if(n>0) {
         GetWindowTextW(h,out.data(),n+1);
-        out.resize(static_cast<std::size_t>(n));
     }
+    out.resize(static_cast<std::size_t>(n));
     return out;
 }
 

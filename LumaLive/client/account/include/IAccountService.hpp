@@ -11,6 +11,8 @@ namespace luma::client::account {
 struct OperationResult {
     bool success{false};
     std::string message;
+    // Stable protocol code for UI localization; message remains diagnostic data.
+    std::string code;
 };
 
 class IAccountService {

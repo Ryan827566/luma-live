@@ -41,7 +41,10 @@ def main():
     def run(name, command, timeout):
         log_path = root / ("output/verify-" + name + ".log")
         with log_path.open("w", encoding="utf-8") as log:
-            result = subprocess.run(command, cwd=root, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
+            test_env = env.copy()
+            if name.startswith("auth-"):
+                test_env.pop("LUMALIVE_AUTH_DATABASE_URL", None)
+            result = subprocess.run(command, cwd=root, env=test_env, stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
         record["checks"].append({"name": name, "exit_code": result.returncode, "log": str(log_path)})
         save()
         if result.returncode:
@@ -49,7 +52,7 @@ def main():
         print("PASS:", name, flush=True)
     save()
     try:
-        targets = ["luma_studio", "luma_signaling_server", "luma_meeting_ui_fixture", "luma_session_ai_tests", "luma_session_ai_gateway_tests", "luma_caption_overlay_tests", "luma_ui_locale_tests", "luma_ui_accessibility_tests", "luma_transcript_view_tests", "luma_ai_provider_settings_tests", "luma_session_archive_tests", "luma_session_archive_search_tests", "luma_ai_service_health_tests", "luma_local_ai_service_tests"]
+        targets = ["luma_auth_integration_tests", "luma_client_account_tests", "luma_account_ui_fixture", "luma_studio", "luma_signaling_server", "luma_meeting_ui_fixture", "luma_session_ai_tests", "luma_session_ai_gateway_tests", "luma_caption_overlay_tests", "luma_ui_locale_tests", "luma_ui_accessibility_tests", "luma_transcript_view_tests", "luma_ai_provider_settings_tests", "luma_session_archive_tests", "luma_session_archive_search_tests", "luma_ai_service_health_tests", "luma_local_ai_service_tests"]
         run("build", [cmake, "--build", str(build), "--config", "Release", "--target", *targets, "--parallel", "1", "--", "/nr:false"], 1800)
         # The configured output must also be newer than the linked preview library.
         executable = binary / "luma_studio.exe"
@@ -57,6 +60,9 @@ def main():
         if not executable.is_file() or not library.is_file() or executable.stat().st_mtime_ns < library.stat().st_mtime_ns:
             raise RuntimeError("Client executable is missing or older than the preview library; check the CMake runtime output directory.")
         record["client"] = {"path": str(executable), "sha256": hashlib.sha256(executable.read_bytes()).hexdigest()}
+        run("auth-integration", [str(binary / "luma_auth_integration_tests.exe")], 120)
+        run("auth-client", [str(binary / "luma_client_account_tests.exe")], 20)
+        run("auth-ui", [sys.executable, "scripts/windows/test_account_ui.py", str(executable)], 90)
         run("package-ai-service", [sys.executable, "scripts/windows/package_ai_service.py", "--binary-dir", str(binary)], 60)
         run("local-ai-service", [str(binary / "luma_local_ai_service_tests.exe")], 40)
         run("local-ai-service-ui", [sys.executable, "scripts/windows/test_local_ai_service_ui.py", str(executable)], 90)

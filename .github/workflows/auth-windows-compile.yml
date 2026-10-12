@@ -3,6 +3,7 @@ name: auth-windows-compile
 on:
   push:
     branches:
+      - main
       - codex/auth-registration-login
   pull_request:
     branches:

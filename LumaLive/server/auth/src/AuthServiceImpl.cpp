@@ -53,7 +53,7 @@ using luma::contracts::auth::wire::Type;
 
 namespace {
 
-std::int64_t now_epoch(){
+std::int64_t system_now_epoch(){
     return std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
 }
@@ -174,6 +174,12 @@ bool valid_text(std::string_view s,std::size_t max){
     return !s.empty()&&s.size()<=max&&luma::contracts::auth::wire::valid_field(s);
 }
 
+bool valid_hex(std::string_view value,std::size_t bytes){
+    return value.size()==bytes*2&&std::all_of(value.begin(),value.end(),[](unsigned char c){
+        return (c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F');
+    });
+}
+
 struct UserRecord{
     std::string id,username,email,display_name,avatar_url,phone,salt_hex,verifier_hex;
     std::uint32_t password_kdf_iterations{luma::contracts::auth::crypto::kPasswordPbkdf2Iterations};
@@ -239,10 +245,12 @@ struct PhoneChallenge{
 
 class AuthServiceImpl final:public IAuthService{
 public:
-    explicit AuthServiceImpl(std::unique_ptr<IAuthStore> store={})
+    explicit AuthServiceImpl(
+        std::unique_ptr<IAuthStore> store={},std::function<std::int64_t()> clock={})
         :auth_store_(store?std::move(store):CreateAuthStoreFromEnvironment()),
          sms_provider_(CreateSmsProviderFromEnvironment()),
-         email_provider_(CreateEmailProviderFromEnvironment()){}
+         email_provider_(CreateEmailProviderFromEnvironment()),
+         clock_(clock?std::move(clock):system_now_epoch){}
 
     Result Start()override{return StartOnPort(9100);}
 
@@ -343,6 +351,8 @@ public:
     }
 
 private:
+    std::int64_t now_epoch()const{return clock_();}
+
     EmailSendResult SendEmailToken(
         std::string_view email,
         std::string_view purpose,
@@ -542,12 +552,17 @@ private:
         return *it->second;
     }
 
-    std::string SessionUser(const ClientState& c){
+    std::string SessionUser(const ClientState& c,bool& access_expired){
+        access_expired=false;
         if(c.token.empty())return {};
         std::lock_guard sl(session_mutex_);
         auto it=sessions_.find(c.token);
-        if(it==sessions_.end()||it->second.expires<=now_epoch()){
-            if(it!=sessions_.end())sessions_.erase(it);
+        if(it==sessions_.end())return {};
+        const auto now=now_epoch();
+        if(it->second.expires<=now){
+            // Access expiry must not revoke the longer-lived refresh credential.
+            access_expired=it->second.refresh_expires>now;
+            if(!access_expired)sessions_.erase(it);
             return {};
         }
         it->second.last_seen=now_epoch();
@@ -750,12 +765,18 @@ private:
 
     void Handle(Socket s,const Packet&p){
         auto send=[&](Type t,std::vector<std::string>f={}){return Send(s,{t,std::move(f)});};
-        auto bad=[&](const char*c,const char*m){send(Type::Error,{c,m});};
+        bool access_expired=false;
+        auto bad=[&](const char*code,const char*message){
+            // Clients can retry natural access expiry with their refresh token;
+            // a revoked or missing session must clear their cached identity.
+            send(Type::Error,{access_expired&&std::string_view(code)=="invalid_session"
+                ?"access_token_expired":code,message});
+        };
 
         auto&c=Client(s);
 
         auto require_session=[&]() -> std::string {
-            return SessionUser(c);
+            return SessionUser(c,access_expired);
         };
 
         switch(p.type){
@@ -779,6 +800,9 @@ private:
         case Type::RegisterFinish: {
             if(c.pending.kind!=Pending::Kind::Register||p.fields.size()!=1){
                 bad("invalid_state","registration challenge missing");return;
+            }
+            if(!valid_hex(p.fields[0],32)){
+                bad("invalid_registration","invalid password verifier");return;
             }
             std::lock_guard lock(store_mutex_);
             if(by_username_.count(normalize(c.pending.username))||by_email_.count(normalize(c.pending.email))){
@@ -988,8 +1012,6 @@ private:
             if(p.fields.size()!=2||p.fields[0]!=c.token){
                 bad("invalid_session","invalid session");return;
             }
-            const auto user_id=require_session();
-            if(user_id.empty()){bad("invalid_session","session expired or invalid");return;}
             if(p.fields[1].empty()){
                 bad("invalid_refresh_token","refresh token is required");return;
             }
@@ -998,11 +1020,20 @@ private:
             std::string new_refresh;
             SessionRecord session;
             const auto now=now_epoch();
+            // Use the same store -> session lock order as revocation and deletion.
+            std::lock_guard lock(store_mutex_);
+            std::string user_id;
             {
                 std::lock_guard sl(session_mutex_);
                 const auto it=sessions_.find(c.token);
                 if(it==sessions_.end()||it->second.refresh_expires<=now){
+                    if(it!=sessions_.end())sessions_.erase(it);
                     bad("invalid_refresh_token","refresh token expired or invalid");return;
+                }
+                user_id=it->second.user_id;
+                if(users_.find(user_id)==users_.end()){
+                    sessions_.erase(it);
+                    bad("invalid_session","account no longer exists");return;
                 }
                 bool valid=false;
                 try{
@@ -1024,7 +1055,6 @@ private:
                 sessions_[new_access]=session;
             }
 
-            std::lock_guard lock(store_mutex_);
             const auto it=users_.find(user_id);
             if(it==users_.end()){bad("invalid_session","account no longer exists");return;}
             c.token=new_access;
@@ -1543,6 +1573,9 @@ private:
             if(c.pending.kind!=Pending::Kind::PasswordChange||p.fields.size()!=3||p.fields[0]!=c.token){
                 bad("invalid_state","password change challenge missing");return;
             }
+            if(!valid_hex(p.fields[2],32)){
+                bad("invalid_password","invalid password verifier");return;
+            }
             const auto user_id=c.pending.user_id;
             std::lock_guard lock(store_mutex_);
             auto it=users_.find(user_id);
@@ -1656,7 +1689,8 @@ private:
         }
 
         case Type::ResetPassword: {
-            if(p.fields.size()!=3){
+            if(p.fields.size()!=3||!valid_hex(p.fields[0],32)||
+               !valid_hex(p.fields[1],16)||!valid_hex(p.fields[2],32)){
                 bad("invalid_reset","reset token, salt and verifier are required");return;
             }
             std::lock_guard lock(store_mutex_);
@@ -1666,7 +1700,7 @@ private:
                     target=&u;break;
                 }
             }
-            if(!target||target->reset_token_expires<now_epoch()){
+            if(!target||target->reset_token_expires<=now_epoch()){
                 bad("invalid_token","password reset token is invalid or expired");return;
             }
 
@@ -1943,6 +1977,7 @@ private:
     std::unique_ptr<IAuthStore> auth_store_;
     std::unique_ptr<ISmsProvider> sms_provider_;
     std::unique_ptr<IEmailProvider> email_provider_;
+    std::function<std::int64_t()> clock_;
     std::unordered_map<Socket,std::shared_ptr<ClientState>> clients_;
     std::unordered_map<std::string,SessionRecord> sessions_;
     std::unordered_map<std::string,UserRecord> users_;
@@ -1959,6 +1994,11 @@ std::unique_ptr<IAuthService>CreateAuthService(){
 
 std::unique_ptr<IAuthService>CreateAuthService(std::unique_ptr<IAuthStore> store){
     return std::make_unique<AuthServiceImpl>(std::move(store));
+}
+
+std::unique_ptr<IAuthService>CreateAuthService(
+    std::unique_ptr<IAuthStore> store,std::function<std::int64_t()> clock){
+    return std::make_unique<AuthServiceImpl>(std::move(store),std::move(clock));
 }
 
 }

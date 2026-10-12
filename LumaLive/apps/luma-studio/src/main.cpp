@@ -2,7 +2,6 @@
 #include "luma/client/ui/scene_editor/SceneEditorView.hpp"
 #include "StudioShell.hpp"
 #include "StudioPreview.hpp"
-#include "AccountView.hpp"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -19,8 +18,6 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE,PWSTR,int n){
     }
     if(commandLine.find(L"--workspace-pages")!=std::wstring::npos)
         return luma::client::ui::studio::RunStudioShell(h,n);
-    if(commandLine.find(L"--account")!=std::wstring::npos)
-        return luma::client::ui::account::RunAccountView(h,n);
     return luma::client::ui::preview::RunStudioPreview(h,n);
 }
 #else

@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include "contracts/errors/Error.hpp"
@@ -19,4 +20,7 @@ public:
 };
 std::unique_ptr<IAuthService> CreateAuthService();
 std::unique_ptr<IAuthService> CreateAuthService(std::unique_ptr<IAuthStore> store);
+// The supplied clock returns UTC epoch seconds and must be safe to call concurrently.
+std::unique_ptr<IAuthService> CreateAuthService(
+    std::unique_ptr<IAuthStore> store,std::function<std::int64_t()> clock);
 }
