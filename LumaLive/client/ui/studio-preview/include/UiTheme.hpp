@@ -1,5 +1,6 @@
 #pragma once
 #include "UiLocale.hpp"
+#include "UiScrollBar.hpp"
 #include <windows.h>
 #include <commctrl.h>
 #include <algorithm>
@@ -45,7 +46,7 @@ inline LRESULT CALLBACK EditProc(HWND h,UINT message,WPARAM w,LPARAM l,UINT_PTR 
  if(message==WM_SETFOCUS||message==WM_KILLFOCUS||message==WM_ENABLE)RedrawWindow(h,nullptr,nullptr,RDW_FRAME|RDW_INVALIDATE|RDW_UPDATENOW);
  return result;
 }
-inline void InstallEdit(HWND h){SetWindowSubclass(h,EditProc,4,0);RedrawWindow(h,nullptr,nullptr,RDW_FRAME|RDW_INVALIDATE);}
+inline void InstallEdit(HWND h){SetWindowSubclass(h,EditProc,4,0);if(GetWindowLongPtrW(h,GWL_STYLE)&ES_MULTILINE)UiScrollBar::Install(h,Surface,Muted,RGB(65,79,99),Accent);RedrawWindow(h,nullptr,nullptr,RDW_FRAME|RDW_INVALIDATE);}
 
 // Keep the native ComboBox selection, popup, type-ahead and accessibility tree.
 // Only its closed field is painted here; parent list painting remains intact.

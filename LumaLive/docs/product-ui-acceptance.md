@@ -167,3 +167,14 @@ All 19 actual-EXE verifier checks passed, including new native search Unicode/da
 Camera/microphone startup and device initialization failures now use localized, actionable UI messages. Raw capture errors remain in debugger output rather than being appended as English text to the Chinese interface. Capture behavior is unchanged; physical failure injection is still pending.
 
 All 19 actual-EXE verifier checks passed on SHA-256 `1bf4c92d4a81c22088c6637c41a382e1370cdb8881ead326a24bc3c34d52eafe`. A subsequent compact English (1024x700) navigation run also passed History forward/reverse Tab order and queued Enter/Escape through the production message loop, in addition to search, cancellation, export, inline deletion and retained three-participant navigation. Simulated composition messages do not replace physical IME or Narrator acceptance.
+
+
+## 2026-10-12 AI scrollbars and call-state localization
+
+AI session text and History now use a dark vertical track with a rounded thumb, hover/drag accents and arrow controls. The native EDIT retains its text, selection, wheel/keyboard handling, scroll range and accessibility object. Pointer tracking uses full line positions, avoiding 16-bit truncation on long records. Capture and repeat stop on release, cancel, hide, disable and destruction; high-contrast mode delegates bar rendering/interaction to Windows. This does not style the participant list or dropdown popup scrollbars.
+
+Focused native tests passed wheel reading/following, text selection, arrow and page clicks, dragging a 70,000-line record, held-arrow repeat, cancellation/hide and native range/visibility. The compact Chinese History capture at output/ui-scrollbar-20261012/zh-CN/assistant-history.bmp was visually inspected; track/thumb pixel colors also matched the dark palette. These tests send native input messages, not physical pointer/IME or Narrator acceptance. System high-contrast and physical multi-monitor transitions still need hands-on acceptance.
+
+Call status mapping now matches fixed messages exactly, preserves only participant-identity suffixes, differentiates local rejection from remote rejection, and explains busy/cancel/end/leave/reconnect failures. Chinese no longer appends English diagnostic suffixes to recognized statuses. Simplified/traditional Chinese mappings, UTF-8 identities, English passthrough and unknown-message fallback passed the locale regression.
+
+All 19 actual-EXE verifier checks passed after integration. EXE SHA-256: 9f50c35c39dc6908577b7b52e12187c3f39c7df9f3f2e86065cdef0ea051310b. No real provider/media/TURN acceptance or complete module acceptance is implied.

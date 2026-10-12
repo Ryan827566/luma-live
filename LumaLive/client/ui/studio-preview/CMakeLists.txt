@@ -119,7 +119,7 @@ add_test(NAME luma_ui_accessibility_tests COMMAND luma_ui_accessibility_tests)
 
 add_executable(luma_transcript_view_tests tests/TranscriptViewTests.cpp)
 target_include_directories(luma_transcript_view_tests PRIVATE include)
-target_link_libraries(luma_transcript_view_tests PRIVATE user32 gdi32)
+target_link_libraries(luma_transcript_view_tests PRIVATE user32 gdi32 comctl32)
 add_test(NAME luma_transcript_view_tests COMMAND luma_transcript_view_tests)
 
 # User-owned local AI settings and explicit session archives.

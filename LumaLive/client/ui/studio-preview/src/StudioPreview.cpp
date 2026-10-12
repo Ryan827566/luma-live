@@ -1,4 +1,5 @@
 #include "UiTheme.hpp"
+#include "CallMessages.hpp"
 #include "CaptionOverlay.hpp"
 #include "StudioPreview.hpp"
 #include "PreviewMedia.hpp"
@@ -28,16 +29,8 @@ using Microsoft::WRL::ComPtr;
 constexpr COLORREF Bg=RGB(8,10,13), Panel=RGB(16,19,24), Border=RGB(39,45,55), Ink=RGB(232,237,245), Muted=RGB(145,155,171), Mint=RGB(0,145,245);
 enum Id {Open=100,Camera,Microphone,Monitor,Volume,TestSound,Refresh,CameraList,MicList,Pause,Stop,FileMode,CameraMode,FullScreen,Join,Host,Room,RemoteMode,Identity,Peers,Dial,AcceptCall,RejectCall,EndCall,ShareScreen,Reconnect,Meeting,Ai,Advanced};
 std::wstring Wide(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),nullptr,0);std::wstring out(n,L' ');MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),out.data(),n);return out;}
-std::wstring CallMessage(const std::string& value){
- if(!ChineseUi())return Wide(value);
- const std::pair<const char*,const wchar_t*> messages[]={
- {"Connected to ",L"已连接："},{"Connecting to ",L"正在连接："},{"Calling ",L"正在呼叫："},{"Incoming call from ",L"收到来电："},
- {"Joining room",L"正在加入房间"},{"Ready; choose a participant to call",L"已就绪，请选择通话对象"},{"Requesting connection recovery",L"正在请求恢复连接"},{"Reconnecting media",L"正在重新连接音视频"},
- {"Connection interrupted; attempting recovery",L"连接中断，正在尝试恢复"},{"Connection failed; reconnect or end the call",L"连接失败，请重新连接或结束通话"},{"Signaling disconnected; rejoin to reconnect",L"服务器连接断开，请重新加入房间"},
- {"Room registration timed out",L"加入房间超时"},{"Call timed out",L"呼叫超时"},{"Call ended",L"通话已结束"},{"Call rejected",L"对方拒绝了通话"},{"Call cancelled",L"呼叫已取消"},{"Offline",L"尚未连接"}};
- for(const auto& item:messages)if(value.rfind(item.first,0)==0)return std::wstring(UiLabel(item.second,item.second))+Wide(value.substr(std::char_traits<char>::length(item.first)));
- return UiLabel(L"连接未完成，请检查房间状态或重新加入",L"Check the room status or rejoin");
-}
+std::wstring CallMessage(const std::string& value){return LocalizedCallMessage(value);}
+
 void Fill(HDC dc,RECT r,COLORREF c){auto b=CreateSolidBrush(c);FillRect(dc,&r,b);DeleteObject(b);}
 void Text(HDC dc,const std::wstring& s,RECT r,HFONT font,COLORREF color=Ink,UINT flags=DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS){auto old=SelectObject(dc,font);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,color);DrawTextW(dc,s.c_str(),-1,&r,flags);SelectObject(dc,old);}
 std::wstring Hr(HRESULT hr){wchar_t b[24];swprintf_s(b,L"0x%08X",static_cast<unsigned>(hr));return b;}
