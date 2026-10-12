@@ -115,7 +115,7 @@ class StudioWindow {
             auto result=capture_->StartCamera(config,callback);
             if(!result.IsOk()){config.width=640;config.height=480;result=capture_->StartCamera(config,callback);}
             if(result.IsOk()){expectCamera_=true;call_.SetVideoSource("camera");SetWindowTextW(Control(Camera),UiLabel(L"关闭摄像头",L"Stop camera"));status_=UiLabel(L"摄像头已开启 · 等待第一帧",L"Camera started. Waiting for video.");}
-            else status_=UiLabel(L"摄像头无法开启：",L"Unable to start camera: ")+Wide(result.Message())+UiLabel(L"。请检查系统隐私权限或关闭占用它的程序。",L". Check device permissions and other apps.");
+            else{OutputDebugStringW((L"LumaLive camera capture: "+Wide(result.Message())+L"\n").c_str());status_=UiLabel(L"无法开启摄像头。请刷新设备列表，或关闭占用摄像头的程序后重试。",L"Unable to start camera. Refresh devices or close another app using the camera, then try again.");}
         }
         EnableWindow(Control(CameraList),!capture_->IsCameraCapturing()&&!cameras_.devices.empty());
         InvalidateRect(surface_,nullptr,FALSE);InvalidateRect(window_,nullptr,FALSE);
@@ -127,7 +127,7 @@ class StudioWindow {
             auto index=SendMessageW(Control(MicList),CB_GETCURSEL,0,0);if(index<0||size_t(index)>=microphones_.devices.size())return;
             media::AudioCaptureConfig config;config.device_id=microphones_.devices[index].id;config.channels=1;audioCount_=0;audioFailed_=false;
             auto result=capture_->StartMicrophone(config,[this](AudioFrame f){peak_=Peak(f);call_.Audio(f);if(aiCallActive_)ai_.session.Submit("local",f);++audioCount_;if(monitor_&&!audio_.Push(f))audioFailed_=true;});
-            if(result.IsOk()){expectMicrophone_=true;SetWindowTextW(Control(Microphone),UiLabel(L"关闭麦克风",L"Stop microphone"));status_=UiLabel(L"麦克风已开启 · 戴上耳机后可开启监听",L"Microphone started. Use headphones for monitoring.");}else status_=UiLabel(L"麦克风无法开启：",L"Unable to start microphone: ")+Wide(result.Message());
+            if(result.IsOk()){expectMicrophone_=true;SetWindowTextW(Control(Microphone),UiLabel(L"关闭麦克风",L"Stop microphone"));status_=UiLabel(L"麦克风已开启 · 戴上耳机后可开启监听",L"Microphone started. Use headphones for monitoring.");}else{OutputDebugStringW((L"LumaLive microphone capture: "+Wide(result.Message())+L"\n").c_str());status_=UiLabel(L"无法开启麦克风。请刷新设备列表，或关闭占用麦克风的程序后重试。",L"Unable to start microphone. Refresh devices or close another app using the microphone, then try again.");}
         }
         EnableWindow(Control(MicList),!capture_->IsMicrophoneCapturing()&&!microphones_.devices.empty());EnableWindow(Control(Monitor),capture_->IsMicrophoneCapturing());InvalidateRect(window_,nullptr,FALSE);
     }
@@ -368,7 +368,7 @@ public:
         for(int id:{RemoteMode,Meeting,Ai,Open,CameraMode,FileMode,Pause,Stop,FullScreen,CameraList,Camera,Refresh,MicList,Microphone,ShareScreen,Monitor,Volume,TestSound,Identity,Room,Advanced,Host,Join,Peers,Dial,AcceptCall,RejectCall,EndCall,Reconnect})SetWindowPos(Control(id),HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
         audio_.SetVolume(volume_/100.f);remoteAudio_.SetVolume(volume_/100.f);
         for(auto [id,label]:{std::pair<int,const wchar_t*>{Host,UiLabel(L"信令服务器",L"Signaling server")},{Room,UiLabel(L"房间号",L"Room ID")},{Identity,UiLabel(L"显示名称",L"Display name")},{Peers,UiLabel(L"通话对象",L"Participant")},{CameraList,UiLabel(L"摄像头",L"Camera")},{MicList,UiLabel(L"麦克风",L"Microphone")},{Volume,UiLabel(L"输出音量",L"Output volume")}})SetAccessibleName(Control(id),label);
-        capture_=media::CreateDeviceCaptureService();auto result=capture_->Start();if(!result.IsOk())status_=UiLabel(L"设备初始化失败：",L"Device initialization failed: ")+Wide(result.Message());Enumerate();Layout();
+        capture_=media::CreateDeviceCaptureService();auto result=capture_->Start();if(!result.IsOk()){OutputDebugStringW((L"LumaLive device initialization: "+Wide(result.Message())+L"\n").c_str());status_=UiLabel(L"设备初始化失败。请检查设备连接后重启 LumaLive。",L"Unable to initialize devices. Check device connections, then restart LumaLive.");}Enumerate();Layout();
         const auto renderPath=Option(L"--render-check");if(!renderPath.empty()){const bool rendered=RenderCheck(renderPath);Shutdown();DestroyWindow(window_);return rendered?0:2;}
         const auto mediaPath=Option(L"--media");if(!mediaPath.empty())OpenMedia(mediaPath.c_str());
         SetTimer(window_,1,33,nullptr);ShowWindow(window_,show);UpdateWindow(window_);
@@ -385,3 +385,5 @@ int RunStudioPreview(HINSTANCE instance,int show){
     int result;{StudioWindow window;result=window.Run(instance,show);}CoUninitialize();return result;
 }
 }
+
+

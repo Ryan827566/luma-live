@@ -162,3 +162,8 @@ History searches localized dates and saved UTF-8 content case-insensitively, wit
 Search is bounded to the latest 1,000 records and a 32 MiB content-read budget; limits and unreadable records are visible, and partial results never imply a complete no-match search. Search preserves stored bytes and ordering. These limits are not unlimited archive indexing.
 
 All 19 actual-EXE verifier checks passed, including new native search Unicode/date/context/cancel/budget/invalid-file tests and actual hosted search, cancellation, page retention and input-method message regression. Compact English navigation passed; English/Chinese 1024x700 captures in output/ui-ai-search-20261012 were inspected. IME message tests do not replace physical typing/Narrator acceptance. EXE SHA-256: 6cf4a30d61c5dda3977cf8fc18e5f261854908efeb7a8f0b18672bdc6e31825b. Real provider/media/TURN, slow network timings and final UI/module acceptance remain open.
+# 2026-10-12 device status and History keyboard checkpoint
+
+Camera/microphone startup and device initialization failures now use localized, actionable UI messages. Raw capture errors remain in debugger output rather than being appended as English text to the Chinese interface. Capture behavior is unchanged; physical failure injection is still pending.
+
+All 19 actual-EXE verifier checks passed on SHA-256 `1bf4c92d4a81c22088c6637c41a382e1370cdb8881ead326a24bc3c34d52eafe`. A subsequent compact English (1024x700) navigation run also passed History forward/reverse Tab order and queued Enter/Escape through the production message loop, in addition to search, cancellation, export, inline deletion and retained three-participant navigation. Simulated composition messages do not replace physical IME or Narrator acceptance.

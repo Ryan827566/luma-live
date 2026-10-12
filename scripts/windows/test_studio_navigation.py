@@ -202,6 +202,10 @@ try:
         while not u.IsWindowEnabled(u.GetDlgItem(child, 48)):
             assert time.monotonic() < deadline, 'Archive search did not finish'
             time.sleep(.05)
+    history_order = (13, 47, 48, 49, 16, 18, 36, 17, 43, 44, 45)
+    for previous, following in zip(history_order, history_order[1:]):
+        assert u.GetNextDlgTabItem(child, u.GetDlgItem(child, previous), False) == u.GetDlgItem(child, following), 'History Tab order differs from visible layout'
+        assert u.GetNextDlgTabItem(child, u.GetDlgItem(child, following), True) == u.GetDlgItem(child, previous), 'History reverse Tab order differs'
     search_edit = u.GetDlgItem(child, 47)
     record_picker = u.GetDlgItem(child, 16)
     set_text(search_edit, "\u4f60\u597d")
@@ -215,12 +219,20 @@ try:
     time.sleep(.35)
     assert u.SendMessageW(record_picker, 0x146, 0, 0) == 1, 'IME composition Enter submitted search'
     u.SendMessageW(search_edit, 0x10E, 0, 0)  # WM_IME_ENDCOMPOSITION
-    u.SendMessageW(search_edit, 0x100, 0x0D, 0)
+    u.PostMessageW(search_edit, 0x100, 0x0D, 0)  # production IsDialogMessage route
+    deadline = time.monotonic() + 8
+    while u.SendMessageW(record_picker, 0x146, 0, 0) != 0:
+        assert time.monotonic() < deadline, 'Queued search Enter did not complete'
+        time.sleep(.05)
     wait_search()
     assert u.SendMessageW(record_picker, 0x146, 0, 0) == 0, 'Call search exposed meeting content'
     assert not text_of(archived) and not u.IsWindowEnabled(u.GetDlgItem(child, 44)) and not u.IsWindowEnabled(u.GetDlgItem(child, 36)), 'No matches left stale destructive/export actions'
-    u.SendMessageW(child, 0x111, 49, 0)
-    assert not text_of(search_edit) and text_of(archived) == saved_text, 'Clear did not restore full record list'
+    u.PostMessageW(search_edit, 0x100, 0x1B, 0)
+    deadline = time.monotonic() + 3
+    while text_of(search_edit):
+        assert time.monotonic() < deadline, 'Queued Escape did not clear search'
+        time.sleep(.05)
+    assert text_of(archived) == saved_text, 'Clear did not restore full record list'
     set_text(search_edit, 'SYNTHETIC CALL')
     u.SendMessageW(child, 0x111, 48, 0)
     u.SendMessageW(child, 0x111, 13, 0)
