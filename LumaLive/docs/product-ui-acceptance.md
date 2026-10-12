@@ -178,3 +178,14 @@ Focused native tests passed wheel reading/following, text selection, arrow and p
 Call status mapping now matches fixed messages exactly, preserves only participant-identity suffixes, differentiates local rejection from remote rejection, and explains busy/cancel/end/leave/reconnect failures. Chinese no longer appends English diagnostic suffixes to recognized statuses. Simplified/traditional Chinese mappings, UTF-8 identities, English passthrough and unknown-message fallback passed the locale regression.
 
 All 19 actual-EXE verifier checks passed after integration. EXE SHA-256: 9f50c35c39dc6908577b7b52e12187c3f39c7df9f3f2e86065cdef0ea051310b. No real provider/media/TURN acceptance or complete module acceptance is implied.
+
+
+## 2026-10-12 scrollbar lifecycle follow-up and participant list
+
+The dark scrollbar now also covers the meeting participant LISTBOX. It uses native row positions, preserving selected participants and arrow-key behavior. Dropdown popups remain native and are not included in this checkpoint.
+
+Independent review found two issues in the initial scrollbar checkpoint: synchronous scroll notifications could destroy the EDIT before its callback returned, and held thumb drags retained the original range while captions changed. Both are fixed. Callback guards defer state deletion until reentrant callbacks unwind; destroyed controls stop further work. Thumb movement reads the current range/geometry and cancels if the scrollbar disappears. The bounded second review reported no remaining concrete blockers.
+
+New native regression cases passed: parent destroys EDIT during EN_VSCROLL, held thumb sees appended text, shrinking text cancels capture, participant thumb/arrow scrolling preserves selection, and participant arrow-key navigation still works. The same test source was separately compiled with MSVC AddressSanitizer (/fsanitize=address) and passed with no sanitizer diagnostics; build/run logs are in output/scrollbar-sanitizer. This is additional memory-error checking, not a substitute for physical pointer/Narrator acceptance.
+
+All 19 actual-EXE checks passed after these fixes. English compact captures in output/ui-scrollbar-20261012/en-US were inspected. Current EXE SHA-256: 9f65283064b1bf5541f2c84d0a3b928f1ecc2f2a0778183c88e7de7ae050ed6d. Full physical DPI/IME/Narrator/high-contrast workflows, provider/media/TURN and final visual/module acceptance remain open.

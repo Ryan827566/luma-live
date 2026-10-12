@@ -5,6 +5,12 @@
 #include <stdexcept>
 using namespace luma::client::ui::preview;
 void require(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
+LRESULT CALLBACK ClosingParent(HWND h,UINT m,WPARAM w,LPARAM l){
+    if(m==WM_COMMAND&&HIWORD(w)==EN_VSCROLL&&GetPropW(h,L"CloseOnScroll")){
+        RemovePropW(h,L"CloseOnScroll");DestroyWindow(reinterpret_cast<HWND>(l));return 0;
+    }
+    return DefWindowProcW(h,m,w,l);
+}
 int main() {
     auto parent = CreateWindowExW(0, L"STATIC", L"", WS_OVERLAPPEDWINDOW, 0, 0, 600, 400, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     auto edit = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, 0, 0, 400, 180, parent, nullptr, GetModuleHandleW(nullptr), nullptr);
@@ -85,11 +91,46 @@ int main() {
         thumb={(b.rcScrollBar.left+b.rcScrollBar.right)/2,b.rcScrollBar.top+(b.xyThumbTop+b.xyThumbBottom)/2};
         press(thumb);destination={thumb.x,b.rcScrollBar.bottom+80};ScreenToClient(edit,&destination);
         SendMessageW(edit,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(destination.x,destination.y));
-        require(first()>65535,"Long-record thumb position was truncated to 16 bits");release();
+        require(first()>65535,"Long-record thumb position was truncated to 16 bits");
+        // The range can grow or disappear while a user holds the thumb.
+        for(int i=0;i<1000;++i)longRecord+=L"new\r\n";
+        ReplaceTranscriptText(edit,longRecord.c_str());
+        SendMessageW(edit,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(destination.x,destination.y));
+        require(first()>70900,"Held thumb retained a stale range after incoming text");
+        ReplaceTranscriptText(edit,L"Now short");
+        SendMessageW(edit,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(destination.x,destination.y));
+        require(GetCapture()!=edit,"Disappearing scrollbar did not cancel tracking");
+        ReplaceTranscriptText(edit,longRecord.c_str());
         b=bar();press({(b.rcScrollBar.left+b.rcScrollBar.right)/2,b.rcScrollBar.top+b.dxyLineButton/2});
         const int repeatStart=first();SendMessageW(edit,WM_TIMER,UiScrollBar::RepeatTimer,0);
         require(first()==repeatStart-1,"Held scrollbar arrow did not repeat");
         ShowWindow(edit,SW_HIDE);require(GetCapture()!=edit,"Hidden scrollbar retained capture");
+        auto list=CreateWindowExW(0,L"LISTBOX",L"",WS_CHILD|WS_VISIBLE|WS_VSCROLL|LBS_NOTIFY,0,0,220,180,parent,nullptr,GetModuleHandleW(nullptr),nullptr);
+        require(list&&UiScrollBar::Install(list,RGB(16,19,24),RGB(145,155,171),RGB(65,79,99),RGB(0,145,245),true),"Participant scrollbar installation failed");
+        for(int i=0;i<100;++i){auto name=L"Participant "+std::to_wstring(i);SendMessageW(list,LB_ADDSTRING,0,reinterpret_cast<LPARAM>(name.c_str()));}
+        SendMessageW(list,LB_SETCURSEL,42,0);SendMessageW(list,LB_SETTOPINDEX,30,0);
+        b={sizeof(b)};require(GetScrollBarInfo(list,OBJID_VSCROLL,&b),"Participant scrollbar unavailable");
+        SendMessageW(list,WM_NCLBUTTONDOWN,HTVSCROLL,MAKELPARAM((b.rcScrollBar.left+b.rcScrollBar.right)/2,b.rcScrollBar.top+b.dxyLineButton/2));
+        SendMessageW(list,WM_LBUTTONUP,0,0);require(SendMessageW(list,LB_GETTOPINDEX,0,0)==29,"Participant arrow did not scroll one row");
+        GetScrollBarInfo(list,OBJID_VSCROLL,&b);thumb={(b.rcScrollBar.left+b.rcScrollBar.right)/2,b.rcScrollBar.top+(b.xyThumbTop+b.xyThumbBottom)/2};
+        SendMessageW(list,WM_NCLBUTTONDOWN,HTVSCROLL,MAKELPARAM(thumb.x,thumb.y));
+        destination={thumb.x,b.rcScrollBar.bottom+80};ScreenToClient(list,&destination);
+        SendMessageW(list,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(destination.x,destination.y));SendMessageW(list,WM_LBUTTONUP,0,0);
+        require(SendMessageW(list,LB_GETTOPINDEX,0,0)>80,"Participant thumb did not scroll");
+        require(SendMessageW(list,LB_GETCURSEL,0,0)==42,"Participant scroll changed selected member");
+        SendMessageW(list,WM_KEYDOWN,VK_DOWN,0);require(SendMessageW(list,LB_GETCURSEL,0,0)==43,"Participant keyboard navigation changed");
+        DestroyWindow(list);
+        WNDCLASSW cls{};cls.lpfnWndProc=ClosingParent;cls.hInstance=GetModuleHandleW(nullptr);cls.lpszClassName=L"LumaScrollbarDestroyTest";
+        RegisterClassW(&cls);
+        auto closing=CreateWindowExW(0,cls.lpszClassName,L"",WS_OVERLAPPEDWINDOW,0,0,400,300,nullptr,nullptr,cls.hInstance,nullptr);
+        auto transient=CreateWindowExW(0,L"EDIT",L"",WS_CHILD|WS_VISIBLE|WS_VSCROLL|ES_MULTILINE|ES_READONLY,0,0,250,100,closing,nullptr,cls.hInstance,nullptr);
+        require(transient&&UiScrollBar::Install(transient,RGB(16,19,24),RGB(145,155,171),RGB(65,79,99),RGB(0,145,245)),"Transient scrollbar setup failed");
+        ReplaceTranscriptText(transient,longRecord.c_str());ShowWindow(closing,SW_SHOWNOACTIVATE);
+        b={sizeof(b)};require(GetScrollBarInfo(transient,OBJID_VSCROLL,&b),"Transient scrollbar unavailable");
+        SetPropW(closing,L"CloseOnScroll",HANDLE(1));
+        SendMessageW(transient,WM_NCLBUTTONDOWN,HTVSCROLL,MAKELPARAM((b.rcScrollBar.left+b.rcScrollBar.right)/2,b.rcScrollBar.top+b.dxyLineButton/2));
+        require(!IsWindow(transient),"Parent did not destroy the EDIT during its scroll notification");
+        require(GetCapture()!=transient,"Destroyed scrollbar retained capture");DestroyWindow(closing);
         std::cout << "PASS: native transcript wheel/selection/following and dark scrollbar arrows/page/drag/cancel/range\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << "\n"; DestroyWindow(parent); return 1;
