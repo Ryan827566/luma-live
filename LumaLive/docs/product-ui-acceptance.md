@@ -1,0 +1,193 @@
+# Product UI delivery contract
+
+Status: requirements and source audit, not visual acceptance.
+
+## Product direction
+
+A Windows live-communication workspace for calling, meetings and live production, with a shared AI assistant. Preserve the supplied Figma dark neutral/blue brand direction. One top-level client window; module navigation stays on the far left. AI is a cross-module capability and is not owned by the video module. User priority changed on 2026-10-03: complete this UI checklist before continuing other functionality.
+
+## Design sources
+
+- User Figma: https://www.figma.com/design/FYKhhlXGpcTp2pNrxHUWHe/ (node 4-3464). Prior screenshot access does not establish complete structural fidelity.
+- Taste repository redesign guidance: https://github.com/Leonxlnx/taste-skill/blob/main/skills/redesign-skill/SKILL.md. Read on 2026-10-01. Audit first, preserve the existing stack and behavior, implement targeted changes, test again. This source was read remotely; no successful local installation is claimed.
+- Current main Taste skill excludes realtime collaborative product UI; do not transplant marketing heroes, scroll effects, or its web framework defaults into this native application. User choices, including left navigation, take precedence over generic skill suggestions. Never invent realistic-looking participant data or metrics.
+
+## Observed issues to resolve
+
+Inspected the generated standalone meeting idle render at output/next/Release/ui-checks/idle-96.bmp and current source. This is diagnostic standalone output, not evidence of the full hosted workspace appearance.
+
+- Idle meeting renders a mostly empty roster and disabled in-meeting controls. Replace with a deliberate pre-join page; show roster/media controls when they become relevant.
+- Server host/port and generated participant ID dominate the first-use flow. Put connection configuration in settings/advanced disclosure, and keep join/create focused on meeting and display name.
+- Create and join have identical visual weight. Separate the two intents with a clear primary action and meaningful hierarchy.
+- Native edit/combo outlines and AI white surfaces conflict with the dark workspace. Use common semantic surface, text, border, focus and state tokens.
+- The call workspace still mixes English headings with Chinese copy. Move all owned UI text, errors, statuses and accessibility names into locale resources selected from Windows display language. Provider content and OS-reported device names are data, not UI translation keys; label them clearly without falsifying their names.
+- Meeting/AI controls still need keyboard traversal, focus restoration, screen-reader names and multi-monitor checks in the hosted shell. Rendering at DPI scales alone is insufficient.
+- Application icon and taskbar resources are absent. Create a distinct LumaLive mark representing live media and shared intelligence, then validate 16/24/32/48/256 pixel variants.
+
+## Visual and interaction acceptance
+
+1. Persistent left navigation with selected, hover, focus and incoming-call states. Switching pages retains relevant sessions and user input.
+2. Single main content hierarchy per page. Use a documented type scale and spacing scale, consistent icon family and restrained blue accent. No decorative metrics or filler headings.
+3. User-visible loading, empty, connecting, failed, disconnected and retry states; destructive actions require an inline confirmation instead of spawning another feature window.
+4. Validate at 100%, 150% and 200% display scaling with short and long localized strings. No overlap, clipped labels, inaccessible controls or hidden destructive actions.
+5. Motion must explain state changes and respect reduced-motion preferences; no continuous decoration around live video.
+6. Validate complete keyboard workflows, focus indicators and accessible names, alongside actual screenshots of the hosted application.
+7. Real-provider AI configuration and opt-in status remain explicit. The global assistant must identify which business context it is using and keep scopes separate.
+
+Do not mark product UI complete based on compilation, synthetic media tests or this document. Require an actual rendered and interacted-with client plus resolved acceptance findings.
+
+
+2026-10-03 UI checkpoint (not visually accepted): added shared native theme/button hover/focus tokens. Call workspace labels now use Chinese/English pairs, technical headings were simplified, connection configuration collapsed, and host-close confirmation reveals the meeting page. Meeting prejoin now focuses on room/name; idle roster/media actions are hidden. Host leave/end/remove/close use inline confirm/cancel rather than MessageBox. Navigation test updated for these controls. Figma structure API again failed with no-selection response; screenshot reviewed only, no exact-fidelity claim. Taste redesign guidance reread remotely; no local installation claim. AI visual rewrite, icon assets, broader locale coverage, full DPI/keyboard/visual acceptance are still pending. No newly built UI executable is claimed by this checkpoint.
+
+
+2026-10-03 verified UI checkpoint:
+- AI page now shares dark surfaces, type, spacing, hover/focus and responsive action grouping with the workspace. Its subtitle identifies the call or meeting context; records remain isolated. Native transcript selection/scroll is retained during background updates.
+- Added original LumaLive light-beam/play/connected-media mark as vector master, PNG and 16/24/32/48/64/256 ICO; resource 101 is linked into the actual EXE. The generator is reproducible with Pillow.
+- Display-language helper supports simplified Chinese, traditional Chinese conversion and English, with English fallback for other languages. Full localization coverage and culturally reviewed traditional wording are still pending.
+- End-meeting confirmation is inline. Native button-click regression also exercises Escape cancellation without ending the session, then confirms end. Fixed IsDialogMessage swallowing Escape by requesting that key in the child subclass.
+- Unified verifier PASSED: executable build, locale helper, SessionAi state, caption rendering, gateway mock tests, native HTTP/mock-provider integration, three-participant hosted navigation, standalone 96/144/192 DPI renders and meeting control regression. The Python DPI runner removes the PowerShell launch dependency; system execution policy is unchanged.
+- Actual hosted call/meeting/AI screenshots inspected in output/ui-visual-review, with English captures under en-US; diagnostic meeting renders in output/next/Release/ui-checks. Diagnostic DPI rendering is not physical multi-monitor/DPI acceptance. Current EXE SHA-256: 595cbbfecd2e29cb7c09e9c7900e2f0bfc00d068d97b5f19a28256d3665c2553.
+- Still pending: complete visual polishing (including native dropdown/scrollbar styling), transitions/reduced-motion, full keyboard/accessibility and multi-monitor workflows, complete locale coverage, Figma structural fidelity, real AI provider and physical multi-device media acceptance. This is a verified development checkpoint, not final product/module acceptance; do not merge main on this basis.
+
+
+2026-10-03 keyboard checkpoint: shared owner-drawn buttons explicitly handle Enter through dialog navigation, ignore held-key autorepeat, and leave disabled controls inactive. AI Tab and reverse-Tab order now follows the visual action order at both responsive column counts. Hosted regression verifies forward/reverse native tab traversal and queued Enter activation of keyword guidance, plus existing confirmation Escape and three-member flows. Full verify_client.py passed on the rebuilt executable; SHA-256: 02b6909fd6ca0914dbbc87ac02d05d16e0e54a80baa2b090159cbc2d67f3bfbd. This does not complete screen-reader or full physical keyboard/multi-monitor acceptance.
+
+
+2026-10-04 native-control checkpoint:
+- Call, meeting and AI dropdown fields share dark fill, border, chevron, focus and disabled styling while preserving native popup/selection/type-ahead behavior. Meeting owner-drawn fields use a consistent 34 DIP selection height, including its diagnostic DPI override; independent review identified and corrected that former 30/34 mismatch. Follow-up native metrics found the standard call/AI ComboBox still uses a 22-pixel selection area (28-pixel outer field at 96 DPI): CB_SETITEMHEIGHT alone does not normalize these non-owner-drawn controls. Aligning those heights and popup rows remains a next-step visual issue; do not claim all dropdown heights match.
+- Shared button hover uses a finite transition and reads Windows client-area animation preference; hidden/disabled/destroyed controls stop timers. This implements reduced-motion behavior, but interactive OS-setting and physical multi-monitor acceptance remain pending.
+- Named call/meeting inputs, device lists, volume, AI translation language and transcript through native accessibility annotations; annotations are cleared at window destruction. Programmatic native-name tests verify initial naming, renaming without changing input values, and querying the actual hosted AI field from a separate process. Full Narrator workflows remain pending.
+- Short AI records hide an unnecessary vertical scrollbar. Overflow still uses the native scrollbar; wheel scrolling and return to the short-record state are covered in hosted regression. Overflow scrollbar skin remains native and is not claimed fully dark.
+- Actual EXE rebuilt; full verify_client.py passed (9 checks), including accessibility, language, AI/mock integration, three-member navigation and DPI diagnostics. English and traditional Chinese hosted navigation also passed. One earlier gateway health request aborted with WinError 10053; two subsequent complete runs passed without changing gateway code. Do not characterize that intermittent failure as a fixed gateway bug.
+- Screenshots inspected in output/ui-controls-20261004; source for accessible annotations: https://learn.microsoft.com/en-us/windows/win32/api/oleacc/nn-oleacc-iaccpropservices . Current tested EXE SHA-256: b50efb03d864a56af605c904bae4e8477edea2e6da8ebdbd889b4ca95ea3e0ee.
+- Remaining product acceptance includes full hosted small-screen/high-DPI layouts, physical multi-monitor changes, complete screen-reader flows/localization, and real-provider/physical-media checks. Development branch checkpoint only.
+
+
+2026-10-04 shortcut and locale follow-up: file-open actions (including Ctrl+O) now stay within the call workspace; hidden call actions cannot open a modal file dialog from AI or meeting pages. F11 and Ctrl+O ignore held-key autorepeat. The meeting/call exclusivity message and media-file filter now use the common locale helper, including traditional Chinese conversion. Hosted regression checks the hidden file action with a bounded message timeout. The rebuilt executable passed all 9 verifier checks; SHA-256: 4bb6fca40aa2f388ba11528b92f1b546e1592a3aac91a7d843a52ccc9a5da22c. Full keyboard, screen-reader and physical multi-monitor acceptance remain pending.
+
+
+2026-10-07 icon and dropdown checkpoint:
+- Replaced the initial multi-symbol icon with a cohesive pair of joined L-shaped light bands around an open communication space. The generated raster master is kept in the repository; packaging preserves transparency and produces nine Windows sizes (16/20/24/32/40/48/64/128/256). The earlier SVG is archived as lumalive-v1.svg, not represented as the new artwork's vector master. Real-size variants were inspected on dark/light surfaces, and the new embedded icon is visible in hosted client captures.
+- Call and AI combo boxes now use fixed owner-drawn native lists with string storage, shared dark row painting, 34 DIP selection and 30 DIP popup rows. Native selection, accessible names and keyboard navigation remain intact. Device/participant action spacing was adjusted after screenshot review to leave at least 8 DIP below the closed fields; hosted regression verifies actual window rectangles as well as item metrics.
+- Rebuilt the actual executable; all nine verify_client.py checks passed, including three-participant navigation and diagnostic DPI renders. English and traditional Chinese hosted navigation also passed. Updated captures: output/ui-brand-v2; size sheet: output/icon-review/lumalive-sizes.png. Tested EXE SHA-256: be97a50b02421a8a285794ca613a3a8674030cf883ad19b0fd21d659e4783342.
+- This is a development checkpoint, not final product UI acceptance. Full small-screen/multi-monitor behavior, screen-reader workflows, remaining native scrollbar styling/localization, real provider AI and physical media tests remain outstanding.
+
+
+2026-10-07 keyboard follow-up:
+- Reordered native dialog traversal to start with Calls, Meetings and AI, then proceed through media, devices and connection controls. Hosted regression verifies forward/reverse sidebar traversal after opening both embedded pages; prior executable reproduced the incorrect first Tab target.
+- Pending meeting confirmation now consumes Escape before fullscreen exit in both hosted and standalone dispatch. Held-key repeats cannot cancel a confirmation and immediately leave fullscreen. The three-participant hosted test confirms Escape hides End confirmation without dropping membership or fullscreen; a fresh subsequent Escape restores the window.
+- Independent static review found no blocking issues. All nine client verifier checks passed on the rebuilt EXE; English and traditional Chinese hosted navigation passed separately. EXE SHA-256: 80815676a8cc2ee386f68f676331e5429a6daa20520c1163eadccaa335e63929.
+- This covers navigation order and confirmation cancellation, not complete Narrator/focus restoration or physical multi-monitor acceptance. Small-screen layout and full product UI acceptance remain open; keep this checkpoint on the development branch.
+
+
+2026-10-10 compact workspace checkpoint:
+- Main window now supports a 1024x700 DIP outer size (1008x661 client in the tested 96-DPI environment). Narrow navigation/connection columns and shorter previews leave device controls reachable without reducing font sizes. Compact connection settings, status and call duration fit above the footer; final English capture confirms the previously clipped duration is visible.
+- Meeting prejoin uses shared form geometry for controls and text. Advanced settings, safety note and status fit the 864x621 hosted area. Pending confirmations reserve space below the video grid instead of overlapping tiles; short tiles adapt their avatar/hint placement.
+- AI instructions use measured wrapped text height. Action columns depend on localized label widths, preserving row-major keyboard traversal and at least 8 DIP below the 40-DIP closed combo field. The transcript retains usable height.
+- Full actual-EXE verifier passed all nine checks. Compact 1024x700 hosted navigation passed in zh-CN, en-US and zh-TW, each with three real local signaling participants. Added native control-boundary checks for call settings, meeting settings and AI. Screenshots reviewed in output/ui-compact-final (earlier language captures in output/ui-compact). EXE SHA-256: 7da902df8b3dfb0bf004be0c2b56e6a9c8bb8655b3677a48d0dc88c70ca968b8.
+- This does not establish physical multi-monitor/high-DPI behavior, smaller-than-minimum screen support, full Narrator/localization acceptance, or real-provider/physical-media acceptance. Keep on the development branch until whole-module acceptance.
+
+
+2026-10-10 focus and input-frame checkpoint:
+- Cancelling End or Remove now returns keyboard focus to the originating action rather than always jumping to Leave; unavailable targets fall back to Leave.
+- Hosted regression queries the actual client GUI thread focus. Closing while on Calls or AI reveals the meeting and focuses Cancel; cancellation retains all three members. Escape from End confirmation returns focus to End while retaining fullscreen.
+- Call/meeting text inputs and the AI transcript now share dark borders and a blue focused border while keeping native editing/selection/IME/scroll behavior. The subclass handles native EDIT client painting as well as non-client painting because Windows consumes the original WS_BORDER style. Actual focused captures in output/ui-focus-final confirm the frame is visible. Native overflow scrollbar styling and full IME/Narrator workflows are still pending.
+- Latest actual executable passed all nine verify_client.py checks. Compact zh-CN/en-US/zh-TW focus/navigation checks passed before the final paint-only correction; the full verifier and focused compact screenshots passed again after that correction. EXE SHA-256: 3155cb49aebc26f9ea6a38bfe60dfadee30ccd9dfb8e097636dd18df0ac79003. No physical multi-monitor or real-provider/media acceptance is implied.
+
+
+2026-10-10 native volume control checkpoint:
+- Native trackbar channel/thumb custom drawing now uses the shared dark/blue palette. The native trackbar still owns range, position, mouse/keyboard handling and accessibility.
+- Hosted regression verifies Right increments volume and Left restores it. All nine actual-EXE checks passed; the compact call capture in output/ui-slider-final confirms the blue level segment and dark remaining track render correctly. Physical drag and screen-reader workflows remain separate manual acceptance items.
+- Tested EXE SHA-256: 1e6d571bfb37cdbbd16a7c9e4abb3e0f36c40d6673e1a2c16259124261106e9e. Native overflow scrollbar styling, broader device/localization/accessibility and full UI acceptance remain open.
+
+
+2026-10-10 screen-sharing status localization:
+- Call-page screen-sharing startup and interruption failures now use system-language UI messages instead of raw English capture errors. Raw details remain in debug output. Remembering a startup failure also prevents the polling loop from replacing it immediately with an interruption message.
+- Actual client rebuilt and all nine verifier checks passed. Physical screen-capture failure/recovery was not injected in this run and remains a device acceptance item. EXE SHA-256: af75cc92a3eda107611bff27ec335394d1099747555d5f787761b499e52ed888.
+
+
+2026-10-11 transcript reading checkpoint:
+- Incoming captions now preserve the viewport after wheel scrolling up, even when the caret remains at the end. Selected text and its reading position survive updates. Returning to the tail resumes automatic following.
+- Corrected the former EM_SETSEL(-1,-1) assumption: that message deselects, rather than positioning the caret at the new end. The shared transcript helper now sets explicit end offsets and scrolls native lines; this also works while the AI workspace is hidden. Native regression verifies hidden-page updates and reveal without losing the newest captions.
+- Scrollbar visibility uses the EDIT formatting rectangle and actual font line height. Native tests cover overflow and replacement with short text. Scrollbar colors are unchanged and remain a separate visual item.
+- All ten actual-client verifier checks passed, including the new native transcript view regression, existing three-member navigation and DPI diagnostics. Algorithm-only independent review found no blocking issue; its filesystem review was unavailable. EXE SHA-256: d751019fd557463df569b58065263b4666a02ad5313f4c9590519e500a464cef.
+- This is a development checkpoint, not final UI or real-provider/media acceptance. Windows message semantics reference: https://learn.microsoft.com/en-us/windows/win32/controls/em-setsel .
+
+
+2026-10-11 AI workspace delivery checkpoint:
+- Added inline Session / History / Service settings tabs using existing dark controls, system-language labels and accessible field names. Settings has a masked key input and inline validation/save feedback. Tab order follows visible layout; closing and reopening the panel resets cached control state.
+- Explicit Save record persists available transcript and generated content. History has its own readonly view, keeps live session updates separate and normalizes display line endings without changing archive bytes. No extra top-level window is created.
+- All 13 actual-EXE verifier checks passed, including native encrypted settings, archive tests, C++/Python DPAPI interoperability, gateway config reload and hosted UI save/history assertions. Compact English 1024x700 navigation passed; latest default-size screenshots in output/ui-ai-workspace-20261011 include History and Service settings. Capture fixtures are synthetic and use isolated profiles, not user records/credentials.
+- Tested EXE SHA-256: d1f2da2980739dc5afa345ebcf55c48813441e2a380bb3259c90f6ddc0b47cf7. This is local implementation evidence, not real AI provider, physical multi-monitor/device or final visual acceptance. Scrollbar polish, complete localization/Narrator/IME and remaining module functions are still open.
+
+
+## Local AI service checks (2026-10-11)
+
+Service settings now offers an explicit asynchronous Check local service action: unavailable, configuration required, configuration ready, or incompatible response. Ready is not real-provider validation. Checks call only loopback, send no secrets/audio/transcript and do not call the provider. Editing/saving or closing invalidates old results; checks are disabled while dirty or a previous request drains. Redirects, duplicate/unknown protocol headers, invalid ports and non-200 responses cannot be reported ready. Older gateways need updating for the new GET /health protocol headers.
+
+All 15 actual-EXE checks passed, including native lifecycle, production-gateway HTTP integration, hosted settings/status and three-member navigation/DPI regressions. Compact English 1024x700 navigation/captures passed before the final display-only newline correction; the full verifier passed afterward. Live and archived AI output now normalize display line endings. EXE SHA-256: 810e8a24d846ace18926f56ff6abf9ea6a0f1911895bdb25befaa2ae8884ecd8. Real provider, physical media/TURN and final product/module acceptance remain pending.
+
+
+## Explicit archive deletion (2026-10-11)
+
+History now supports deleting the selected saved record through an inline confirmation. Cancel is focused by default; Escape, internal tab switches and leaving the AI workspace cancel pending deletion. Hidden/old confirmations cannot delete records. Only the selected saved file is removed; the active transcript and other call/meeting records are preserved. Deletion is permanent and the confirmation says so. The backend validates context/ID and deletes through a validated regular-file handle while holding ancestor directory locks. Missing/invalid records report localized errors.
+
+All 15 actual-EXE checks passed, including selected-file deletion, invalid/directory rejection, other-context preservation and hosted confirmation/cancellation tests. Compact English navigation passed; English and simplified Chinese 1024x700 captures in output/ui-archive-delete-20261011 were inspected. Independent scoped UI review found no blocking issue. EXE SHA-256: 11593f2a5b62c7a2eb91e3a4301367da4647d191e2d2489f816676e26c5b4a89. This does not establish final UI, real-provider or physical media acceptance.
+
+
+2026-10-11 archive timestamp localization: record labels now convert UTC identifiers to local time using Windows historical timezone rules and localized simplified/traditional Chinese or English time labels. IDs and newest-first UTC sorting are unchanged. Native tests cover midnight rollover, eastern/western offsets, locale labels and invalid date fallback. All 15 actual-client checks passed after the final change. EXE SHA-256: 99decf2680ec1dcd156795d667517a772ec7a3fe8c73723455a352674e4256c7.
+
+
+## Packaged local AI service (2026-10-12)
+
+Service settings now starts/stops the bundled loopback gateway without a terminal or machine-wide Python installation. Startup is asynchronous and bounded. The child runs hidden inside a kill-on-close Windows Job, survives page switches, and closes when its owning client exits. Cancellation, failed startup, early process exit and readiness timeout release owned processes. A compatible externally owned service is reported separately and never stopped by this client. Starting the service does not enable captions or upload audio; provider configuration readiness does not validate the real provider.
+
+The packaging script pins Python 3.14.8 x64, verifies the official archive SHA-256 and writes a distribution manifest while retaining the runtime license. The isolated embedded runtime imports gateway/provider modules from its adjacent bundle. First-time developer packaging requires explicit --download or a supplied archive; end users do not need Python.
+
+All 18 actual-EXE verifier checks passed, including native process ownership/hidden launch/cancellation/timeout/external-service tests and hosted UI start, stop, restart, page-switch retention and owner-exit cleanup against the packaged gateway. Compact English 1024x700 navigation passed; English and Chinese captures are in output/ui-ai-lifecycle-20261012. Tested EXE SHA-256: d31f8e795e138071b59864a85db4e92b998e902ff331ad67fe486ae75ddf2c11. No real provider, physical media/TURN or final module acceptance is implied.
+
+
+## Inline archive export (2026-10-12)
+
+History now exports the selected record as a byte-preserving Markdown file into an explicitly shown folder, with separate call/meeting subfolders. The UI shows a selectable result path without opening another window. Existing files are never replaced; the original archive and live session are unchanged. Native tests cover mixed-newline Unicode bytes, invalid paths/contexts, source preservation and duplicates. Hosted UI tests cover successful export, duplicate rejection, hidden-page actions and pending-deletion guards. All 18 actual-EXE checks passed. Compact English 1024x700 captures in output/ui-ai-export-20261012 were inspected. EXE SHA-256: 5a39c2b9137637142e962d938a8d9da7b6183fb844279350db6a036e3504b1ba. Windows symlink-fixture tests are skipped where the OS lacks symlink permission; do not claim those cases were exercised. Record search, network-folder responsiveness and final product acceptance remain open.
+
+
+2026-10-12 asynchronous export checkpoint: archive writes now run on a worker that owns only copied request data and shared result state, never window pointers. The UI polls results and disables repeat export/edit/delete during the operation; hidden pages retain the result and destroyed panels detach safely. All 18 actual-EXE checks passed after rebuilding. Real slow-network timing and provider/device acceptance remain separate. EXE SHA-256: 5bdf3d583869a9be9bbe8436ec9944787405777cb83f873c1cd0f14f7d3a260e.
+
+
+## Background archive search (2026-10-12)
+
+History searches localized dates and saved UTF-8 content case-insensitively, within the current call/meeting context. Search uses a background worker with cancellation and copied request state; no worker accesses window handles. A pending result remains busy until consumed by the UI, closing a reviewed race between result application and deletion confirmation. Search can survive page changes; Clear cancels/restores records and late canceled results cannot replace the cleared list. Enter searches outside IME composition; composition Enter is left to the input method. Empty results disable delete/export and do not show an old record.
+
+Search is bounded to the latest 1,000 records and a 32 MiB content-read budget; limits and unreadable records are visible, and partial results never imply a complete no-match search. Search preserves stored bytes and ordering. These limits are not unlimited archive indexing.
+
+All 19 actual-EXE verifier checks passed, including new native search Unicode/date/context/cancel/budget/invalid-file tests and actual hosted search, cancellation, page retention and input-method message regression. Compact English navigation passed; English/Chinese 1024x700 captures in output/ui-ai-search-20261012 were inspected. IME message tests do not replace physical typing/Narrator acceptance. EXE SHA-256: 6cf4a30d61c5dda3977cf8fc18e5f261854908efeb7a8f0b18672bdc6e31825b. Real provider/media/TURN, slow network timings and final UI/module acceptance remain open.
+# 2026-10-12 device status and History keyboard checkpoint
+
+Camera/microphone startup and device initialization failures now use localized, actionable UI messages. Raw capture errors remain in debugger output rather than being appended as English text to the Chinese interface. Capture behavior is unchanged; physical failure injection is still pending.
+
+All 19 actual-EXE verifier checks passed on SHA-256 `1bf4c92d4a81c22088c6637c41a382e1370cdb8881ead326a24bc3c34d52eafe`. A subsequent compact English (1024x700) navigation run also passed History forward/reverse Tab order and queued Enter/Escape through the production message loop, in addition to search, cancellation, export, inline deletion and retained three-participant navigation. Simulated composition messages do not replace physical IME or Narrator acceptance.
+
+
+## 2026-10-12 AI scrollbars and call-state localization
+
+AI session text and History now use a dark vertical track with a rounded thumb, hover/drag accents and arrow controls. The native EDIT retains its text, selection, wheel/keyboard handling, scroll range and accessibility object. Pointer tracking uses full line positions, avoiding 16-bit truncation on long records. Capture and repeat stop on release, cancel, hide, disable and destruction; high-contrast mode delegates bar rendering/interaction to Windows. This does not style the participant list or dropdown popup scrollbars.
+
+Focused native tests passed wheel reading/following, text selection, arrow and page clicks, dragging a 70,000-line record, held-arrow repeat, cancellation/hide and native range/visibility. The compact Chinese History capture at output/ui-scrollbar-20261012/zh-CN/assistant-history.bmp was visually inspected; track/thumb pixel colors also matched the dark palette. These tests send native input messages, not physical pointer/IME or Narrator acceptance. System high-contrast and physical multi-monitor transitions still need hands-on acceptance.
+
+Call status mapping now matches fixed messages exactly, preserves only participant-identity suffixes, differentiates local rejection from remote rejection, and explains busy/cancel/end/leave/reconnect failures. Chinese no longer appends English diagnostic suffixes to recognized statuses. Simplified/traditional Chinese mappings, UTF-8 identities, English passthrough and unknown-message fallback passed the locale regression.
+
+All 19 actual-EXE verifier checks passed after integration. EXE SHA-256: 9f50c35c39dc6908577b7b52e12187c3f39c7df9f3f2e86065cdef0ea051310b. No real provider/media/TURN acceptance or complete module acceptance is implied.
+
+
+## 2026-10-12 scrollbar lifecycle follow-up and participant list
+
+The dark scrollbar now also covers the meeting participant LISTBOX. It uses native row positions, preserving selected participants and arrow-key behavior. Dropdown popups remain native and are not included in this checkpoint.
+
+Independent review found two issues in the initial scrollbar checkpoint: synchronous scroll notifications could destroy the EDIT before its callback returned, and held thumb drags retained the original range while captions changed. Both are fixed. Callback guards defer state deletion until reentrant callbacks unwind; destroyed controls stop further work. Thumb movement reads the current range/geometry and cancels if the scrollbar disappears. The bounded second review reported no remaining concrete blockers.
+
+New native regression cases passed: parent destroys EDIT during EN_VSCROLL, held thumb sees appended text, shrinking text cancels capture, participant thumb/arrow scrolling preserves selection, and participant arrow-key navigation still works. The same test source was separately compiled with MSVC AddressSanitizer (/fsanitize=address) and passed with no sanitizer diagnostics; build/run logs are in output/scrollbar-sanitizer. This is additional memory-error checking, not a substitute for physical pointer/Narrator acceptance.
+
+All 19 actual-EXE checks passed after these fixes. English compact captures in output/ui-scrollbar-20261012/en-US were inspected. Current EXE SHA-256: 9f65283064b1bf5541f2c84d0a3b928f1ecc2f2a0778183c88e7de7ae050ed6d. Full physical DPI/IME/Narrator/high-contrast workflows, provider/media/TURN and final visual/module acceptance remain open.
+
+Reproducible memory check: the optional `luma_transcript_view_asan_tests` CMake target (EXCLUDE_FROM_ALL) now builds the same regression source with AddressSanitizer. Build it explicitly with `cmake --build build/d-drive --config Release --target luma_transcript_view_asan_tests`, then run its EXE from an x64 Visual Studio developer environment with the sanitizer runtime on PATH. The repository target was built and passed; logs are output/verify-scrollbar-asan-target.log and output/verify-scrollbar-asan-run.log. The production EXE is unchanged by this extra test target.

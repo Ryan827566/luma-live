@@ -1,0 +1,78 @@
+#include "MeetingMedia.hpp"
+#include "TcpSignalingServer.hpp"
+#include <array>
+#include <atomic>
+#include <cmath>
+#include <cstring>
+#include <iostream>
+#include <thread>
+#include <stdexcept>
+#include <objbase.h>
+using Media=luma::client::ui::preview::MeetingMedia;
+using Session=luma::client::ui::preview::MeetingSession;
+using namespace std::chrono_literals;
+void require(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
+int main(){CoInitializeEx(nullptr,COINIT_MULTITHREADED);int result=0;try{
+ luma::server::signaling::TcpSignalingServer server;unsigned short port=19600;while(port<19700&&!server.Start(port))++port;require(port<19700,"server start");
+ std::array<std::array<std::atomic<int>,3>,3> videos{},audio{};std::array<Media,3> clients;std::array<int,3> mixed{};
+ auto start=[&](int index,bool create){Media::Callbacks cb;cb.video=[&,index](const std::string& id,Media::Video frame){int from=id[0]-'a';if(from>=0&&from<3&&frame.width==160&&frame.height==120)++videos[index][from];};cb.audio=[&,index](const std::string& id,Media::Audio frame){int from=id[0]-'a';if(from<0||from>=3)return;for(size_t n=0;n+1<frame.data.size();n+=2){int16_t sample;std::memcpy(&sample,frame.data.data()+n,2);if(std::abs(int(sample))>100){++audio[index][from];break;}}};return clients[index].Start("127.0.0.1",port,"media-test",std::string(1,char('a'+index)),create,cb,{});};
+ require(start(0,true),"host start");auto deadline=std::chrono::steady_clock::now()+3s;while(!clients[0].Session().IsHost()&&std::chrono::steady_clock::now()<deadline){clients[0].Poll();std::this_thread::sleep_for(5ms);}require(clients[0].Session().IsHost(),"host registration");require(start(1,false)&&start(2,false),"join peers");
+ Media::Video frame;frame.width=160;frame.height=120;frame.format=luma::client::media::pipeline::PixelFormat::I420;frame.data.resize(28800,128);
+ Media::Audio pcm;pcm.sample_rate=48000;pcm.channels=1;pcm.format=luma::client::media::pipeline::AudioSampleFormat::S16;pcm.data.resize(960);
+ std::array<std::string,3> sources{"camera","camera","camera"};std::array<bool,3> microphones{true,true,true};
+ bool injectedFailure=false;int tick=0;auto pump=[&]{for(int i=0;i<3;++i){clients[i].Poll();if(!injectedFailure)require(clients[i].Error().empty(),clients[i].Error().c_str());if(clients[i].Session().GetState()==Session::State::Joined){clients[i].SetVideo(sources[i]);clients[i].SetMicrophone(microphones[i]);frame.timestamp_us=std::uint64_t(tick)*10000;std::fill(frame.data.begin(),frame.data.begin()+19200,static_cast<unsigned char>(40+i*60));if(tick%3==0)clients[i].VideoFrame(frame);for(int n=0;n<480;++n){int16_t sample=static_cast<int16_t>(std::sin((tick*480+n)*(421.+i*313)*6.283185307/48000)*12000);std::memcpy(pcm.data.data()+n*2,&sample,2);}clients[i].AudioFrame(pcm);auto output=clients[i].MixAudio();for(size_t n=0;n+1<output.data.size();n+=2){int16_t value;std::memcpy(&value,output.data.data()+n,2);if(std::abs(int(value))>100){++mixed[i];break;}}}}++tick;std::this_thread::sleep_for(10ms);};
+ auto complete=[&]{for(int to=0;to<3;++to)for(int from=0;from<3;++from)if(to!=from&&(videos[to][from]<5||audio[to][from]<8))return false;return true;};
+ deadline=std::chrono::steady_clock::now()+20s;while(!complete()&&std::chrono::steady_clock::now()<deadline)pump();
+ for(int to=0;to<3;++to)for(int from=0;from<3;++from)if(to!=from)std::cout<<from<<"->"<<to<<" video="<<videos[to][from]<<" audible="<<audio[to][from]<<'\n';require(complete(),"Not all six directed media paths decoded");for(auto blocks:mixed)require(blocks>0,"Decoded audio did not reach meeting mixer");
+ for(int to=0;to<3;++to)for(int from=0;from<3;++from)if(to!=from)require(clients[to].PeerState(std::string(1,char('a'+from)))=="connected","decoded peer is not connected");
+ require(clients[0].PeerState("unknown")=="absent","unknown peer state");
+ // Both negotiation roles can rebuild one link; the third participant must keep streaming.
+ const auto epoch=clients[0].Session().Epoch();
+ auto reconnect=[&](int requester,const char* peer){
+  const int v01=videos[0][1],v10=videos[1][0],a01=audio[0][1],a10=audio[1][0],v02=videos[0][2];
+  require(clients[requester].Reconnect(peer),"reconnect rejected");
+  deadline=std::chrono::steady_clock::now()+12s;
+  while((videos[0][1]<v01+5||videos[1][0]<v10+5||audio[0][1]<a01+8||audio[1][0]<a10+8||clients[0].PeerState("b")!="connected"||clients[1].PeerState("a")!="connected")&&std::chrono::steady_clock::now()<deadline)pump();
+  require(videos[0][1]>=v01+5&&videos[1][0]>=v10+5&&audio[0][1]>=a01+8&&audio[1][0]>=a10+8,"bidirectional media did not resume after reconnect");
+  require(clients[0].PeerState("b")=="connected"&&clients[1].PeerState("a")=="connected","reconnect transport state");
+  require(videos[0][2]>v02&&clients[0].Session().Epoch()==epoch&&clients[0].Session().Members().size()==3,"reconnect disrupted meeting");
+ };
+ reconnect(0,"b");reconnect(1,"a");
+ for(int failed:{0,1}){
+  const int oldV01=videos[0][1],oldV10=videos[1][0],oldA01=audio[0][1],oldA10=audio[1][0],third=videos[2][0];
+  injectedFailure=true;clients[failed].FailPeerForTest(failed==0?"b":"a");pump();
+  require(clients[failed].PeerState(failed==0?"b":"a")=="failed","fault did not close transport");
+  deadline=std::chrono::steady_clock::now()+12s;
+  auto recovered=[&]{return clients[0].PeerState("b")=="connected"&&clients[1].PeerState("a")=="connected"&&videos[0][1]>=oldV01+5&&videos[1][0]>=oldV10+5&&audio[0][1]>=oldA01+8&&audio[1][0]>=oldA10+8;};
+  while(!recovered()&&std::chrono::steady_clock::now()<deadline)pump();
+  require(recovered(),"automatic recovery did not restore bidirectional decoded media");
+  require(videos[2][0]>third&&clients[0].Session().Epoch()==epoch,"automatic recovery disrupted meeting");
+  for(auto& client:clients)require(client.Error().empty(),"recovery left error");injectedFailure=false;
+ }
+ require(!clients[0].Reconnect("missing")&&!clients[0].Reconnect("a"),"invalid reconnect accepted");
+ // Continue submitting capture frames while controls are OFF: the media
+ // layer itself must enforce privacy, not rely on capture stopping promptly.
+ sources[1]="off";microphones[1]=false;
+ for(int n=0;n<40;++n)pump();
+ require(clients[0].Session().Members().at("b").video=="off"&&!clients[2].Session().Members().at("b").microphone,"off state did not reach peers");
+ int mutedVideo=videos[0][1]+videos[2][1],mutedAudio=audio[0][1]+audio[2][1];
+ for(int n=0;n<30;++n)pump();
+ require(mutedVideo==videos[0][1]+videos[2][1]&&mutedAudio==audio[0][1]+audio[2][1],"disabled participant media leaked");
+ sources[1]="screen";microphones[1]=true;
+ deadline=std::chrono::steady_clock::now()+8s;
+ while((videos[0][1]+videos[2][1]<mutedVideo+10||audio[0][1]+audio[2][1]<mutedAudio+16)&&std::chrono::steady_clock::now()<deadline)pump();
+ require(videos[0][1]+videos[2][1]>=mutedVideo+10&&audio[0][1]+audio[2][1]>=mutedAudio+16,"media did not resume after source change");
+ require(clients[2].Session().Members().at("b").video=="screen","screen source state missing");
+ sources[1]="camera";
+ require(clients[0].Session().Remove("b"),"remove member");deadline=std::chrono::steady_clock::now()+3s;while(clients[1].Session().GetState()!=Session::State::Removed&&std::chrono::steady_clock::now()<deadline)pump();require(clients[1].Session().GetState()==Session::State::Removed,"member was not removed");
+ int before=videos[1][0]+videos[1][2]+audio[1][0]+audio[1][2];for(int n=0;n<20;++n)pump();require(before==videos[1][0]+videos[1][2]+audio[1][0]+audio[1][2],"removed client still received media");
+ // Keep c paused while b joins, negotiates, leaves and rejoins with the same ID.
+ // Its next Poll must discard SDP queued for the previous membership instance.
+ auto pollWithoutC=[&]{for(int n=0;n<100;++n){clients[0].Poll();clients[1].Poll();std::this_thread::sleep_for(10ms);}};
+ require(start(1,false),"first rejoin");pollWithoutC();require(clients[1].Session().GetState()==Session::State::Joined,"first rejoin registration");
+ clients[1].Leave();deadline=std::chrono::steady_clock::now()+3s;while(clients[0].Session().Members().count("b")&&std::chrono::steady_clock::now()<deadline){clients[0].Poll();std::this_thread::sleep_for(5ms);}require(!clients[0].Session().Members().count("b"),"host did not observe leave");require(start(1,false),"second rejoin");pollWithoutC();require(clients[1].Session().GetState()==Session::State::Joined,"second rejoin registration");
+ int oldVideo=videos[2][1],oldAudio=audio[2][1];deadline=std::chrono::steady_clock::now()+15s;
+ while((videos[2][1]<oldVideo+5||audio[2][1]<oldAudio+8)&&std::chrono::steady_clock::now()<deadline)pump();
+ require(videos[2][1]>=oldVideo+5&&audio[2][1]>=oldAudio+8,"same-ID rejoin media failed after queued old offer");
+ require(clients[0].Session().End(),"end meeting");deadline=std::chrono::steady_clock::now()+3s;while(clients[2].Session().GetState()!=Session::State::Ended&&std::chrono::steady_clock::now()<deadline)pump();require(clients[2].Session().GetState()==Session::State::Ended,"meeting did not end");for(auto& client:clients){client.Leave();require(client.PeerState("b")=="absent","leave retained peer state");}server.Stop();std::cout<<"PASS: three-client decoded video/audio mesh, mute/source controls, removal, same-ID rejoin and meeting end\n";
+}catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';result=1;}CoUninitialize();return result;}

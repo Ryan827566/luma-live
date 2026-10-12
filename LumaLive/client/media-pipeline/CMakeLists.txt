@@ -17,3 +17,8 @@ add_executable(luma_device_capture_tests tests/DeviceCaptureServiceTests.cpp)
 target_link_libraries(luma_device_capture_tests PRIVATE luma_client_media_pipeline)
 target_compile_features(luma_device_capture_tests PRIVATE cxx_std_20)
 add_test(NAME luma_device_capture_tests COMMAND luma_device_capture_tests)
+
+if(WIN32)
+  add_executable(luma_camera_probe tests/CameraProbe.cpp)
+  target_link_libraries(luma_camera_probe PRIVATE luma_client_media_pipeline ole32)
+endif()

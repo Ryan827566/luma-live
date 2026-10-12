@@ -19,6 +19,7 @@ int main() {
     auto post = [&](std::function<void()> event) { std::lock_guard lock(mutex); events.push_back(std::move(event)); };
     auto a = NativeWebRtcPeerConnection::Create(), b = NativeWebRtcPeerConnection::Create();
     std::atomic<int> videos{0}, audible{0};
+    std::atomic<bool> stats_received{false};
     bool aRemote = false, bRemote = false;
     std::deque<std::function<void()>> aIce, bIce;
     WebRtcCallbacks ac, bc;
@@ -38,14 +39,23 @@ int main() {
     std::fill(video.data.begin(),video.data.begin()+19200,90);
     AudioFrame audio;audio.sample_rate=48000;audio.channels=1;audio.format=AudioSampleFormat::S16;audio.data.resize(960);
     const auto start=steady_clock::now();int tick=0;
-    while(steady_clock::now()-start<seconds(12) && (videos<5||audible<5)) {
+    while(steady_clock::now()-start<seconds(12) && (videos<5||audible<5||!stats_received)) {
         std::deque<std::function<void()>> ready; {std::lock_guard lock(mutex);ready.swap(events);} for(auto& event:ready) event();
         for(int i=0;i<480;++i){int16_t sample=static_cast<int16_t>(std::sin((tick*480+i)*6.283185307179586*440/48000)*12000);std::memcpy(audio.data.data()+i*2,&sample,2);}
         if(!a->AddAudioFrame(audio)){std::cerr<<"PCM rejected\n";return 2;}
         if(tick%3==0){video.timestamp_us=duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count();if(!a->AddVideoFrame(video)){std::cerr<<"Video rejected\n";return 3;}}
+        if (tick % 50 == 0 && bRemote) {
+            b->GetNetworkStats([&](WebRtcNetworkStats stats) {
+                if (stats.report_ready && stats.inbound_ready && stats.jitter_ready &&
+                    stats.packets_received > 0 && !stats.selected_candidate_pair_id.empty() &&
+                    stats.packet_loss_percent >= 0 && stats.packet_loss_percent <= 100)
+                    stats_received = true;
+            });
+        }
         ++tick;std::this_thread::sleep_for(milliseconds(10));
     }
     a->Close();b->Close();
     std::cout<<"Decoded video frames: "<<videos<<", audible PCM blocks: "<<audible<<'\n';
-    return videos>=5&&audible>=5 ? 0 : 4;
+    std::cout << "Network stats delivered: " << stats_received << '\n';
+    return videos>=5&&audible>=5&&stats_received ? 0 : 4;
 }

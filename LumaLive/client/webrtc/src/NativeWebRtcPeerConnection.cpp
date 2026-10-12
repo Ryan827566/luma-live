@@ -18,6 +18,11 @@
 #include "api/video/video_frame.h"
 #include "api/video/video_sink_interface.h"
 #include "api/jsep.h"
+#include "api/stats/rtc_stats_collector_callback.h"
+#include "api/stats/rtc_stats_report.h"
+#include <algorithm>
+#include <cmath>
+#include <optional>
 #include "absl/types/optional.h"
 #include "media/base/video_broadcaster.h"
 #include "rtc_base/thread.h"
@@ -51,6 +56,76 @@ public:
     std::unique_ptr<::webrtc::VideoDecoder> CreateVideoDecoder(const ::webrtc::SdpVideoFormat& format) override {
         return format.name == "VP8" ? ::webrtc::VP8Decoder::Create() : nullptr;
     }
+};
+
+// Read through the SDK's member interface instead of assuming the binary
+// layout of RTCInboundRtpStreamStats matches this bundle's public headers.
+std::optional<std::string> StatValue(const ::webrtc::RTCStats& stat, const char* name) {
+    for (const auto* member : stat.Members()) {
+        if (member->is_defined() && std::strcmp(member->name(), name) == 0)
+            return member->ValueToString();
+    }
+    return std::nullopt;
+}
+std::optional<double> StatNumber(const ::webrtc::RTCStats& stat, const char* name) {
+    auto value = StatValue(stat, name);
+    if (!value) return std::nullopt;
+    try {
+        size_t used = 0;
+        const double number = std::stod(*value, &used);
+        if (used == value->size() && std::isfinite(number)) return number;
+    } catch (const std::exception&) {}
+    return std::nullopt;
+}
+class NetworkStatsObserver : public ::webrtc::RTCStatsCollectorCallback {
+public:
+    NetworkStatsObserver(std::shared_ptr<std::atomic<bool>> active,
+                         std::function<void(WebRtcNetworkStats)> callback)
+        : active_(std::move(active)), callback_(std::move(callback)) {}
+    void OnStatsDelivered(const ::rtc::scoped_refptr<const ::webrtc::RTCStatsReport>& report) override {
+        if (!active_->load()) return;
+        WebRtcNetworkStats result;
+        if (report) {
+            result.report_ready = true;
+            // Only a transport's selected pair is authoritative. A merely
+            // succeeded/nominated candidate may be a previous ICE route.
+            for (const auto& stat : *report) {
+                if (std::strcmp(stat.type(), "transport") != 0) continue;
+                auto id = StatValue(stat, "selectedCandidatePairId");
+                if (!id) continue;
+                const auto* pair = report->Get(*id);
+                if (!pair || std::strcmp(pair->type(), "candidate-pair") != 0) continue;
+                result.selected_candidate_pair_id = *id;
+                if (auto rtt = StatNumber(*pair, "currentRoundTripTime"); rtt && *rtt >= 0) {
+                    result.round_trip_time_ms = std::max(result.round_trip_time_ms, *rtt * 1000);
+                    result.rtt_ready = true;
+                }
+            }
+            double positive_lost = 0;
+            for (const auto& stat : *report) {
+                if (std::strcmp(stat.type(), "inbound-rtp") != 0) continue;
+                const auto received = StatNumber(stat, "packetsReceived");
+                const auto lost = StatNumber(stat, "packetsLost");
+                if (received && lost && *received >= 0 && *received < 9e18 && std::abs(*lost) < 9e18) {
+                    result.inbound_ready = true;
+                    result.packets_received += static_cast<std::uint64_t>(*received);
+                    result.packets_lost += static_cast<std::int64_t>(*lost);
+                    positive_lost += std::max(0.0, *lost);
+                }
+                if (auto jitter = StatNumber(stat, "jitter"); jitter && *jitter >= 0) {
+                    result.jitter_ms = std::max(result.jitter_ms, *jitter * 1000);
+                    result.jitter_ready = true;
+                }
+            }
+            const double expected = static_cast<double>(result.packets_received) + positive_lost;
+            if (expected > 0) result.packet_loss_percent = positive_lost * 100 / expected;
+            else result.inbound_ready = false;
+        }
+        if (active_->load()) callback_(std::move(result));
+    }
+private:
+    std::shared_ptr<std::atomic<bool>> active_;
+    std::function<void(WebRtcNetworkStats)> callback_;
 };
 
 class LocalVideoSource : public ::webrtc::Notifier<::webrtc::VideoTrackSourceInterface> {
@@ -123,6 +198,18 @@ public:
     explicit PcObserver(WebRtcCallbacks& cb):cb_(cb){}
     void OnSignalingChange(::webrtc::PeerConnectionInterface::SignalingState) override {}
     void OnDataChannel(::rtc::scoped_refptr<::webrtc::DataChannelInterface>) override {}
+    void OnIceConnectionChange(::webrtc::PeerConnectionInterface::IceConnectionState state) override {
+        if (!cb_.on_connection_state) return;
+        using Pc = ::webrtc::PeerConnectionInterface;
+        switch (state) {
+        case Pc::kIceConnectionChecking: cb_.on_connection_state("connecting"); break;
+        case Pc::kIceConnectionConnected:
+        case Pc::kIceConnectionCompleted: cb_.on_connection_state("connected"); break;
+        case Pc::kIceConnectionDisconnected: cb_.on_connection_state("disconnected"); break;
+        case Pc::kIceConnectionFailed: cb_.on_connection_state("failed"); break;
+        default: break;
+        }
+    }
     void OnIceGatheringChange(::webrtc::PeerConnectionInterface::IceGatheringState) override {}
     void OnConnectionChange(::webrtc::PeerConnectionInterface::PeerConnectionState state) override { if(cb_.on_connection_state) cb_.on_connection_state(std::string(::webrtc::PeerConnectionInterface::AsString(state))); }
     void OnIceCandidate(const ::webrtc::IceCandidateInterface* c) override { if(cb_.on_local_ice_candidate && c){ std::string s; if(!c->ToString(&s)) return; cb_.on_local_ice_candidate(c->sdp_mid(), c->sdp_mline_index(), s); } }
@@ -166,6 +253,7 @@ struct NativeWebRtcPeerConnection::Impl {
     // Own Winsock until all transport threads and connections are destroyed.
     ::rtc::WinsockInitializer winsock;
     WebRtcCallbacks cb;
+    std::shared_ptr<std::atomic<bool>> stats_active = std::make_shared<std::atomic<bool>>(false);
     std::unique_ptr<::rtc::Thread> network_thread;
     std::unique_ptr<::rtc::Thread> worker_thread;
     std::unique_ptr<::rtc::Thread> signaling_thread;
@@ -219,6 +307,7 @@ bool NativeWebRtcPeerConnection::Initialize(const luma::contracts::PeerConnectio
        !pc->AddTrack(at,{"luma-stream"}).ok()) return false;
 
     impl_->pc=std::move(pc);
+    impl_->stats_active=std::make_shared<std::atomic<bool>>(true);
     impl_->video_source=std::move(video_source);
     impl_->audio_source=std::move(audio_source);
     return true;
@@ -234,7 +323,7 @@ bool NativeWebRtcPeerConnection::AddVideoFrame(const luma::client::media::pipeli
 bool NativeWebRtcPeerConnection::AddAudioFrame(const luma::client::media::pipeline::AudioFrame& f){
     return impl_->audio_device && impl_->audio_device->Push(f);
 }
-bool NativeWebRtcPeerConnection::CreateOffer(){
+bool NativeWebRtcPeerConnection::CreateOffer(bool ice_restart){
     if(!impl_->pc) return false;
     auto weak=weak_from_this();
     auto* obs = new ::rtc::RefCountedObject<DescriptionObserver>(
@@ -253,7 +342,9 @@ bool NativeWebRtcPeerConnection::CreateOffer(){
                     d);
             },
             [weak](const std::string& error){if(auto self=weak.lock())if(self->impl_->cb.on_connection_state)self->impl_->cb.on_connection_state("error: "+error);});
-    impl_->pc->CreateOffer(obs,::webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
+    ::webrtc::PeerConnectionInterface::RTCOfferAnswerOptions options;
+    options.ice_restart = ice_restart;
+    impl_->pc->CreateOffer(obs, options);
     return true;
 }
 
@@ -305,11 +396,18 @@ bool NativeWebRtcPeerConnection::SetRemoteDescription(
 }
 
 bool NativeWebRtcPeerConnection::AddRemoteIceCandidate(const std::string&mid,int mline,const std::string&candidate){if(!impl_->pc)return false;::webrtc::SdpParseError e;std::unique_ptr<::webrtc::IceCandidateInterface> c(::webrtc::CreateIceCandidate(mid,mline,candidate,&e));return c&&impl_->pc->AddIceCandidate(c.get());}
-void NativeWebRtcPeerConnection::Close(){if(impl_&&impl_->pc){impl_->pc->Close();impl_->pc=nullptr;}if(impl_){if(impl_->audio_device)impl_->audio_device->Terminate();impl_->factory=nullptr;impl_->audio_device=nullptr;impl_->video_source=nullptr;impl_->audio_source=nullptr;impl_->observer.reset();if(impl_->signaling_thread){impl_->signaling_thread->Stop();impl_->signaling_thread.reset();}if(impl_->worker_thread){impl_->worker_thread->Stop();impl_->worker_thread.reset();}if(impl_->network_thread){impl_->network_thread->Stop();impl_->network_thread.reset();}}}
+bool NativeWebRtcPeerConnection::GetNetworkStats(std::function<void(WebRtcNetworkStats)> callback) {
+    if (!impl_->pc || !callback) return false;
+    ::rtc::scoped_refptr<NetworkStatsObserver> observer(
+        new ::rtc::RefCountedObject<NetworkStatsObserver>(impl_->stats_active, std::move(callback)));
+    impl_->pc->GetStats(observer.get());
+    return true;
+}
+void NativeWebRtcPeerConnection::Close(){if(impl_)impl_->stats_active->store(false);if(impl_&&impl_->pc){impl_->pc->Close();impl_->pc=nullptr;}if(impl_){if(impl_->audio_device)impl_->audio_device->Terminate();impl_->factory=nullptr;impl_->audio_device=nullptr;impl_->video_source=nullptr;impl_->audio_source=nullptr;impl_->observer.reset();if(impl_->signaling_thread){impl_->signaling_thread->Stop();impl_->signaling_thread.reset();}if(impl_->worker_thread){impl_->worker_thread->Stop();impl_->worker_thread.reset();}if(impl_->network_thread){impl_->network_thread->Stop();impl_->network_thread.reset();}}}
 bool NativeWebRtcPeerConnection::IsInitialized()const noexcept{return impl_&&impl_->pc!=nullptr;}
 }
 #else
-namespace luma::client::webrtc { struct NativeWebRtcPeerConnection::Impl{}; std::shared_ptr<NativeWebRtcPeerConnection> NativeWebRtcPeerConnection::Create() { return std::shared_ptr<NativeWebRtcPeerConnection>(new NativeWebRtcPeerConnection()); } NativeWebRtcPeerConnection::NativeWebRtcPeerConnection():impl_(std::make_unique<Impl>()){} NativeWebRtcPeerConnection::~NativeWebRtcPeerConnection()=default; bool NativeWebRtcPeerConnection::Initialize(const luma::contracts::PeerConnectionConfig&,WebRtcCallbacks){return false;} bool NativeWebRtcPeerConnection::AddVideoFrame(const luma::client::media::pipeline::VideoFrame&){return false;} bool NativeWebRtcPeerConnection::AddAudioFrame(const luma::client::media::pipeline::AudioFrame&){return false;} bool NativeWebRtcPeerConnection::CreateOffer(){return false;} bool NativeWebRtcPeerConnection::CreateAnswer(){return false;} bool NativeWebRtcPeerConnection::SetRemoteDescription(const std::string&,const std::string&){return false;} bool NativeWebRtcPeerConnection::AddRemoteIceCandidate(const std::string&,int,const std::string&){return false;} void NativeWebRtcPeerConnection::Close(){} bool NativeWebRtcPeerConnection::IsInitialized()const noexcept{return false;} }
+namespace luma::client::webrtc { struct NativeWebRtcPeerConnection::Impl{}; std::shared_ptr<NativeWebRtcPeerConnection> NativeWebRtcPeerConnection::Create() { return std::shared_ptr<NativeWebRtcPeerConnection>(new NativeWebRtcPeerConnection()); } NativeWebRtcPeerConnection::NativeWebRtcPeerConnection():impl_(std::make_unique<Impl>()){} NativeWebRtcPeerConnection::~NativeWebRtcPeerConnection()=default; bool NativeWebRtcPeerConnection::Initialize(const luma::contracts::PeerConnectionConfig&,WebRtcCallbacks){return false;} bool NativeWebRtcPeerConnection::AddVideoFrame(const luma::client::media::pipeline::VideoFrame&){return false;} bool NativeWebRtcPeerConnection::AddAudioFrame(const luma::client::media::pipeline::AudioFrame&){return false;} bool NativeWebRtcPeerConnection::CreateOffer(bool ice_restart){return false;} bool NativeWebRtcPeerConnection::CreateAnswer(){return false;} bool NativeWebRtcPeerConnection::SetRemoteDescription(const std::string&,const std::string&){return false;} bool NativeWebRtcPeerConnection::AddRemoteIceCandidate(const std::string&,int,const std::string&){return false;} bool NativeWebRtcPeerConnection::GetNetworkStats(std::function<void(WebRtcNetworkStats)>){return false;} void NativeWebRtcPeerConnection::Close(){} bool NativeWebRtcPeerConnection::IsInitialized()const noexcept{return false;} }
 #endif
 
 

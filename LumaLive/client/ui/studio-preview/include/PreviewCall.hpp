@@ -23,6 +23,7 @@ class PreviewCall {
         contracts::SignalingMessage signal;
         std::string type, text;
         std::uint64_t generation{};
+        webrtc::WebRtcNetworkStats stats{};
     };
     std::mutex mutex_, mediaMutex_;
     std::deque<Event> events_;
@@ -31,6 +32,13 @@ class PreviewCall {
     webrtc::WebRtcCallbacks callbacks_;
     contracts::PeerConnectionConfig config_;
     std::string room_, peer_, remote_, status_;
+    std::string localVideoSource_{"off"}, remoteVideoSource_{"off"};
+    std::atomic<bool> localVideoEnabled_{false}, remoteVideoEnabled_{false};
+    std::atomic<std::uint64_t> negotiation_{0}, receivedFrames_{0};
+    std::uint64_t restartFrameBaseline_{0};
+    bool negotiating_{false}, awaitingAnswer_{false}, reconnectRequested_{false};
+    webrtc::WebRtcNetworkStats stats_{};
+    Clock::time_point lastStats_{};
     std::vector<std::string> participants_;
     std::deque<std::pair<std::string, std::int64_t>> seenInvites_;
     std::vector<contracts::SignalingMessage> pendingIce_;
@@ -56,6 +64,24 @@ class PreviewCall {
         m.type = type; m.target_peer_id = remote_; m.sequence = callId_;
         return Send(std::move(m));
     }
+    bool SendVideoSource() {
+        contracts::SignalingMessage m;
+        m.type = T::CallMediaState; m.target_peer_id = remote_;
+        m.sequence = callId_; m.value = localVideoSource_;
+        return Send(std::move(m));
+    }
+    static bool Revision(const std::string& text, std::uint64_t& value) {
+        try {
+            std::size_t used = 0;
+            value = std::stoull(text, &used);
+            return used == text.size() && value > 0 && !text.empty() && text[0] != '-';
+        } catch (...) { return false; }
+    }
+    void Connected() {
+        state_ = CallState::Connected; reconnectRequested_ = false;
+        if (started_ == Clock::time_point{}) started_ = Clock::now();
+        status_ = "Connected to " + remote_;
+    }
     void CloseMedia() {
         mediaReady_ = false;
         ++generation_;
@@ -63,10 +89,13 @@ class PreviewCall {
         if (rtc_) rtc_->Close();
         rtc_.reset();
         pendingIce_.clear(); remoteSet_ = false; answerPending_ = false;
+        negotiating_ = false; awaitingAnswer_ = false; reconnectRequested_ = false;
+        negotiation_ = 0; receivedFrames_ = 0; stats_ = {}; lastStats_ = {};
     }
     void End(const std::string& reason) {
         CloseMedia();
         remote_.clear(); callId_ = 0; started_ = {}; caller_ = false;
+        remoteVideoSource_ = "off"; remoteVideoEnabled_ = false;
         state_ = accepting_ && signaling_.IsConnected() ? CallState::Ready : CallState::Offline;
         status_ = reason;
     }
@@ -75,23 +104,31 @@ class PreviewCall {
         const auto generation = generation_.load();
         auto cb = callbacks_;
         cb.on_local_description = [this, generation](const auto& type, const auto& sdp) {
-            Queue({1, {}, type, sdp, generation});
+            contracts::SignalingMessage m; m.value = std::to_string(negotiation_.load());
+            Queue({1, std::move(m), type, sdp, generation});
         };
         cb.on_local_ice_candidate = [this, generation](const auto& mid, int line, const auto& candidate) {
             contracts::SignalingMessage m;
             m.type = T::IceCandidate; m.candidate_mid = mid;
             m.value = std::to_string(line); m.candidate = candidate;
+            m.sdp = std::to_string(negotiation_.load());
             Queue({2, std::move(m), {}, {}, generation});
         };
         cb.on_remote_description_set = [this, generation] { Queue({3, {}, {}, {}, generation}); };
         cb.on_connection_state = [this, generation](const auto& state) { Queue({4, {}, {}, state, generation}); };
         auto video = cb.on_remote_video;
         cb.on_remote_video = [this, generation, video](auto frame) {
-            if (generation == generation_.load() && mediaReady_ && video) video(std::move(frame));
+            if (generation == generation_.load() && mediaReady_ && remoteVideoEnabled_) {
+                ++receivedFrames_;
+                if (video) video(std::move(frame));
+            }
         };
         auto audio = cb.on_remote_audio;
         cb.on_remote_audio = [this, generation, audio](auto frame) {
-            if (generation == generation_.load() && mediaReady_ && audio) audio(std::move(frame));
+            if (generation == generation_.load() && mediaReady_) {
+                ++receivedFrames_;
+                if (audio) audio(std::move(frame));
+            }
         };
         std::lock_guard lock(mediaMutex_);
         rtc_ = webrtc::NativeWebRtcPeerConnection::Create();
@@ -119,6 +156,33 @@ public:
     const std::vector<std::string>& Participants() const { return participants_; }
     const std::string& Remote() const { return remote_; }
     const std::string& LastStatus() const { return status_; }
+    const std::string& RemoteVideoSource() const { return remoteVideoSource_; }
+    const webrtc::WebRtcNetworkStats& NetworkStats() const { return stats_; }
+    bool SetVideoSource(const std::string& source) {
+        if (source != "off" && source != "camera" && source != "screen") return false;
+        localVideoSource_ = source; localVideoEnabled_ = source != "off";
+        if (rtc_ && (state_ == CallState::Connected || state_ == CallState::Connecting))
+            return SendVideoSource();
+        return true;
+    }
+    bool Reconnect() {
+        // Only a call that already connected may restart ICE. Pending invites
+        // cannot use this path to bypass the other participant's consent.
+        if (!rtc_ || started_ == Clock::time_point{} || negotiating_ || reconnectRequested_ ||
+            (state_ != CallState::Connected && state_ != CallState::Connecting)) return false;
+        state_ = CallState::Connecting; deadline_ = Clock::now() + timeout_;
+        restartFrameBaseline_ = receivedFrames_.load();
+        if (!caller_) {
+            reconnectRequested_ = true; status_ = "Requesting connection recovery";
+            if (!SendCall(T::CallReconnect)) { End("Unable to request reconnect"); return false; }
+            return true;
+        }
+        ++negotiation_; remoteSet_ = false; pendingIce_.clear();
+        negotiating_ = true; awaitingAnswer_ = true;
+        status_ = "Reconnecting media";
+        if (!rtc_->CreateOffer(true)) { Fail("Unable to restart connection"); return false; }
+        return true;
+    }
     std::int64_t DurationSeconds() const {
         return started_ == Clock::time_point{} ? 0 :
             std::chrono::duration_cast<std::chrono::seconds>(Clock::now() - started_).count();
@@ -174,7 +238,7 @@ public:
         if (!OpenMedia()) { Fail("Media initialization failed"); return false; }
         state_ = CallState::Connecting; deadline_ = Clock::now() + timeout_;
         status_ = "Connecting to " + remote_;
-        if (!SendCall(T::CallAccept)) { End("Unable to accept invitation"); return false; }
+        if (!SendCall(T::CallAccept) || !SendVideoSource()) { End("Unable to accept invitation"); return false; }
         return true;
     }
     bool Reject() {
@@ -189,7 +253,7 @@ public:
     }
     void Video(const media::pipeline::VideoFrame& frame) {
         std::lock_guard lock(mediaMutex_);
-        if (rtc_ && mediaReady_) rtc_->AddVideoFrame(frame);
+        if (rtc_ && mediaReady_ && localVideoEnabled_) rtc_->AddVideoFrame(frame);
     }
     void Audio(const media::pipeline::AudioFrame& frame) {
         std::lock_guard lock(mediaMutex_);
@@ -204,25 +268,30 @@ public:
                 if (e.generation != generation_ || !rtc_ || remote_.empty()) continue;
                 if (e.kind == 4) {
                     if (e.text == "connected") {
-                        state_ = CallState::Connected;
-                        if (started_ == Clock::time_point{}) started_ = Clock::now();
-                        status_ = "Connected to " + remote_;
+                        if (!negotiating_ && !reconnectRequested_) Connected();
                     } else if (e.text == "disconnected") {
                         state_ = CallState::Connecting; deadline_ = Clock::now() + timeout_;
                         status_ = "Connection interrupted; attempting recovery";
+                    } else if (e.text == "failed" && started_ != Clock::time_point{}) {
+                        state_ = CallState::Connecting; deadline_ = Clock::now() + timeout_;
+                        status_ = "Connection failed; reconnect or end the call";
                     } else if (e.text == "failed" || e.text == "closed" ||
                                e.text.find("error") != std::string::npos) Fail("Media connection failed: " + e.text);
                     continue;
                 }
+                if (e.kind == 5) { stats_ = e.stats; continue; }
                 if (e.kind == 1 || e.kind == 2) {
                     auto m = e.signal;
                     if (e.kind == 1) { m.type = e.type == "offer" ? T::Offer : T::Answer; m.sdp = e.text; }
                     m.target_peer_id = remote_; m.sequence = callId_;
-                    if (!Send(std::move(m))) End("Signaling send failed");
+                    const bool answered = e.kind == 1 && e.type == "answer";
+                    if (!Send(std::move(m))) { End("Signaling send failed"); continue; }
+                    if (answered) negotiating_ = false;
                     continue;
                 }
                 if (e.kind == 3) {
                     remoteSet_ = true;
+                    if (caller_ && awaitingAnswer_) { awaitingAnswer_ = false; negotiating_ = false; }
                     bool valid = true;
                     for (const auto& m : pendingIce_) valid = AddIce(m) && valid;
                     pendingIce_.clear();
@@ -280,32 +349,74 @@ public:
                     if (!OpenMedia()) { Fail("Media initialization failed"); break; }
                     state_ = CallState::Connecting; deadline_ = Clock::now() + timeout_;
                     status_ = "Connecting to " + remote_;
-                    if (!rtc_->CreateOffer()) Fail("Unable to create offer");
+                    negotiation_ = 1; negotiating_ = true; awaitingAnswer_ = true;
+                    if (!SendVideoSource() || !rtc_->CreateOffer()) Fail("Unable to create offer");
                 }
                 break;
             case T::CallReject: if (state_ == CallState::Outgoing) End("Call rejected by remote participant"); break;
             case T::CallBusy: if (state_ == CallState::Outgoing) End("Remote participant is busy"); break;
             case T::CallCancel: if (state_ == CallState::Incoming || state_ == CallState::Connecting) End("Caller cancelled"); break;
             case T::CallHangup: End("Remote participant ended the call"); break;
-            case T::Offer:
-                if (!caller_ && state_ == CallState::Connecting && rtc_ && !answerPending_ && !remoteSet_) {
-                    answerPending_ = true;
+            case T::CallMediaState:
+                if (rtc_ && (state_ == CallState::Connecting || state_ == CallState::Connected) &&
+                    (m.value == "off" || m.value == "camera" || m.value == "screen")) {
+                    remoteVideoSource_ = m.value; remoteVideoEnabled_ = m.value != "off";
+                }
+                break;
+            case T::CallReconnect:
+                if (caller_) Reconnect();
+                break;
+            case T::Offer: {
+                std::uint64_t revision = 0;
+                if (!caller_ && rtc_ && !negotiating_ && !answerPending_ &&
+                    (state_ == CallState::Connecting || state_ == CallState::Connected) &&
+                    Revision(m.value, revision) && revision > negotiation_) {
+                    negotiation_ = revision; negotiating_ = true; reconnectRequested_ = false;
+                    restartFrameBaseline_ = receivedFrames_.load();
+                    remoteSet_ = false; answerPending_ = true;
+                    pendingIce_.erase(std::remove_if(pendingIce_.begin(), pendingIce_.end(),
+                        [revision](const auto& candidate) {
+                            return candidate.sdp != std::to_string(revision);
+                        }), pendingIce_.end());
+                    state_ = CallState::Connecting; deadline_ = Clock::now() + timeout_;
                     if (!rtc_->SetRemoteDescription("offer", m.sdp)) Fail("Invalid remote offer");
                 }
                 break;
-            case T::Answer:
-                if (caller_ && state_ == CallState::Connecting && rtc_ && !remoteSet_)
+            }
+            case T::Answer: {
+                std::uint64_t revision = 0;
+                if (caller_ && state_ == CallState::Connecting && rtc_ && awaitingAnswer_ && !remoteSet_ &&
+                    Revision(m.value, revision) && revision == negotiation_)
                     if (!rtc_->SetRemoteDescription("answer", m.sdp)) Fail("Invalid remote answer");
                 break;
-            case T::IceCandidate:
-                if (!rtc_) break;
-                if (!remoteSet_) {
+            }
+            case T::IceCandidate: {
+                std::uint64_t revision = 0;
+                if (!rtc_ || !Revision(m.sdp, revision) || revision < negotiation_) break;
+                // ICE can race the offer callback. Buffer the next offer's
+                // candidates until its description is installed, never apply
+                // them to the previous negotiation.
+                if (revision > negotiation_ && (caller_ || revision != negotiation_ + 1)) break;
+                if (!remoteSet_ || revision > negotiation_) {
                     if (pendingIce_.size() < 128) pendingIce_.push_back(m);
                     else Fail("Too many remote network candidates");
                 } else if (!AddIce(m)) Fail("Invalid remote network candidate");
                 break;
+            }
             default: break;
             }
+        }
+        // Some WebRTC builds keep PeerConnectionState connected during ICE
+        // restart. A completed negotiation plus newly decoded media is also a
+        // truthful connected signal; it does not claim a changed network path.
+        if (rtc_ && state_ == CallState::Connecting && remoteSet_ && !negotiating_ &&
+            !reconnectRequested_ && receivedFrames_.load() > restartFrameBaseline_) Connected();
+        if (rtc_ && Clock::now() - lastStats_ >= std::chrono::seconds(1)) {
+            lastStats_ = Clock::now();
+            const auto generation = generation_.load();
+            rtc_->GetNetworkStats([this, generation](const webrtc::WebRtcNetworkStats& stats) {
+                Event e; e.kind = 5; e.generation = generation; e.stats = stats; Queue(std::move(e));
+            });
         }
         if (Active() && !signaling_.IsConnected()) { Stop(); status_ = "Signaling disconnected; rejoin to reconnect"; }
         if ((state_ == CallState::Joining || state_ == CallState::Incoming ||
@@ -324,6 +435,7 @@ public:
         signaling_.Close(); CloseMedia(); ++registration_;
         { std::lock_guard lock(mutex_); events_.clear(); }
         participants_.clear(); seenInvites_.clear(); remote_.clear(); callId_ = 0; started_ = {};
+        remoteVideoSource_ = "off"; remoteVideoEnabled_ = false;
         state_ = CallState::Offline; status_ = "Offline";
     }
 };
