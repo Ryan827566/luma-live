@@ -122,6 +122,16 @@ target_include_directories(luma_transcript_view_tests PRIVATE include)
 target_link_libraries(luma_transcript_view_tests PRIVATE user32 gdi32 comctl32)
 add_test(NAME luma_transcript_view_tests COMMAND luma_transcript_view_tests)
 
+# Optional memory-error verification of reentrant native window destruction.
+# Explicit target only: normal client builds need no sanitizer runtime.
+if(MSVC)
+  add_executable(luma_transcript_view_asan_tests EXCLUDE_FROM_ALL tests/TranscriptViewTests.cpp)
+  target_include_directories(luma_transcript_view_asan_tests PRIVATE include)
+  target_compile_options(luma_transcript_view_asan_tests PRIVATE /fsanitize=address /Zi)
+  target_link_options(luma_transcript_view_asan_tests PRIVATE /DEBUG /INCREMENTAL:NO)
+  target_link_libraries(luma_transcript_view_asan_tests PRIVATE user32 gdi32 comctl32)
+endif()
+
 # User-owned local AI settings and explicit session archives.
 target_link_libraries(luma_studio_preview PRIVATE crypt32 ws2_32 shell32)
 add_executable(luma_ai_provider_settings_tests tests/AiProviderSettingsTests.cpp)
