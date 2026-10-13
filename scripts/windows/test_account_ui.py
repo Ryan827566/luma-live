@@ -84,7 +84,17 @@ try:
     assert text(control(2121))=='','Password was retained after registration'
     click(2160);done('required')
     fields('ui.person','wrong password','');click(2160);done('incorrect')
-    fields('ui.person','secure ui password','');click(2160);done('signed in')
+    fields('ui.person','secure ui password','')
+    u.SendMessageW(control(2121),0x10D,0,0)
+    u.PostMessageW(control(2121),0x100,0x0D,0)
+    time.sleep(.2)
+    assert text(control(2100))=='Sign in' and 'incorrect' in text(control(2163)), 'IME Enter submitted the form'
+    u.SendMessageW(control(2121),0x10E,0,0)
+    fields('ui.person','secure ui password','')
+    u.PostMessageW(control(2121),0x100,0x0D,0)
+    wait(lambda:'signed in' in text(control(2163)))
+    done('signed in')
+
     assert text(control(2100))=='Profile';fits()
     fields('ui.person','ui@example.com','Updated UI','');click(2160);done('Done')
     assert 'Updated UI' in text(control(2164))
@@ -108,7 +118,7 @@ try:
     done('Done');assert 'Security activity' in text(control(2164)) and 'Password sign-in succeeded' in text(control(2164))
     click(2100);click(2161);done('signed out');assert text(control(2100))=='Sign in'
     click(2102);fits();fields('ui.person');click(2161);done('check your email')
-    print('PASS: account UI registration/login/profile/session/confirmation/logout/recovery and compact layout')
+    print('PASS: account UI including actual message-loop Enter and simulated IME Enter suppression')
 finally:
     if root:u.PostMessageW(root,0x10,0,0)
     try:process.wait(timeout=10)

@@ -39,3 +39,5 @@ For automated local acceptance only, run `C:/Python314/python.exe scripts/window
 ## Remaining production gates
 
 The login UI is connected to the repository's real account protocol. This does **not** complete production identity deployment. The bundled email/SMS providers currently implement development/test delivery only; production providers, PostgreSQL deployment/persistence acceptance and authenticated encrypted transport still require implementation/configuration and acceptance. No real email or SMS was sent in these tests. The UI does not persist passwords or login tokens; connection configuration and remembered-session behavior need a separate product decision/implementation. Physical multi-monitor DPI, real IME/Narrator and final visual review remain separate from automated geometry checks.
+
+Additional keyboard validation on the same EXE passed queued Enter submission and simulated IME Enter suppression. The IME assertion checks that no request/page transition occurs; native composition is allowed to change edit text. Traditional Chinese compact account captures were also inspected. This does not certify a physical IME.
