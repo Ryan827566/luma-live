@@ -1,4 +1,5 @@
 #include "AccountPanel.hpp"
+#include "AccountConnectionSettings.hpp"
 #include "IAccountService.hpp"
 #include "UiTheme.hpp"
 #include "UiAccessibility.hpp"
@@ -96,7 +97,7 @@ std::wstring EventText(const contracts::auth::SecurityEvent& event){
     return std::wstring(date)+L"\r\n"+label+L"\r\n\r\n";
 }
 struct Snapshot {
-    Action action{};Result result;bool connected{},authenticated{};
+    Action action{};Result result;bool connected{},authenticated{};std::wstring settingsError;
     contracts::auth::UserProfile profile;contracts::auth::SecuritySummary security;
     std::vector<contracts::auth::DeviceSession> sessions;
     std::vector<contracts::auth::SecurityEvent> events;
@@ -144,7 +145,9 @@ struct AccountPanel::Impl {
         status=Make(Status,L"STATIC",L"",SS_LEFT);confirm=Button(Confirm,UiLabel(L"确认操作",L"Confirm"));cancel=Button(Cancel,UiLabel(L"取消",L"Cancel"));
         ShowWindow(detail,SW_SHOW);ShowWindow(status,SW_SHOW);
         SendMessageW(detail,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(S(12),S(12)));
-        SetTimer(window,1,80,nullptr);Configure();ShowWindow(window,SW_SHOW);
+        AccountConnectionSettings saved;std::wstring settingsError;
+        const bool loaded=LoadAccountConnectionSettings(saved,settingsError);host=saved.host;port=saved.port;
+        SetTimer(window,1,80,nullptr);Configure();if(!loaded)Notice(settingsError.c_str(),true);ShowWindow(window,SW_SHOW);
     }
     void Field(int i,const wchar_t* label,const std::wstring& value=L"",bool secret=false){
         ++fieldCount;secrets[i]=secret;SetWindowTextW(labels[i],label);SetAccessibleName(fields[i],label);SetWindowTextW(fields[i],value.c_str());
@@ -198,7 +201,7 @@ struct AccountPanel::Impl {
             text+=state.security.mfa_enabled?UiLabel(L"双重验证已启用",L"Two-step verification on"):UiLabel(L"双重验证未启用",L"Two-step verification off");
             if(page==Page::Devices){text+=L"\r\n\r\n";for(const auto& device:state.sessions)text+=Wide(device.device_name)+L"\r\n"+Wide(device.remote_address)+L"\r\n\r\n";}
         }else text=UiLabel(L"一个账户，连接你的工作空间。\r\n\r\n在这里管理身份、个人资料和登录设备。通话与会议会在切换页面时继续运行。",L"One account for your workspace.\r\n\r\nManage your identity, profile and signed-in devices here. Calls and meetings keep running when you switch pages.");
-        if(page==Page::Service)text=UiLabel(L"账户服务连接\r\n\r\n输入管理员提供的服务器 IPv4 地址和端口。连接成功后可使用登录、注册及账户管理。",L"Account service connection\r\n\r\nUse the server IPv4 address and port provided by your administrator. Connect to sign in, create an account and manage your profile.");
+        if(page==Page::Service)text=UiLabel(L"账户服务连接\r\n\r\n输入管理员提供的服务器 IPv4 地址和端口。连接成功后保存此地址，下次打开时自动填入。",L"Account service connection\r\n\r\nUse the server IPv4 address and port provided by your administrator. Connect to sign in, create an account and manage your profile. A successful connection saves this address for next time.");
         if(page==Page::Security&&section==4){text=UiLabel(L"安全记录（本地时间）\r\n\r\n",L"Security activity (local time)\r\n\r\n");for(const auto& event:state.events)text+=EventText(event);if(state.events.empty())text+=UiLabel(L"暂无记录。",L"No activity yet.");}
         SetWindowTextW(detail,text.c_str());UpdateTranscriptScrollbar(detail);
     }
@@ -282,6 +285,7 @@ struct AccountPanel::Impl {
                 case Action::Delete:result=s.DeleteAccount();break;
                 default:break;
                 }}
+                if(result.success&&action==Action::Connect)SaveAccountConnectionSettings({address,servicePort},out.settingsError);
                 out.result=std::move(result);
                 if(out.result.success&&s.IsAuthenticated()&&(action==Action::Login||action==Action::PhoneLogin||action==Action::Profile||action==Action::Refresh||action==Action::VerifyEmail||action==Action::VerifyPhone)){
                     auto checked=s.GetSecuritySummary();if(checked.success)checked=s.GetProfile();if(!checked.success)out.result=std::move(checked);
@@ -299,7 +303,8 @@ struct AccountPanel::Impl {
         else if((success&&(action==Action::Register||action==Action::Reset||action==Action::Password||action==Action::Logout||action==Action::Delete))||(wasAuthenticated&&!state.authenticated)){page=Page::Login;section=0;phoneChallenge.clear();verifyChallenge.clear();Configure();if(IsWindowVisible(window))SetFocus(fields[0]);}
         else if(success&&(action==Action::Profile||action==Action::Connect||action==Action::Refresh||action==Action::DisableMfa||action==Action::VerifyEmail||action==Action::VerifyPhone||action==Action::Revoke||action==Action::RevokeOthers||action==Action::Sessions)){if(page==Page::Devices||action==Action::DisableMfa)Configure();else RefreshDetail();}
         if(success){
-            Notice(SuccessLabel(action));
+            if(action==Action::Connect&&!state.settingsError.empty())Notice((std::wstring(SuccessLabel(action))+L" "+state.settingsError).c_str(),true);
+            else Notice(SuccessLabel(action));
             if(action==Action::Events)RefreshDetail();
             if(action==Action::PhoneCode)phoneChallenge=Part(message,"challenge="," expires=");
             if(action==Action::RequestPhone)verifyChallenge=Part(message,"challenge="," expires=");

@@ -28,7 +28,7 @@ The actual client at `output/next/Release/luma_studio.exe` hosts **Account** in 
 - `scripts/windows/verify_client.py` includes these three checks in the existing actual-EXE regression, records the binary SHA256 and all logs. Check `output/client-verification.json` for the current run result rather than inferring that a build equals full acceptance.
 - Account screenshots are under `output/ui-account-20261013`. Synthetic IME messages do not replace a real input-method or Narrator acceptance session.
 
-Latest run: all 22 actual-EXE checks passed. EXE SHA256 `5c544ba07d5c9817f3788a3440acf5c28d16ee0d5ba64381542fe43d9df24307`. Compact Chinese sign-in/registration/recovery/connection captures were inspected.
+Latest run: all 23 actual-EXE checks passed. EXE SHA256 `eccbe99b8d3bbba6f6c0ac58aa40b2f4ae7459e8ed2413db4ea3fb35d24b8732`. Compact Chinese sign-in/registration/recovery/connection captures were inspected.
 
 ## How to try it
 
@@ -38,8 +38,16 @@ For automated local acceptance only, run `C:/Python314/python.exe scripts/window
 
 ## Remaining production gates
 
-The login UI is connected to the repository's real account protocol. This does **not** complete production identity deployment. The bundled email/SMS providers currently implement development/test delivery only; production providers, PostgreSQL deployment/persistence acceptance and authenticated encrypted transport still require implementation/configuration and acceptance. No real email or SMS was sent in these tests. The UI does not persist passwords or login tokens; connection configuration and remembered-session behavior need a separate product decision/implementation. Physical multi-monitor DPI, real IME/Narrator and final visual review remain separate from automated geometry checks.
+The login UI is connected to the repository's real account protocol. This does **not** complete production identity deployment. The bundled email/SMS providers currently implement development/test delivery only; production providers, PostgreSQL deployment/persistence acceptance and authenticated encrypted transport still require implementation/configuration and acceptance. No real email or SMS was sent in these tests. The UI does not persist passwords or login tokens; remembered-session behavior is not implemented. Physical multi-monitor DPI, real IME/Narrator and final visual review remain separate from automated geometry checks.
 
 Additional keyboard validation on the same EXE passed queued Enter submission and simulated IME Enter suppression. The IME assertion checks that no request/page transition occurs; native composition is allowed to change edit text. Traditional Chinese compact account captures were also inspected. This does not certify a physical IME.
 
 Account details now hide the scrollbar for short text and recalculate overflow after content, layout and DPI changes. Actual-EXE coverage verifies short/long/short transitions and scrolling security activity; all 22 checks passed on this binary.
+
+## Connection settings persistence (2026-10-13)
+
+A successful explicit connection saves only the IPv4 address and port under `%LOCALAPPDATA%/LumaLive/account-connection.conf`. A fresh client restores these fields; it does not reconnect automatically or remember credentials. Failed connections do not replace the saved endpoint. Saving runs with the request worker; a save error is shown separately while the successful connection stays usable. Malformed/oversized configuration falls back to defaults with a visible message and leaves the file untouched.
+
+The native settings regression covers bounded parsing, strict IPv4/port validation, Unicode paths, atomic replacement failure and preservation of prior contents. Actual-EXE UI tests use a temporary `LUMALIVE_ACCOUNT_SETTINGS_PATH`, verify restart restoration and empty credentials, then verify failed connections and malformed files preserve saved bytes. Tests never modify the user's account connection settings.
+
+After this integration, all 23 actual-EXE checks passed, including the added native account settings regression.

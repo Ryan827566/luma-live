@@ -7,6 +7,7 @@ import socket
 import subprocess
 import sys
 import time
+import tempfile
 
 u = c.WinDLL('user32', use_last_error=True)
 cb = c.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
@@ -45,7 +46,10 @@ with socket.socket() as reservation:
     reservation.bind(('127.0.0.1',0));port=reservation.getsockname()[1]
 server=subprocess.Popen([str(binary.parent/'luma_account_ui_fixture.exe'),str(port)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
 assert server.stdout.readline().strip()==str(port),'Account fixture failed'
+settings_dir=tempfile.TemporaryDirectory(prefix='luma-account-ui-')
+settings_path=Path(settings_dir.name)/'account-connection.conf'
 env={k.upper():v for k,v in os.environ.items()};env['LUMALIVE_UI_LANGUAGE']='en-US'
+env['LUMALIVE_ACCOUNT_SETTINGS_PATH']=str(settings_path)
 startup=subprocess.STARTUPINFO();startup.dwFlags=subprocess.STARTF_USESHOWWINDOW;startup.wShowWindow=0
 process=subprocess.Popen([str(binary),'--account'],env=env,startupinfo=startup)
 root=None
@@ -124,9 +128,30 @@ try:
     assert not u.GetWindowLongW(control(2164),-16)&0x200000, 'Short profile retained the activity scrollbar'
     click(2100);click(2161);done('signed out');assert text(control(2100))=='Sign in'
     click(2102);fits();fields('ui.person');click(2161);done('check your email')
-    print('PASS: account UI including actual message-loop Enter and simulated IME Enter suppression')
+    # A fresh client restores only the successful endpoint, without remembered credentials.
+    saved=settings_path.read_bytes()
+    assert b'ui.person' not in saved and b'secure ui password' not in saved
+    u.PostMessageW(root,0x10,0,0);process.wait(timeout=10);root=None
+    process=subprocess.Popen([str(binary),'--account'],env=env,startupinfo=startup)
+    root=wait(find);panel=wait(lambda:u.FindWindowExW(root,None,'LumaAccountPage',None))
+    wait(lambda:control(2100) and text(control(2100))=='Sign in')
+    assert text(control(2120))=='' and text(control(2121))==''
+    click(2103)
+    assert text(control(2120))=='127.0.0.1' and text(control(2121))==str(port), 'Endpoint was not restored'
+    fields('invalid address',str(port));click(2160);done('IPv4')
+    assert settings_path.read_bytes()==saved, 'Failed connection replaced the saved endpoint'
+    u.PostMessageW(root,0x10,0,0);process.wait(timeout=10);root=None
+    settings_path.write_text('malformed settings',encoding='utf-8')
+    process=subprocess.Popen([str(binary),'--account'],env=env,startupinfo=startup)
+    root=wait(find);panel=wait(lambda:u.FindWindowExW(root,None,'LumaAccountPage',None))
+    wait(lambda:control(2163) and text(control(2163)))
+    click(2103)
+    assert text(control(2120))=='127.0.0.1' and text(control(2121))=='9100'
+    assert settings_path.read_text(encoding='utf-8')=='malformed settings', 'Loading overwrote invalid settings'
+    print('PASS: account UI, keyboard, details scrolling and isolated endpoint persistence')
 finally:
     if root:u.PostMessageW(root,0x10,0,0)
     try:process.wait(timeout=10)
     except subprocess.TimeoutExpired:process.terminate();process.wait();raise
     server.communicate('\n',timeout=10)
+    settings_dir.cleanup()

@@ -4,6 +4,8 @@ Both `codex/video-meetings` and `codex/auth-registration-login` are merged into 
 
 The client now includes a hosted Account page in the left navigation. Registration/login/recovery, profile, security and devices use the account service asynchronously. Authentication expiry, revocation, reset across clients and stalled requests have focused regression fixes. See [login-acceptance.md](login-acceptance.md) for scope, testing and remaining production-provider/transport gates. This does not imply the existing video/AI real-provider or physical-device gates are complete.
 
+Account detail scrollbars now follow content size. Successful connection endpoints persist across client restarts, with invalid-file recovery and isolated native/UI tests; passwords and session tokens are not saved.
+
 The detailed earlier snapshots below are chronological history; their earlier branch/UI instructions are superseded by the user's main-only development request and the latest checkpoint.
 
 ---
