@@ -14,6 +14,9 @@ inline void close_socket(Socket s){::closesocket(s);}
 inline bool init_sockets(){static bool once=[](){WSADATA d{};return WSAStartup(MAKEWORD(2,2),&d)==0;}();return once;}
 #else
 #include <arpa/inet.h>
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
 using Socket=int; constexpr Socket kInvalidSocket=-1;
@@ -31,18 +34,81 @@ using luma::contracts::auth::wire::Packet;
 using luma::contracts::auth::wire::Type;
 
 namespace {
-bool SetSocketTimeouts(Socket socket){
+using IoClock=std::chrono::steady_clock;
+constexpr auto kIoTimeout=std::chrono::seconds(5);
+
+int SocketError(){
 #ifdef _WIN32
-    const DWORD timeout_ms=5000;
-    return ::setsockopt(socket,SOL_SOCKET,SO_RCVTIMEO,
-        reinterpret_cast<const char*>(&timeout_ms),sizeof(timeout_ms))==0&&
-        ::setsockopt(socket,SOL_SOCKET,SO_SNDTIMEO,
-        reinterpret_cast<const char*>(&timeout_ms),sizeof(timeout_ms))==0;
+    return WSAGetLastError();
 #else
-    const timeval timeout{5,0};
-    return ::setsockopt(socket,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout))==0&&
-        ::setsockopt(socket,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof(timeout))==0;
+    return errno;
 #endif
+}
+bool Interrupted(int error){
+#ifdef _WIN32
+    return error==WSAEINTR;
+#else
+    return error==EINTR;
+#endif
+}
+bool WouldBlock(int error){
+#ifdef _WIN32
+    return error==WSAEWOULDBLOCK;
+#else
+    return error==EAGAIN||error==EWOULDBLOCK;
+#endif
+}
+bool SetNonBlocking(Socket socket){
+#ifdef _WIN32
+    u_long enabled=1;
+    return ::ioctlsocket(socket,FIONBIO,&enabled)==0;
+#else
+    if(socket>=FD_SETSIZE)return false;
+    const auto flags=::fcntl(socket,F_GETFL,0);
+    if(flags<0||::fcntl(socket,F_SETFL,flags|O_NONBLOCK)!=0)return false;
+#ifdef SO_NOSIGPIPE
+    const int enabled=1;
+    if(::setsockopt(socket,SOL_SOCKET,SO_NOSIGPIPE,&enabled,sizeof(enabled))!=0)return false;
+#endif
+    return true;
+#endif
+}
+bool WaitReady(Socket socket,bool writing,IoClock::time_point deadline){
+    while(true){
+        const auto now=IoClock::now();
+        if(now>=deadline)return false;
+        const auto remaining=std::chrono::duration_cast<std::chrono::microseconds>(deadline-now);
+        timeval timeout{};timeout.tv_sec=static_cast<long>(remaining.count()/1000000);
+        timeout.tv_usec=static_cast<long>(remaining.count()%1000000);
+        fd_set ready,errors;FD_ZERO(&ready);FD_ZERO(&errors);FD_SET(socket,&ready);FD_SET(socket,&errors);
+#ifdef _WIN32
+        const auto result=::select(0,writing?nullptr:&ready,writing?&ready:nullptr,&errors,&timeout);
+#else
+        const auto result=::select(socket+1,writing?nullptr:&ready,writing?&ready:nullptr,&errors,&timeout);
+#endif
+        if(result>0)return IoClock::now()<deadline;
+        if(result<0&&!Interrupted(SocketError()))return false;
+        // Interrupted waits and sub-microsecond timeouts retain the original deadline.
+    }
+}
+bool ConnectSocket(Socket socket,const sockaddr_in& address){
+    const auto deadline=IoClock::now()+kIoTimeout;
+    if(::connect(socket,reinterpret_cast<const sockaddr*>(&address),sizeof(address))==0)return IoClock::now()<deadline;
+    const auto error=SocketError();
+#ifdef _WIN32
+    const bool pending=WouldBlock(error)||error==WSAEINPROGRESS||error==WSAEALREADY||Interrupted(error);
+#else
+    const bool pending=WouldBlock(error)||error==EINPROGRESS||error==EALREADY||Interrupted(error);
+#endif
+    if(!pending||!WaitReady(socket,true,deadline))return false;
+    int completion_error=0;
+#ifdef _WIN32
+    int length=sizeof(completion_error);
+#else
+    socklen_t length=sizeof(completion_error);
+#endif
+    return ::getsockopt(socket,SOL_SOCKET,SO_ERROR,reinterpret_cast<char*>(&completion_error),&length)==0&&
+        completion_error==0&&IoClock::now()<deadline;
 }
 }
 
@@ -59,14 +125,14 @@ public:
         host_=std::move(host);port_=port;
         Socket s=::socket(AF_INET,SOCK_STREAM,0);
         if(s==kInvalidSocket)return{false,"socket creation failed"};
-        if(!SetSocketTimeouts(s)){close_socket(s);return{false,"unable to configure account connection timeout"};}
+        if(!SetNonBlocking(s)){close_socket(s);return{false,"unable to configure account connection"};}
         sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(port_);
 #ifdef _WIN32
         if(::InetPtonA(AF_INET,host_.c_str(),&a.sin_addr)!=1){close_socket(s);return{false,"host must be an IPv4 address"};}
 #else
         if(::inet_pton(AF_INET,host_.c_str(),&a.sin_addr)!=1){close_socket(s);return{false,"host must be an IPv4 address"};}
 #endif
-        if(::connect(s,reinterpret_cast<sockaddr*>(&a),sizeof(a))!=0){close_socket(s);return{false,"unable to connect to auth server"};}
+        if(!ConnectSocket(s,a)){close_socket(s);return{false,"unable to connect to auth server"};}
         socket_=s;running_=true;return{true,"connected"};
     }
 
@@ -628,21 +694,42 @@ private:
     }
 
     bool Send(const Packet&p){
+        const auto deadline=IoClock::now()+kIoTimeout;
         auto msg=luma::contracts::auth::wire::encode(p);
         std::size_t off=0;
         while(off<msg.size()){
-            int n=::send(socket_,msg.data()+off,static_cast<int>(msg.size()-off),0);
-            if(n<=0)return DisconnectLocked();
+            if(IoClock::now()>=deadline)return DisconnectLocked();
+#ifdef MSG_NOSIGNAL
+            constexpr int flags=MSG_NOSIGNAL;
+#else
+            constexpr int flags=0;
+#endif
+            const int n=::send(socket_,msg.data()+off,static_cast<int>(msg.size()-off),flags);
+            if(n<0){
+                const auto error=SocketError();
+                if(Interrupted(error))continue;
+                if(WouldBlock(error)&&WaitReady(socket_,true,deadline))continue;
+                return DisconnectLocked();
+            }
+            if(n==0)return DisconnectLocked();
             off+=static_cast<std::size_t>(n);
         }
         return true;
     }
 
     bool Recv(Packet&out){
+        const auto deadline=IoClock::now()+kIoTimeout;
         std::string line;char c=0;
         while(true){
+            if(IoClock::now()>=deadline)return DisconnectLocked();
             const int n=::recv(socket_,&c,1,0);
-            if(n<=0)return DisconnectLocked();
+            if(n<0){
+                const auto error=SocketError();
+                if(Interrupted(error))continue;
+                if(WouldBlock(error)&&WaitReady(socket_,false,deadline))continue;
+                return DisconnectLocked();
+            }
+            if(n==0)return DisconnectLocked();
             if(c=='\n')break;
             line.push_back(c);
             if(line.size()>64*1024)return DisconnectLocked();

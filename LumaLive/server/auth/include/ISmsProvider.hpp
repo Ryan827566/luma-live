@@ -34,8 +34,9 @@ public:
 std::unique_ptr<ISmsProvider> CreateDevelopmentSmsProvider();
 
 // Select the provider from LUMALIVE_SMS_PROVIDER.
-// Empty or "mock" selects the development provider. Other values currently
-// produce a provider that reports "not configured" until a real adapter is added.
+// Empty, "mock" or "development" selects the development provider only when
+// LUMALIVE_AUTH_ENV is "test" or "development". Other configurations report
+// not configured until a production adapter is added. Tests can inject an adapter.
 std::unique_ptr<ISmsProvider> CreateSmsProviderFromEnvironment();
 
 }

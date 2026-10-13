@@ -3,6 +3,7 @@
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
+#include <atomic>
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
@@ -32,7 +33,7 @@ namespace {
 using luma::contracts::auth::wire::Packet;
 using luma::contracts::auth::wire::Type;
 
-Socket Listen(std::uint16_t& port){
+Socket Listen(std::uint16_t& port,bool accepting=true){
     const Socket listener=::socket(AF_INET,SOCK_STREAM,0);
     assert(listener!=kInvalidSocket);
     sockaddr_in address{};
@@ -40,7 +41,7 @@ Socket Listen(std::uint16_t& port){
     address.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
     address.sin_port=0;
     assert(::bind(listener,reinterpret_cast<sockaddr*>(&address),sizeof(address))==0);
-    assert(::listen(listener,1)==0);
+    if(accepting)assert(::listen(listener,1)==0);
 #ifdef _WIN32
     int address_length=sizeof(address);
 #else
@@ -56,17 +57,30 @@ Packet Receive(Socket peer){
     while(true){assert(::recv(peer,&c,1,0)==1);if(c=='\n')break;line.push_back(c);assert(line.size()<4096);}
     return luma::contracts::auth::wire::decode_line(line);
 }
-void Send(Socket peer,const Packet& packet){
-    const auto bytes=luma::contracts::auth::wire::encode(packet);
+int SendBytes(Socket peer,const char* bytes,int length){
+#ifdef MSG_NOSIGNAL
+    return static_cast<int>(::send(peer,bytes,length,MSG_NOSIGNAL));
+#else
+    return static_cast<int>(::send(peer,bytes,length,0));
+#endif
+}
+void SendRaw(Socket peer,std::string_view bytes){
     std::size_t offset=0;
     while(offset<bytes.size()){
-        const auto sent=::send(peer,bytes.data()+offset,static_cast<int>(bytes.size()-offset),0);
+        const auto sent=SendBytes(peer,bytes.data()+offset,static_cast<int>(bytes.size()-offset));
         assert(sent>0);offset+=static_cast<std::size_t>(sent);
     }
 }
+void Send(Socket peer,const Packet& packet){SendRaw(peer,luma::contracts::auth::wire::encode(packet));}
 Packet Challenge(Type type){
     if(type==Type::RegisterChallenge)return{type,{std::string(32,'a'),std::string(64,'b'),"600000"}};
     return{type,{std::string(32,'a'),std::string(64,'b'),type==Type::LoginChallenge?"0":std::string(32,'c'),"600000"}};
+}
+Packet LoggedIn(){
+    const auto future=std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count()+3600;
+    return{Type::LoginOk,{"fixture-access","fixture-refresh","fixture-session","fixture-device","Fixture",
+        "fixture-user","fixture.user","fixture@example.com","Fixture",std::to_string(future),std::to_string(future)}};
 }
 
 void RejectChallenge(Type operation,const Packet& malformed){
@@ -77,10 +91,7 @@ void RejectChallenge(Type operation,const Packet& malformed){
         assert(Receive(peer).type==Type::LoginBegin);
         auto login=Challenge(Type::LoginChallenge);login.fields.back()="1";Send(peer,login);
         assert(Receive(peer).type==Type::LoginProof);
-        const auto future=std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count()+3600;
-        Send(peer,{Type::LoginOk,{"fixture-access","fixture-refresh","fixture-session","fixture-device","Fixture",
-            "fixture-user","fixture.user","fixture@example.com","Fixture",std::to_string(future),std::to_string(future)}});
+        Send(peer,LoggedIn());
         const auto begin=Receive(peer).type;
         assert(begin==(operation==Type::RegisterChallenge?Type::RegisterBegin:
             operation==Type::LoginChallenge?Type::LoginBegin:Type::ChangePasswordBegin));
@@ -128,7 +139,7 @@ void ChallengeCases(){
 
 void ChallengeWatchdog(){
     // A regressed huge iteration count cannot be interrupted by closing its socket.
-    // Run all malformed cases in one killable process, keeping the full suite below 20 seconds.
+    // Bound malformed cases independently of the transport timeout regressions below.
 #ifdef _WIN32
     wchar_t executable[32768]{};const auto length=GetModuleFileNameW(nullptr,executable,32768);
     assert(length>0&&length<32768);
@@ -153,6 +164,77 @@ void ChallengeWatchdog(){
     assert(finished&&WIFEXITED(status)&&WEXITSTATUS(status)==0);
 #endif
 }
+
+void FragmentedProtocolAndRefusedConnection(){
+    std::uint16_t port=0,refused_port=0;
+    const auto listener=Listen(port),reserved=Listen(refused_port,false);
+    std::thread server([&]{
+        const auto peer=::accept(listener,nullptr,nullptr);assert(peer!=kInvalidSocket);
+        assert(Receive(peer).type==Type::LoginBegin);
+        auto challenge=Challenge(Type::LoginChallenge);challenge.fields.back()="1";
+        const auto bytes=luma::contracts::auth::wire::encode(challenge);
+        for(std::size_t offset=0;offset<bytes.size();offset+=11){
+            SendRaw(peer,std::string_view(bytes).substr(offset,11));
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        assert(Receive(peer).type==Type::LoginProof);
+        const Packet profile{Type::ProfileOk,{"fixture-user","fixture.user","fixture@example.com","Loaded profile","",""}};
+        // Two frames in one write must remain separate across successive Recv calls.
+        SendRaw(peer,luma::contracts::auth::wire::encode(LoggedIn())+luma::contracts::auth::wire::encode(profile));
+        assert(Receive(peer).type==Type::GetProfile);
+        char c=0;assert(::recv(peer,&c,1,0)==0);CloseSocket(peer);
+    });
+    auto service=luma::client::account::CreateAccountService();
+    assert(service->Connect("127.0.0.1",port).success);
+    assert(service->Login("fixture.user","fixture password").success);
+    assert(service->IsAuthenticated()&&service->GetProfile().success);
+    assert(service->Session().user.display_name=="Loaded profile");
+    const auto started=std::chrono::steady_clock::now();
+    assert(!service->Connect("127.0.0.1",refused_port).success);
+    assert(std::chrono::steady_clock::now()-started<std::chrono::seconds(7));
+    assert(!service->IsRunning()&&!service->IsAuthenticated());
+    assert(service->Session().token.empty()&&service->Session().user.user_id.empty());
+    server.join();CloseSocket(listener);CloseSocket(reserved);
+}
+
+void SlowResponseDeadline(){
+    std::uint16_t port=0;const auto listener=Listen(port);
+    std::mutex mutex;std::condition_variable completed;bool release_peer=false;
+    std::atomic<int> sent{0};
+    std::thread server([&]{
+        const auto peer=::accept(listener,nullptr,nullptr);assert(peer!=kInvalidSocket);
+        assert(Receive(peer).type==Type::LoginBegin);
+        auto challenge=Challenge(Type::LoginChallenge);challenge.fields.back()="1";Send(peer,challenge);
+        assert(Receive(peer).type==Type::LoginProof);Send(peer,LoggedIn());
+        assert(Receive(peer).type==Type::GetProfile);
+        const auto bytes=luma::contracts::auth::wire::encode({Type::ProfileOk,
+            {std::string(80,'a'),"fixture.user","fixture@example.com","Fixture","",""}});
+        // Every byte arrives well within the old inactivity timeout. End at 8 seconds
+        // even on the old implementation, so the regression fails without hanging.
+        for(std::size_t i=0;i<40;++i){
+            if(SendBytes(peer,bytes.data()+i,1)!=1)break;
+            ++sent;
+            std::unique_lock lock(mutex);
+            if(completed.wait_for(lock,std::chrono::milliseconds(200),[&]{return release_peer;}))break;
+        }
+        CloseSocket(peer);
+    });
+    auto service=luma::client::account::CreateAccountService();
+    assert(service->Connect("127.0.0.1",port).success);
+    assert(service->Login("fixture.user","fixture password").success);
+    const auto started=std::chrono::steady_clock::now();
+    const auto result=service->GetProfile();
+    const auto elapsed=std::chrono::steady_clock::now()-started;
+    {std::lock_guard lock(mutex);release_peer=true;}
+    completed.notify_one();server.join();CloseSocket(listener);
+    assert(!result.success&&sent>=10);
+    assert(elapsed>=std::chrono::milliseconds(4500)&&elapsed<std::chrono::seconds(7));
+    assert(!service->IsRunning()&&!service->IsAuthenticated());
+    assert(service->Session().token.empty()&&service->Session().refresh_token.empty()&&service->Session().user.user_id.empty());
+    const auto stopped=std::chrono::steady_clock::now();
+    assert(service->Stop().success);
+    assert(std::chrono::steady_clock::now()-stopped<std::chrono::seconds(1));
+}
 }
 
 int main(int argc,char** argv) {
@@ -172,6 +254,8 @@ int main(int argc,char** argv) {
     }
     assert(argc==1);
     ChallengeWatchdog();
+    FragmentedProtocolAndRefusedConnection();
+    SlowResponseDeadline();
     std::uint16_t port=0;const auto listener=Listen(port);
 
     std::mutex mutex;

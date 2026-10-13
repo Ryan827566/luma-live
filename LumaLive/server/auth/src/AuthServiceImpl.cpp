@@ -246,10 +246,11 @@ struct PhoneChallenge{
 class AuthServiceImpl final:public IAuthService{
 public:
     explicit AuthServiceImpl(
-        std::unique_ptr<IAuthStore> store={},std::function<std::int64_t()> clock={})
+        std::unique_ptr<IAuthStore> store={},std::function<std::int64_t()> clock={},
+        std::unique_ptr<IEmailProvider> email={},std::unique_ptr<ISmsProvider> sms={})
         :auth_store_(store?std::move(store):CreateAuthStoreFromEnvironment()),
-         sms_provider_(CreateSmsProviderFromEnvironment()),
-         email_provider_(CreateEmailProviderFromEnvironment()),
+         sms_provider_(sms?std::move(sms):CreateSmsProviderFromEnvironment()),
+         email_provider_(email?std::move(email):CreateEmailProviderFromEnvironment()),
          clock_(clock?std::move(clock):system_now_epoch){}
 
     Result Start()override{return StartOnPort(9100);}
@@ -1994,6 +1995,13 @@ std::unique_ptr<IAuthService>CreateAuthService(){
 
 std::unique_ptr<IAuthService>CreateAuthService(std::unique_ptr<IAuthStore> store){
     return std::make_unique<AuthServiceImpl>(std::move(store));
+}
+
+std::unique_ptr<IAuthService>CreateAuthService(
+    std::unique_ptr<IAuthStore> store,std::unique_ptr<IEmailProvider> email,
+    std::unique_ptr<ISmsProvider> sms){
+    return std::make_unique<AuthServiceImpl>(std::move(store),std::function<std::int64_t()>{},
+        std::move(email),std::move(sms));
 }
 
 std::unique_ptr<IAuthService>CreateAuthService(

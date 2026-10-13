@@ -62,7 +62,7 @@ def main():
         record["client"] = {"path": str(executable), "sha256": hashlib.sha256(executable.read_bytes()).hexdigest()}
         run("account-connection-settings", [str(binary / "luma_account_connection_settings_tests.exe")], 20)
         run("auth-integration", [str(binary / "luma_auth_integration_tests.exe")], 120)
-        run("auth-client", [str(binary / "luma_client_account_tests.exe")], 20)
+        run("auth-client", [str(binary / "luma_client_account_tests.exe")], 30)
         run("auth-ui", [sys.executable, "scripts/windows/test_account_ui.py", str(executable)], 90)
         run("package-ai-service", [sys.executable, "scripts/windows/package_ai_service.py", "--binary-dir", str(binary)], 60)
         run("local-ai-service", [str(binary / "luma_local_ai_service_tests.exe")], 40)

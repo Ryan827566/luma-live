@@ -46,6 +46,12 @@ with socket.socket() as reservation:
     reservation.bind(('127.0.0.1',0));port=reservation.getsockname()[1]
 server=subprocess.Popen([str(binary.parent/'luma_account_ui_fixture.exe'),str(port)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
 assert server.stdout.readline().strip()==str(port),'Account fixture failed'
+def mailbox(command):
+    server.stdin.write(command+'\n');server.stdin.flush()
+    reply=server.stdout.readline().strip()
+    assert reply and reply!='MISSING','Test delivery was not captured: '+command
+    return reply
+
 settings_dir=tempfile.TemporaryDirectory(prefix='luma-account-ui-')
 settings_path=Path(settings_dir.name)/'account-connection.conf'
 env={k.upper():v for k,v in os.environ.items()};env['LUMALIVE_UI_LANGUAGE']='en-US'
@@ -68,6 +74,8 @@ try:
     u.SetWindowPos(root,None,0,0,round(1024*scale),round(700*scale),0x16)
     def control(i):return u.GetDlgItem(panel,i)
     def click(i):u.SendMessageW(panel,0x111,i,0)
+    def select_mode(index):
+        u.SendMessageW(control(2165),0x14E,index,0);u.SendMessageW(panel,0x111,(1<<16)|2165,0)
     def fields(*values):
         for i,value in enumerate(values):put(control(2120+i),value)
     def done(expected):
@@ -106,6 +114,19 @@ try:
     # The page and its authenticated session survive module switches.
     u.SendMessageW(root,0x111,127,0);u.SendMessageW(root,0x111,129,0)
     assert text(control(2100))=='Profile'
+    # The injected delivery adapters never return OTPs through the account protocol.
+    click(2101);mailbox('reject-email');click(2161);done('could not send the email')
+    mailbox('accept-delivery');click(2161);done('Verification email sent')
+    email_code=mailbox('email_verification')
+    assert email_code not in text(control(2164))+text(control(2163))
+    fields('invalid');click(2160);done('invalid or expired')
+    fields(email_code);click(2160);done('Done');assert 'Email verified' in text(control(2164))
+    select_mode(1);mailbox('reject-sms');fields('+14155552670','');click(2161);done('could not send the text message')
+    mailbox('accept-delivery');fields('+14155552671','');click(2161);done('Text message sent')
+    phone_code=mailbox('phone_verification')
+    fields('+14155552672',phone_code);click(2160);done('Request a code for this phone number')
+    fields('+14155552671',phone_code);click(2160);done('Done');assert 'Phone verified' in text(control(2164))
+    click(2100)
     # Destructive actions stay inline and Escape uses the application's message loop.
     click(2162);assert visible(control(2166))
     u.PostMessageW(control(2167),0x100,0x1B,0);wait(lambda:not visible(control(2166)))
@@ -127,7 +148,19 @@ try:
     click(2100)
     assert not u.GetWindowLongW(control(2164),-16)&0x200000, 'Short profile retained the activity scrollbar'
     click(2100);click(2161);done('signed out');assert text(control(2100))=='Sign in'
+    select_mode(1);fields('+14155552671','','');click(2161);done('Text message sent')
+    phone_login=mailbox('phone_login')
+    fields('+14155552671',phone_login,'');click(2160);done('signed in')
+    assert text(control(2100))=='Profile'
+    click(2101);select_mode(2);fields('wrong password','changed password','changed password');click(2160);done('incorrect')
+    fields('secure ui password','changed password','changed password');click(2160);done('Password updated')
+    assert text(control(2100))=='Sign in'
+    fields('ui.person','secure ui password','');click(2160);done('incorrect')
+    fields('ui.person','changed password','');click(2160);done('signed in')
+    click(2161);done('signed out')
     click(2102);fits();fields('ui.person');click(2161);done('check your email')
+    reset_code=mailbox('password_reset')
+
     # A fresh client restores only the successful endpoint, without remembered credentials.
     saved=settings_path.read_bytes()
     assert b'ui.person' not in saved and b'secure ui password' not in saved
@@ -138,6 +171,13 @@ try:
     assert text(control(2120))=='' and text(control(2121))==''
     click(2103)
     assert text(control(2120))=='127.0.0.1' and text(control(2121))==str(port), 'Endpoint was not restored'
+    # Complete recovery in a different client; consumed reset tokens cannot be reused.
+    click(2102);fields('',reset_code,'recovered password','recovered password');click(2160);done('Password updated')
+    click(2102);fields('',reset_code,'other password','other password');click(2160);done('invalid or expired')
+    click(2100);fields('ui.person','recovered password','');click(2160);done('signed in')
+    click(2162);click(2166);done('account has been deleted')
+    fields('ui.person','recovered password','');click(2160);done('incorrect')
+    click(2103)
     fields('invalid address',str(port));click(2160);done('IPv4')
     assert settings_path.read_bytes()==saved, 'Failed connection replaced the saved endpoint'
     u.PostMessageW(root,0x10,0,0);process.wait(timeout=10);root=None
@@ -148,7 +188,7 @@ try:
     click(2103)
     assert text(control(2120))=='127.0.0.1' and text(control(2121))=='9100'
     assert settings_path.read_text(encoding='utf-8')=='malformed settings', 'Loading overwrote invalid settings'
-    print('PASS: account UI, keyboard, details scrolling and isolated endpoint persistence')
+    print('PASS: account UI, delivery failure, email/phone verification, SMS sign-in, password change, cross-client recovery, deletion, keyboard and endpoint persistence')
 finally:
     if root:u.PostMessageW(root,0x10,0,0)
     try:process.wait(timeout=10)

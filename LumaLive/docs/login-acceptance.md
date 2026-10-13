@@ -16,7 +16,7 @@ The actual client at `output/next/Release/luma_studio.exe` hosts **Account** in 
 
 1. Natural access-token expiry no longer destroys a still-valid refresh session. Expired refresh credentials and revoked sessions are removed; client user/session caches clear on revocation.
 2. Password reset accepts a valid token obtained by a different client instance and generates fresh password salt. The server validates token, salt and verifier formats.
-3. A peer that accepts a request but never responds triggers a five-second socket inactivity timeout; failed transport closes the connection and clears cached identity. This is not a total request/connect deadline.
+3. Connection establishment and each complete protocol send/receive have a fixed five-second deadline. Partial bytes do not reset it. Failed transport closes the connection and clears cached identity. These are phase deadlines, not a five-second limit on an entire multi-step login or password derivation.
 4. Empty edit fields return empty strings in the legacy diagnostic form. The production main entry now routes account access to the hosted page.
 5. CMake no longer references the nonexistent server-local AuthCrypto.cpp. Shared authentication cryptography links into both client and server, including the standalone client build. Authentication assertions remain enabled in Release regression targets.
 
@@ -28,7 +28,7 @@ The actual client at `output/next/Release/luma_studio.exe` hosts **Account** in 
 - `scripts/windows/verify_client.py` includes these three checks in the existing actual-EXE regression, records the binary SHA256 and all logs. Check `output/client-verification.json` for the current run result rather than inferring that a build equals full acceptance.
 - Account screenshots are under `output/ui-account-20261013`. Synthetic IME messages do not replace a real input-method or Narrator acceptance session.
 
-Latest run: all 23 actual-EXE checks passed. EXE SHA256 `9f0ea1c248a20579eae5c23cd83c70d74c6aa03edf44bf2e7c429f9784d4717c`. Compact Chinese sign-in/registration/recovery/connection captures were inspected.
+Latest run: all 23 actual-EXE checks passed. EXE SHA256 `9b22c046cc4140e9d43a79786550f32ef11adc3354014991f741b8c3ae7bd68c`. Compact Chinese sign-in/registration/recovery/connection captures were inspected.
 
 ## How to try it
 
@@ -59,3 +59,11 @@ Registration, password login and password change now validate the entire server 
 The client regression adds 77 scripted loopback-server cases for malformed/oversized iteration counts and malformed fields. Each establishes a synthetic prior identity and verifies prompt failure without an exception or a proof/verifier reply, followed by cleared session state. A separate process with a ten-second watchdog prevents an old unbounded calculation from hanging the suite. Existing real local-server tests cover the normal 600000-iteration path. These bounds do not supply the still-missing authenticated encrypted transport.
 
 The full 23-check verifier passed after the challenge-boundary fix, including the 77 malformed-server cases and normal local-server account workflows.
+
+## Full account workflow and transport deadline follow-up (2026-10-13)
+
+The native client now uses nonblocking sockets with monotonic deadlines for connect, send and receive. Regression cases cover a peer that keeps sending one byte every 200 ms, a silent peer, refused connections, fragmented responses and two protocol frames arriving in a single write. A timed-out authenticated connection loses cached identity. The explicit deadline of a black-holed connect and send-buffer saturation are not separately injected in these tests; they use the same deadline-aware transport path.
+
+The hosted account test now supplies isolated email/SMS adapters through explicit service construction. Only the test fixture exposes captured synthetic codes through its private stdin/stdout pipe; no external delivery, user database or production debug-code response is used. Coverage includes delivery failures with localized status, invalid/correct email verification, phone-number/challenge mismatch, successful phone verification and SMS sign-in, incorrect/correct password changes, rejected old password, reset completed in a fresh client, consumed reset-token rejection and confirmed account deletion. This validates local end-to-end workflows, not production email/SMS providers.
+
+All 23 actual-EXE checks passed after the deadline and delivery-flow changes. The real-provider, TLS, database-deployment and physical-device gates remain open.

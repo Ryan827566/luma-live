@@ -8,6 +8,8 @@ Account detail scrollbars now follow content size. Successful connection endpoin
 
 Password challenges are now fully validated before derivation, preventing unbounded or malformed server parameters from stalling the account worker. All 23 actual-EXE checks, including 77 malformed loopback-server cases, passed.
 
+Account transport now has fixed connect/frame deadlines that are not renewed by partial traffic. Local UI verification now completes email/phone verification, SMS login, password change, cross-client reset and account deletion using isolated delivery adapters. All 23 actual-EXE checks passed; these adapters never contact external delivery services.
+
 The detailed earlier snapshots below are chronological history; their earlier branch/UI instructions are superseded by the user's main-only development request and the latest checkpoint.
 
 ---

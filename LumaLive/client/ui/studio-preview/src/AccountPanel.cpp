@@ -49,6 +49,8 @@ LRESULT CALLBACK SubmitEdit(HWND h,UINT m,WPARAM w,LPARAM l,UINT_PTR id,DWORD_PT
     return DefSubclassProc(h,m,w,l);
 }
 const wchar_t* ErrorLabel(const std::string& error) {
+    if(error=="email_delivery_failed")return UiLabel(L"邮件暂时无法发送，请稍后重试或联系服务管理员。",L"The service could not send the email. Try again later or contact your administrator.");
+    if(error=="sms_delivery_failed")return UiLabel(L"短信暂时无法发送，请稍后重试或联系服务管理员。",L"The service could not send the text message. Try again later or contact your administrator.");
     if(error=="invalid_challenge")return UiLabel(L"账户服务返回了无效的认证信息，已断开连接。请联系服务管理员。",L"The account service returned invalid authentication data. Disconnected; contact your administrator.");
     if(error.find("invalid_credentials")!=std::string::npos)return UiLabel(L"账户或密码不正确，请重新输入。",L"The account or password is incorrect. Try again.");
     if(error.find("locked")!=std::string::npos||error.find("rate_limit")!=std::string::npos)return UiLabel(L"尝试次数过多，请稍后再试。",L"Too many attempts. Please try again later.");

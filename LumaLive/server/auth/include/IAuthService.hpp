@@ -8,6 +8,7 @@
 namespace luma::server::auth {
 class IAuthStore;
 class ISmsProvider;
+class IEmailProvider;
 class IAuthService {
 public:
     virtual ~IAuthService() = default;
@@ -20,6 +21,10 @@ public:
 };
 std::unique_ptr<IAuthService> CreateAuthService();
 std::unique_ptr<IAuthService> CreateAuthService(std::unique_ptr<IAuthStore> store);
+// Explicit delivery adapters allow deployment composition and isolated end-to-end tests.
+std::unique_ptr<IAuthService> CreateAuthService(
+    std::unique_ptr<IAuthStore> store,std::unique_ptr<IEmailProvider> email,
+    std::unique_ptr<ISmsProvider> sms);
 // The supplied clock returns UTC epoch seconds and must be safe to call concurrently.
 std::unique_ptr<IAuthService> CreateAuthService(
     std::unique_ptr<IAuthStore> store,std::function<std::int64_t()> clock);
