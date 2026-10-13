@@ -27,7 +27,7 @@
 namespace luma::client::ui::preview {
 namespace {
 using Microsoft::WRL::ComPtr;
-constexpr COLORREF Bg=RGB(8,10,13), Panel=RGB(16,19,24), Border=RGB(39,45,55), Ink=RGB(232,237,245), Muted=RGB(145,155,171), Mint=RGB(0,145,245);
+constexpr COLORREF Bg=UiTheme::Background, Panel=UiTheme::Surface, Border=UiTheme::Border, Ink=UiTheme::Text, Muted=UiTheme::Muted, Mint=UiTheme::Accent;
 enum Id {Open=100,Camera,Microphone,Monitor,Volume,TestSound,Refresh,CameraList,MicList,Pause,Stop,FileMode,CameraMode,FullScreen,Join,Host,Room,RemoteMode,Identity,Peers,Dial,AcceptCall,RejectCall,EndCall,ShareScreen,Reconnect,Meeting,Ai,Advanced,Account};
 std::wstring Wide(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),nullptr,0);std::wstring out(n,L' ');MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),out.data(),n);return out;}
 std::wstring CallMessage(const std::string& value){return LocalizedCallMessage(value);}
@@ -150,13 +150,13 @@ class StudioWindow {
     }
     AiPanel& ActiveAssistant(){return meetingAiContext_&&meetingPage_?meetingPage_->Assistant():ai_;}
     void Layout(){
-        RECT rc;GetClientRect(window_,&rc);width_=MulDiv(rc.right,96,dpi_);height_=MulDiv(rc.bottom,96,dpi_);left_=width_<1280?144:176;right_=width_<1280?248:280;
+        RECT rc;GetClientRect(window_,&rc);width_=MulDiv(rc.right,96,dpi_);height_=MulDiv(rc.bottom,96,dpi_);left_=width_<1280?176:224;right_=width_<1280?248:280;
         if(meetingPage_){meetingPage_->SetDpi(dpi_);ShowWindow(meetingPage_->Handle(),meetingView_?SW_SHOW:SW_HIDE);meetingPage_->Assistant().Hide();}
         ai_.Hide();account_.Hide();
         if(fullscreen_&&meetingView_&&meetingPage_){MoveWindow(meetingPage_->Handle(),0,0,rc.right,rc.bottom,TRUE);ShowWindow(surface_,SW_HIDE);ShowWindow(remoteSurface_,SW_HIDE);for(auto c:controls_)if(c)ShowWindow(c,SW_HIDE);return;}
         if(fullscreen_&&!aiView_&&!accountView_){MoveWindow(surface_,0,0,rc.right,rc.bottom,TRUE);ShowWindow(remoteSurface_,SW_HIDE);for(auto c:controls_)if(c)ShowWindow(c,SW_HIDE);return;}
         ShowWindow(remoteSurface_,SW_SHOW);for(auto c:controls_)if(c)ShowWindow(c,SW_SHOW);ShowWindow(Control(RemoteMode),SW_SHOW);
-        Place(RemoteMode,12,106,left_-24,42);Place(Meeting,12,158,left_-24,42);Place(Ai,12,210,left_-24,42);Place(Account,12,262,left_-24,42);
+        Place(RemoteMode,8,96,left_-16,38);Place(Meeting,8,138,left_-16,38);Place(Ai,8,180,left_-16,38);Place(Account,8,height_-54,left_-16,38);
         if(aiView_||meetingView_||accountView_){
             for(int id=Open;id<=Account;++id)if(id!=RemoteMode&&id!=Meeting&&id!=Ai&&id!=Account)ShowWindow(Control(id),SW_HIDE);
             ShowWindow(surface_,SW_HIDE);ShowWindow(remoteSurface_,SW_HIDE);
@@ -199,11 +199,11 @@ class StudioWindow {
         RECT all;GetClientRect(window_,&all);Fill(dc,all,Bg);if(fullscreen_)return;
         const int x=left_+16,end=width_-right_-16,total=end-x,deck=(total-16)/2,sourceWidth=(total-16)/2,mx=x+sourceWidth+16,rx=width_-right_+16;
         auto card=[&](int px,int py,int pw,int ph){Fill(dc,R(px,py,pw,ph),Border);Fill(dc,R(px+1,py+1,pw-2,ph-2),Panel);};
-        Fill(dc,R(0,40,left_,height_-40),Panel);Fill(dc,R(left_,40,width_-left_,56),Panel);Fill(dc,R(width_-right_,40,right_,height_-40),Panel);
-        Fill(dc,R(0,39,width_,1),Border);Fill(dc,R(left_-1,40,1,height_),Border);Fill(dc,R(width_-right_,40,1,height_),Border);Fill(dc,R(left_,95,width_-left_-right_,1),Border);
-        DrawIconEx(dc,S(12),S(10),LoadIconW(instance_,MAKEINTRESOURCEW(101)),S(20),S(20),0,nullptr,DI_NORMAL);Label(dc,L"LumaLive",42,6,150,28,body_);Label(dc,UiLabel(L"实时沟通工作台",L"Communication workspace"),232,6,220,28,small_,Muted);
-        Label(dc,UiLabel(L"主工作台",L"Workspace"),width_-right_-210,6,110,28,small_,Ink);Label(dc,UiLabel(L"本地连接",L"Local connection"),width_-right_-104,6,104,28,small_,Muted);
+        Fill(dc,R(0,0,left_,height_),UiTheme::Sidebar);Fill(dc,R(left_,40,width_-left_,56),Bg);Fill(dc,R(width_-right_,40,right_,height_-40),Panel);
+        Fill(dc,R(width_-right_,40,1,height_),Border);Fill(dc,R(left_,95,width_-left_-right_,1),Border);
+        DrawIconEx(dc,S(18),S(15),LoadIconW(instance_,MAKEINTRESOURCEW(101)),S(22),S(22),0,nullptr,DI_NORMAL);Label(dc,L"LumaLive",50,12,left_-60,28,body_);
         Label(dc,UiLabel(L"工作空间",L"Workspace"),20,60,left_-40,24,small_,Muted);
+        Fill(dc,R(16,height_-68,left_-32,1),Border);
         if(meetingView_){Fill(dc,R(left_,40,width_-left_,height_-40),Bg);return;}
         if(aiView_||accountView_){Fill(dc,R(left_,40,width_-left_,height_-40),Bg);return;}
         Label(dc,UiLabel(L"视频通话",L"Video calls"),x,50,total-194,36,body_);
@@ -253,7 +253,9 @@ class StudioWindow {
     void DrawButton(const DRAWITEMSTRUCT& d){
         if(d.CtlType==ODT_COMBOBOX){UiTheme::DrawComboItem(d,body_);return;}
         bool primary=d.CtlID==Open||d.CtlID==Join,selected=(d.CtlID==Ai&&aiView_)||(d.CtlID==Account&&accountView_)||(d.CtlID==RemoteMode&&!aiView_&&!meetingView_&&!accountView_)||(d.CtlID==Meeting&&meetingView_)||(d.CtlID==CameraMode&&cameraView_)||(d.CtlID==FileMode&&!cameraView_);bool disabled=(d.itemState&ODS_DISABLED)!=0;
-        UiTheme::DrawButton(d,body_,primary,selected,d.CtlID==EndCall||d.CtlID==RejectCall);
+        if(d.CtlID==RemoteMode||d.CtlID==Meeting||d.CtlID==Ai||d.CtlID==Account){const auto icon=d.CtlID==RemoteMode?UiTheme::NavIcon::Call:d.CtlID==Meeting?UiTheme::NavIcon::Meeting:d.CtlID==Ai?UiTheme::NavIcon::Assistant:UiTheme::NavIcon::Account;UiTheme::DrawNavigation(d,body_,selected,icon);return;}
+        const bool onCanvas=d.CtlID==Open||d.CtlID==CameraMode||d.CtlID==FileMode||d.CtlID==Pause||d.CtlID==Stop||d.CtlID==FullScreen;
+        UiTheme::DrawButton(d,body_,primary,selected,d.CtlID==EndCall||d.CtlID==RejectCall,onCanvas?Bg:Panel);
     }
     void Fullscreen(){
         if((aiView_||accountView_)&&!fullscreen_)return;

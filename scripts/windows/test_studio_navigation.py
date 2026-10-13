@@ -99,10 +99,15 @@ try:
             assert u.GetNextDlgTabItem(root, u.GetDlgItem(root, before), False) == u.GetDlgItem(root, after), "Sidebar Tab order differs from visual order"
             assert u.GetNextDlgTabItem(root, u.GetDlgItem(root, after), True) == u.GetDlgItem(root, before), "Sidebar reverse Tab order differs"
     sidebar_order()
-    for control_id in (117, 126, 127):
+    sidebar_bounds = w.RECT(); u.GetClientRect(root, c.byref(sidebar_bounds))
+    sidebar_width = (176 if sidebar_bounds.right / scale < 1280 else 224) * scale
+    for control_id in (117, 126, 127, 129):
         rect = w.RECT(); assert u.GetWindowRect(u.GetDlgItem(root, control_id), c.byref(rect))
         u.MapWindowPoints(None, root, c.byref(rect), 2)
-        assert 0 <= rect.left < rect.right <= 176 * scale, f"Module {control_id} outside sidebar: {rect.left}, {rect.right}, scale={scale}"
+        assert 0 <= rect.left < rect.right <= sidebar_width, f"Module {control_id} outside sidebar: {rect.left}, {rect.right}, scale={scale}"
+    account_bounds = w.RECT(); u.GetWindowRect(u.GetDlgItem(root, 129), c.byref(account_bounds))
+    u.MapWindowPoints(None, root, c.byref(account_bounds), 2)
+    assert abs(sidebar_bounds.bottom - account_bounds.bottom - 16 * scale) <= 2, 'Account entry is not anchored to sidebar bottom'
     # Native owner-drawn combos include non-client borders in their outer height.
     # Validate geometry as well as CB_GETITEMHEIGHT, so taller fields cannot cover actions.
     for combo_id, button_id in ((107, 101), (108, 102), (119, 120)):

@@ -81,6 +81,7 @@ try:
     def done(expected):
         wait(lambda:u.IsWindowEnabled(control(2160)))
         assert expected in text(control(2163)),text(control(2163))
+        fits()
     def password_visibility(*indices):
         assert visible(control(2168)), 'Password reveal action is missing'
         for index in indices:assert u.SendMessageW(control(2120+index),0xD2,0,0)!=0
@@ -90,13 +91,27 @@ try:
         for index in indices:assert u.SendMessageW(control(2120+index),0xD2,0,0)!=0
     def fits():
         bounds=w.RECT();u.GetClientRect(panel,c.byref(bounds))
+        visible_bounds=[]
         for i in [*range(2100,2104),*range(2120,2126),*range(2140,2146),*range(2160,2169)]:
             h=control(i)
             if not h or not visible(h):continue
             rect=w.RECT();u.GetWindowRect(h,c.byref(rect));u.MapWindowPoints(None,panel,c.byref(rect),2)
             assert 0<=rect.left<rect.right<=bounds.right and 0<=rect.top<rect.bottom<=bounds.bottom,(i,rect.bottom,bounds.bottom)
+            visible_bounds.append((i,rect))
+        for index,(first,a) in enumerate(visible_bounds):
+            for second,b in visible_bounds[index+1:]:
+                assert min(a.right,b.right)<=max(a.left,b.left) or min(a.bottom,b.bottom)<=max(a.top,b.top),f'Account controls overlap: {first}, {second}'
+        if text(control(2100))=='Sign in':
+            rects=dict(visible_bounds)
+            field=rects[2120]
+            assert abs(field.left+field.right-bounds.right)<=2,'Signed-out form is not centered'
+            for i in (2163,2164):
+                assert rects[i].left==field.left and rects[i].right==field.right,'Account guidance is not in the form column'
+            assert rects[2163].top>=rects[2160].bottom+round(8*scale),'Result crowds the primary action'
+            assert rects[2164].top>=rects[2163].bottom+round(8*scale),'Account guidance covers the result'
     assert visible(control(2163)) and visible(control(2164)), 'Status or account details hidden'
     assert not u.GetWindowLongW(control(2164),-16)&0x200000, 'Short account details show a scrollbar'
+    for tab in (2100,2101,2102,2103):click(tab);fits()
     click(2103);fields('127.0.0.1','70000');click(2160);done('Port must be')
     fields('127.0.0.1',str(port));click(2160);done('Connected')
     click(2101);fits();password_visibility(3,4);fields('ui.person','ui@example.com','UI Person','secure ui password','different');click(2160);done('do not match')

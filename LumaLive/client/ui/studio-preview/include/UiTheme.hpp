@@ -5,7 +5,8 @@
 #include <commctrl.h>
 #include <algorithm>
 namespace luma::client::ui::preview::UiTheme {
-inline constexpr COLORREF Background=RGB(8,10,13),Surface=RGB(16,19,24),Elevated=RGB(24,29,36),Border=RGB(39,45,55),Text=RGB(232,237,245),Muted=RGB(145,155,171),Accent=RGB(0,145,245),AccentSoft=RGB(20,48,70),Danger=RGB(238,100,110);
+// Shared desktop surfaces: hierarchy comes from spacing and tone, not blue panels.
+inline constexpr COLORREF Background=RGB(33,33,33),Sidebar=RGB(24,24,24),Surface=RGB(40,40,40),Elevated=RGB(48,48,48),Border=RGB(66,66,66),Text=RGB(243,243,243),Muted=RGB(180,180,180),Accent=RGB(86,156,240),AccentSoft=RGB(52,52,52),Danger=RGB(255,132,140);
 inline HFONT Font(int size,int weight=400){return CreateFontW(-size,0,0,0,weight,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,ChineseUi()?L"Microsoft YaHei UI":L"Segoe UI");}
 inline void Fill(HDC dc,RECT r,COLORREF color){auto brush=CreateSolidBrush(color);FillRect(dc,&r,brush);DeleteObject(brush);}
 inline constexpr UINT_PTR HoverTimer=0x4c554d41;
@@ -35,7 +36,7 @@ inline void InstallHover(HWND h){SetWindowSubclass(h,HoverProc,1,0);}
 // Retain native editing, selection, IME and scrolling; theme only the existing border.
 inline void DrawEditBorder(HWND h,HDC dc){
  RECT r{};GetWindowRect(h,&r);OffsetRect(&r,-r.left,-r.top);
- auto brush=CreateSolidBrush(IsWindowEnabled(h)&&GetFocus()==h?Accent:Border);FrameRect(dc,&r,brush);DeleteObject(brush);
+ auto brush=CreateSolidBrush(IsWindowEnabled(h)&&GetFocus()==h?Accent:(GetPropW(h,L"LumaQuietField")?Background:Border));FrameRect(dc,&r,brush);DeleteObject(brush);
 }
 inline LRESULT CALLBACK EditProc(HWND h,UINT message,WPARAM w,LPARAM l,UINT_PTR id,DWORD_PTR){
  if(message==WM_NCDESTROY){RemoveWindowSubclass(h,EditProc,id);return DefSubclassProc(h,message,w,l);}
@@ -101,15 +102,34 @@ inline LRESULT DrawTrackbar(const NMCUSTOMDRAW& d){
  RestoreDC(d.hdc,saved);return CDRF_SKIPDEFAULT;
 }
 
-inline void DrawButton(const DRAWITEMSTRUCT& d,HFONT font,bool primary=false,bool selected=false,bool danger=false){
+inline void DrawButton(const DRAWITEMSTRUCT& d,HFONT font,bool primary=false,bool selected=false,bool danger=false,COLORREF backdrop=Background){
  const int saved=SaveDC(d.hDC);const bool disabled=d.itemState&ODS_DISABLED;
- COLORREF fill=disabled?Surface:(selected?AccentSoft:(primary?Accent:Elevated));
- if(!disabled)fill=Blend(fill,primary?RGB(30,161,250):RGB(33,46,62),HoverAmount(d.hwndItem));
- if(!disabled&&(d.itemState&ODS_SELECTED))fill=AccentSoft;
- Fill(d.hDC,d.rcItem,Background);auto brush=CreateSolidBrush(fill);auto pen=CreatePen(PS_SOLID,1,selected?Accent:fill);SelectObject(d.hDC,brush);SelectObject(d.hDC,pen);
- const int radius=MulDiv(6,GetDpiForWindow(d.hwndItem),96);RoundRect(d.hDC,d.rcItem.left,d.rcItem.top,d.rcItem.right,d.rcItem.bottom,radius,radius);
- SelectObject(d.hDC,font);SetBkMode(d.hDC,TRANSPARENT);SetTextColor(d.hDC,disabled?RGB(88,101,117):(danger?Danger:Text));wchar_t label[256]{};GetWindowTextW(d.hwndItem,label,256);RECT text=d.rcItem;InflateRect(&text,-8,-2);DrawTextW(d.hDC,label,-1,&text,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
+ COLORREF fill=disabled?Surface:(primary?Text:(selected?AccentSoft:Surface));
+ if(!disabled)fill=Blend(fill,primary?RGB(216,216,216):RGB(60,60,60),HoverAmount(d.hwndItem));
+ if(!disabled&&(d.itemState&ODS_SELECTED))fill=primary?RGB(196,196,196):Border;
+ Fill(d.hDC,d.rcItem,backdrop);auto brush=CreateSolidBrush(fill);auto pen=CreatePen(PS_SOLID,1,selected?Muted:fill);SelectObject(d.hDC,brush);SelectObject(d.hDC,pen);
+ const int radius=MulDiv(16,GetDpiForWindow(d.hwndItem),96);RoundRect(d.hDC,d.rcItem.left,d.rcItem.top,d.rcItem.right,d.rcItem.bottom,radius,radius);
+ SelectObject(d.hDC,font);SetBkMode(d.hDC,TRANSPARENT);SetTextColor(d.hDC,disabled?RGB(123,123,123):(primary?Background:(danger?Danger:Text)));wchar_t label[256]{};GetWindowTextW(d.hwndItem,label,256);RECT text=d.rcItem;InflateRect(&text,-8,-2);DrawTextW(d.hDC,label,-1,&text,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS|DT_NOPREFIX);
  if(d.itemState&ODS_FOCUS){RECT focus=d.rcItem;InflateRect(&focus,-3,-3);DrawFocusRect(d.hDC,&focus);}
  RestoreDC(d.hDC,saved);DeleteObject(brush);DeleteObject(pen);
+}
+enum class NavIcon {Call,Meeting,Assistant,Account};
+inline void DrawNavigation(const DRAWITEMSTRUCT& d,HFONT font,bool selected,NavIcon icon){
+ const int saved=SaveDC(d.hDC);auto px=[&](int v){return MulDiv(v,int(GetDpiForWindow(d.hwndItem)),96);};
+ const bool disabled=(d.itemState&ODS_DISABLED)!=0;const auto ink=disabled?Muted:Text;
+ Fill(d.hDC,d.rcItem,Sidebar);
+ const auto fill=Blend(selected?Elevated:Sidebar,RGB(54,54,54),disabled?0:HoverAmount(d.hwndItem));
+ auto brush=CreateSolidBrush(fill);auto pen=CreatePen(PS_SOLID,std::max(1,px(1)),fill);SelectObject(d.hDC,brush);SelectObject(d.hDC,pen);
+ RoundRect(d.hDC,d.rcItem.left,d.rcItem.top,d.rcItem.right,d.rcItem.bottom,px(16),px(16));
+ auto stroke=CreatePen(PS_SOLID,std::max(1,px(1)),ink);SelectObject(d.hDC,stroke);SelectObject(d.hDC,GetStockObject(NULL_BRUSH));
+ const int x=d.rcItem.left+px(12),y=(d.rcItem.top+d.rcItem.bottom)/2-px(8);
+ auto line=[&](int a,int b,int c,int e){MoveToEx(d.hDC,x+px(a),y+px(b),nullptr);LineTo(d.hDC,x+px(c),y+px(e));};
+ if(icon==NavIcon::Call){RoundRect(d.hDC,x,y+px(2),x+px(12),y+px(14),px(4),px(4));line(12,6,17,3);line(17,3,17,13);line(17,13,12,10);}
+ else if(icon==NavIcon::Meeting){Ellipse(d.hDC,x+px(5),y,x+px(12),y+px(7));RoundRect(d.hDC,x+px(2),y+px(9),x+px(15),y+px(17),px(7),px(7));line(0,4,2,7);line(17,4,15,7);}
+ else if(icon==NavIcon::Assistant){RoundRect(d.hDC,x,y,x+px(17),y+px(13),px(5),px(5));line(4,13,4,17);line(4,17,9,13);line(4,5,13,5);line(4,8,10,8);}
+ else{Ellipse(d.hDC,x+px(5),y,x+px(12),y+px(7));RoundRect(d.hDC,x+px(1),y+px(9),x+px(16),y+px(17),px(8),px(8));}
+ SelectObject(d.hDC,font);SetBkMode(d.hDC,TRANSPARENT);SetTextColor(d.hDC,ink);wchar_t label[256]{};GetWindowTextW(d.hwndItem,label,256);auto content=d.rcItem;content.left+=px(40);content.right-=px(10);DrawTextW(d.hDC,label,-1,&content,DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS|DT_NOPREFIX);
+ if(d.itemState&ODS_FOCUS){auto focus=d.rcItem;InflateRect(&focus,-px(3),-px(3));DrawFocusRect(d.hDC,&focus);}
+ RestoreDC(d.hDC,saved);DeleteObject(stroke);DeleteObject(brush);DeleteObject(pen);
 }
 }

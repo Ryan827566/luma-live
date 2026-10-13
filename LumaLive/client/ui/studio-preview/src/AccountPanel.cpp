@@ -204,14 +204,42 @@ struct AccountPanel::Impl {
             text+=state.security.phone_verified?UiLabel(L"手机已验证",L"Phone verified"):UiLabel(L"手机未验证",L"Phone not verified");text+=L"\r\n";
             text+=state.security.mfa_enabled?UiLabel(L"双重验证已启用",L"Two-step verification on"):UiLabel(L"双重验证未启用",L"Two-step verification off");
             if(page==Page::Devices){text+=L"\r\n\r\n";for(const auto& device:state.sessions)text+=Wide(device.device_name)+L"\r\n"+Wide(device.remote_address)+L"\r\n\r\n";}
-        }else text=UiLabel(L"一个账户，连接你的工作空间。\r\n\r\n在这里管理身份、个人资料和登录设备。通话与会议会在切换页面时继续运行。",L"One account for your workspace.\r\n\r\nManage your identity, profile and signed-in devices here. Calls and meetings keep running when you switch pages.");
-        if(page==Page::Service)text=UiLabel(L"账户服务连接\r\n\r\n输入管理员提供的服务器 IPv4 地址和端口。连接成功后保存此地址，下次打开时自动填入。",L"Account service connection\r\n\r\nUse the server IPv4 address and port provided by your administrator. Connect to sign in, create an account and manage your profile. A successful connection saves this address for next time.");
+        }else text=UiLabel(L"管理身份与登录设备。切换页面时，通话和会议会继续运行。",L"Manage your identity and signed-in devices. Calls and meetings keep running when you switch pages.");
+        if(page==Page::Service)text=UiLabel(L"输入管理员提供的 IPv4 地址和端口。连接成功后保存，下次自动填入。",L"Enter your administrator's server IPv4 address and port. A successful connection saves them for your next visit.");
         if(page==Page::Security&&section==4){text=UiLabel(L"安全记录（本地时间）\r\n\r\n",L"Security activity (local time)\r\n\r\n");for(const auto& event:state.events)text+=EventText(event);if(state.events.empty())text+=UiLabel(L"暂无记录。",L"No activity yet.");}
         SetWindowTextW(detail,text.c_str());UpdateTranscriptScrollbar(detail);
     }
     void Move(HWND h,int x,int y,int w,int heightValue){MoveWindow(h,S(x),S(y),S(std::max(1,w)),S(heightValue),TRUE);}
     void Layout(){
         if(!window)return;RECT r{};GetClientRect(window,&r);width=MulDiv(r.right,96,int(dpi));height=MulDiv(r.bottom,96,int(dpi));
+        if(!state.authenticated){
+            // Keep the longest form, its result and its guidance visible at 621 DIP.
+            // Native controls stay alive so selection, IME and pending requests survive.
+            const bool compact=height<700;const int offset=std::clamp((height-700)/3,0,48);
+            formWidth=std::min(440,std::max(1,width-64));formX=(width-formWidth)/2;
+            const int tabsWidth=std::min(608,std::max(1,width-56)),tabWidth=(tabsWidth-24)/4;
+            const int tabsX=(width-(tabWidth*4+24))/2;
+            for(int i=0;i<4;++i)Move(tabs[i],tabsX+i*(tabWidth+8),96+offset,tabWidth,36);
+            int y=(compact?148:172)+offset;
+            if(GetWindowLongPtrW(mode,GWL_STYLE)&WS_VISIBLE){Move(mode,formX,y,formWidth,180);UiTheme::SetComboDpi(mode,dpi);y+=44;}
+            int revealField=-1;for(int i=0;i<fieldCount;++i)if(secrets[i])revealField=i;
+            for(int i=0;i<fieldCount;++i){
+                Move(labels[i],formX,y,formWidth-(i==revealField?142:0),18);
+                if(i==revealField)Move(reveal,formX+formWidth-134,y-2,134,24);
+                Move(fields[i],formX,y+22,formWidth,34);y+=compact?60:68;
+            }
+            const int actionY=y+8,half=(formWidth-8)/2;
+            Move(primary,formX,actionY,second==Action::None?formWidth:half,36);
+            Move(secondary,formX+half+8,actionY,half,36);
+            Move(third,formX,actionY+44,formWidth,30);
+            const int statusY=actionY+48;
+            Move(status,formX,statusY,formWidth,52);
+            SetPropW(detail,L"LumaQuietField",HANDLE(1));
+            Move(detail,formX,statusY+60,formWidth,48);UpdateTranscriptScrollbar(detail);
+            Move(confirm,formX,statusY+116,half,34);Move(cancel,formX+half+8,statusY+116,half,34);
+            InvalidateRect(window,nullptr,TRUE);return;
+        }
+        RemovePropW(detail,L"LumaQuietField");
         formX=28;const int content=width-56;formWidth=std::min(440,(content*57)/100);
         const int tabWidth=std::min(152,(content-24)/4);for(int i=0;i<4;++i)Move(tabs[i],formX+i*(tabWidth+8),96,tabWidth,36);
         int y=156;if(GetWindowLongPtrW(mode,GWL_STYLE)&WS_VISIBLE){Move(mode,formX,y,formWidth,180);UiTheme::SetComboDpi(mode,dpi);y+=52;}
@@ -323,8 +351,18 @@ struct AccountPanel::Impl {
     }
     void Paint(HDC dc){
         RECT r;GetClientRect(window,&r);UiTheme::Fill(dc,r,UiTheme::Background);const int saved=SaveDC(dc);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,UiTheme::Text);SelectObject(dc,heading);
-        RECT title{S(28),S(22),r.right-S(28),S(56)};DrawTextW(dc,UiLabel(L"账户与安全",L"Account & security"),-1,&title,DT_SINGLELINE|DT_VCENTER);SelectObject(dc,body);SetTextColor(dc,UiTheme::Muted);
-        RECT sub{S(28),S(60),r.right-S(28),S(82)};DrawTextW(dc,state.authenticated?UiLabel(L"管理个人资料与登录方式",L"Manage your profile and sign-in methods"):UiLabel(L"登录你的 LumaLive 工作空间",L"Sign in to your LumaLive workspace"),-1,&sub,DT_SINGLELINE|DT_END_ELLIPSIS);
+        const int offset=state.authenticated?0:std::clamp((height-700)/3,0,48);
+        const UINT alignment=state.authenticated?DT_LEFT:DT_CENTER;
+        const wchar_t* titleText=UiLabel(L"账户与安全",L"Account & security");
+        const wchar_t* subtitle=UiLabel(L"管理个人资料与登录方式",L"Manage your profile and sign-in methods");
+        if(!state.authenticated){
+            titleText=UiLabel(L"登录 LumaLive",L"Sign in to LumaLive");subtitle=UiLabel(L"连接你的工作空间",L"Connect to your workspace");
+            if(page==Page::Register){titleText=UiLabel(L"创建你的账户",L"Create your account");subtitle=UiLabel(L"开启你的 LumaLive 工作空间",L"Get started with your LumaLive workspace");}
+            if(page==Page::Recovery){titleText=UiLabel(L"找回密码",L"Reset your password");subtitle=UiLabel(L"通过邮箱验证，重新访问账户",L"Verify your email to regain access");}
+            if(page==Page::Service){titleText=UiLabel(L"连接账户服务",L"Connect your account service");subtitle=UiLabel(L"使用管理员提供的连接信息",L"Use the connection details from your administrator");}
+        }
+        RECT title{S(28),S(22+offset),r.right-S(28),S(56+offset)};DrawTextW(dc,titleText,-1,&title,alignment|DT_SINGLELINE|DT_VCENTER);SelectObject(dc,body);SetTextColor(dc,UiTheme::Muted);
+        RECT sub{S(28),S(60+offset),r.right-S(28),S(82+offset)};DrawTextW(dc,subtitle,-1,&sub,alignment|DT_SINGLELINE|DT_END_ELLIPSIS);
         RestoreDC(dc,saved);
     }
     LRESULT Handle(UINT m,WPARAM w,LPARAM l){
@@ -336,7 +374,7 @@ struct AccountPanel::Impl {
             if(HIWORD(w)!=BN_CLICKED)return 0;
             if(id==Primary)Start(first);if(id==Secondary)Start(second);if(id==Third)Start(thirdAction);if(id==Confirm)Start(pending,true);if(id==Cancel)CancelPending();
             if(id==Reveal){showPassword=!showPassword;for(int i=0;i<6;++i)if(secrets[i]){SendMessageW(fields[i],EM_SETPASSWORDCHAR,showPassword?0:L'\x25cf',0);InvalidateRect(fields[i],nullptr,TRUE);}SetWindowTextW(reveal,showPassword?UiLabel(L"隐藏密码",L"Hide password"):UiLabel(L"显示密码",L"Show password"));}return 0;}
-        case WM_CTLCOLORSTATIC:case WM_CTLCOLOREDIT:case WM_CTLCOLORLISTBOX:{auto dc=reinterpret_cast<HDC>(w);const bool edit=m!=WM_CTLCOLORSTATIC||reinterpret_cast<HWND>(l)==detail;SetTextColor(dc,reinterpret_cast<HWND>(l)==status&&error?UiTheme::Danger:UiTheme::Text);SetBkColor(dc,edit?UiTheme::Surface:UiTheme::Background);return reinterpret_cast<LRESULT>(edit?surface:background);}
+        case WM_CTLCOLORSTATIC:case WM_CTLCOLOREDIT:case WM_CTLCOLORLISTBOX:{auto dc=reinterpret_cast<HDC>(w);const auto control=reinterpret_cast<HWND>(l);const bool quiet=control==detail&&!state.authenticated;const bool edit=!quiet&&(m!=WM_CTLCOLORSTATIC||control==detail);SetTextColor(dc,control==status&&error?UiTheme::Danger:(quiet?UiTheme::Muted:UiTheme::Text));SetBkColor(dc,edit?UiTheme::Surface:UiTheme::Background);return reinterpret_cast<LRESULT>(edit?surface:background);}
         case WM_MEASUREITEM:if(auto d=reinterpret_cast<MEASUREITEMSTRUCT*>(l);d->CtlType==ODT_COMBOBOX){d->itemHeight=S(d->itemID==UINT(-1)?34:30);return TRUE;}break;
         case WM_DRAWITEM:{auto& d=*reinterpret_cast<DRAWITEMSTRUCT*>(l);if(d.CtlType==ODT_COMBOBOX)UiTheme::DrawComboItem(d,body);else UiTheme::DrawButton(d,body,d.CtlID==Primary||d.CtlID==Confirm,d.CtlID>=TabBase&&d.CtlID<TabBase+4&&pages[d.CtlID-TabBase]==page,d.CtlID==Third&&thirdAction==Action::Delete);return TRUE;}
         case WM_ERASEBKGND:return 1;

@@ -1,3 +1,9 @@
+# New priority: Codex-style UI (2026-10-13)
+
+The user now requests Codex-style login and post-login workspace layouts, preserving all functionality. See [codex-style-ui-plan.md](codex-style-ui-plan.md) for scope, estimates and acceptance. Main-only development continues. The first implementation replaces blue-black chrome with neutral shared surfaces, sidebar icon rows and a bottom account entry, and centers signed-out account forms. No sign-in gate, protocol or media lifecycle changed. Subsequent account settings/call/meeting/AI layout refinement is still pending. Quota wrap-ups must include a work/test/remaining/progress/time table.
+
+---
+
 # Current checkpoint: main and hosted account page (2026-10-13)
 
 Both `codex/video-meetings` and `codex/auth-registration-login` are merged into main (merge commits 26b616ba and 9c447563). Local development is now on main, without creating another branch. The former stale local HEAD/index was reconciled after content comparison and backup; preserve the independent legacy SVG difference.
