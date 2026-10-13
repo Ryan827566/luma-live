@@ -81,6 +81,13 @@ try:
     def done(expected):
         wait(lambda:u.IsWindowEnabled(control(2160)))
         assert expected in text(control(2163)),text(control(2163))
+    def password_visibility(*indices):
+        assert visible(control(2168)), 'Password reveal action is missing'
+        for index in indices:assert u.SendMessageW(control(2120+index),0xD2,0,0)!=0
+        click(2168)
+        for index in indices:assert u.SendMessageW(control(2120+index),0xD2,0,0)==0
+        click(2168)
+        for index in indices:assert u.SendMessageW(control(2120+index),0xD2,0,0)!=0
     def fits():
         bounds=w.RECT();u.GetClientRect(panel,c.byref(bounds))
         for i in [*range(2100,2104),*range(2120,2126),*range(2140,2146),*range(2160,2169)]:
@@ -92,7 +99,7 @@ try:
     assert not u.GetWindowLongW(control(2164),-16)&0x200000, 'Short account details show a scrollbar'
     click(2103);fields('127.0.0.1','70000');click(2160);done('Port must be')
     fields('127.0.0.1',str(port));click(2160);done('Connected')
-    click(2101);fits();fields('ui.person','ui@example.com','UI Person','secure ui password','different');click(2160);done('do not match')
+    click(2101);fits();password_visibility(3,4);fields('ui.person','ui@example.com','UI Person','secure ui password','different');click(2160);done('do not match')
     fields('ui.person','ui@example.com','UI Person','secure ui password','secure ui password');click(2160);done('Your account is ready')
     assert text(control(2121))=='','Password was retained after registration'
     click(2160);done('required')
@@ -108,7 +115,7 @@ try:
     wait(lambda:'signed in' in text(control(2163)))
     done('signed in')
 
-    assert text(control(2100))=='Profile';fits()
+    assert text(control(2100))=='Profile';fits();assert not visible(control(2168))
     fields('ui.person','ui@example.com','Updated UI','');click(2160);done('Done')
     assert 'Updated UI' in text(control(2164))
     # The page and its authenticated session survive module switches.
@@ -152,13 +159,13 @@ try:
     phone_login=mailbox('phone_login')
     fields('+14155552671',phone_login,'');click(2160);done('signed in')
     assert text(control(2100))=='Profile'
-    click(2101);select_mode(2);fields('wrong password','changed password','changed password');click(2160);done('incorrect')
+    click(2101);select_mode(2);fits();password_visibility(0,1,2);fields('wrong password','changed password','changed password');click(2160);done('incorrect')
     fields('secure ui password','changed password','changed password');click(2160);done('Password updated')
     assert text(control(2100))=='Sign in'
     fields('ui.person','secure ui password','');click(2160);done('incorrect')
     fields('ui.person','changed password','');click(2160);done('signed in')
     click(2161);done('signed out')
-    click(2102);fits();fields('ui.person');click(2161);done('check your email')
+    click(2102);fits();password_visibility(2,3);fields('ui.person');click(2161);done('check your email')
     reset_code=mailbox('password_reset')
 
     # A fresh client restores only the successful endpoint, without remembered credentials.

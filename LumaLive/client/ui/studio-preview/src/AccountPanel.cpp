@@ -194,6 +194,7 @@ struct AccountPanel::Impl {
             Field(0,UiLabel(L"账户服务器地址",L"Account server address"),Wide(host));Field(1,UiLabel(L"端口",L"Port"),std::to_wstring(port));Buttons(Action::Connect,UiLabel(L"连接服务",L"Connect"),state.authenticated?Action::Refresh:Action::None,UiLabel(L"刷新会话",L"Refresh session"));break;
         }
         if(page==Page::Security&&section==4)Buttons(Action::Events,UiLabel(L"刷新安全记录",L"Refresh activity"));
+        ShowWindow(reveal,std::any_of(secrets.begin(),secrets.end(),[](bool value){return value;})?SW_SHOW:SW_HIDE);
         RefreshDetail();Layout();Enable();
     }
     void RefreshDetail(){
@@ -214,10 +215,15 @@ struct AccountPanel::Impl {
         formX=28;const int content=width-56;formWidth=std::min(440,(content*57)/100);
         const int tabWidth=std::min(152,(content-24)/4);for(int i=0;i<4;++i)Move(tabs[i],formX+i*(tabWidth+8),96,tabWidth,36);
         int y=156;if(GetWindowLongPtrW(mode,GWL_STYLE)&WS_VISIBLE){Move(mode,formX,y,formWidth,180);UiTheme::SetComboDpi(mode,dpi);y+=52;}
-        for(int i=0;i<fieldCount;++i){Move(labels[i],formX,y,formWidth,20);Move(fields[i],formX,y+24,formWidth,34);y+=68;}
-        const int actionY=std::max(y+8,height-144),half=(formWidth-8)/2;
+        int revealField=-1;for(int i=0;i<fieldCount;++i)if(secrets[i])revealField=i;
+        for(int i=0;i<fieldCount;++i){
+            Move(labels[i],formX,y,formWidth-(i==revealField?142:0),20);
+            if(i==revealField)Move(reveal,formX+formWidth-134,y-2,134,24);
+            Move(fields[i],formX,y+24,formWidth,34);y+=68;
+        }
+        const int actionY=y+12,half=(formWidth-8)/2;
         Move(primary,formX,actionY,second==Action::None?formWidth:half,36);Move(secondary,formX+half+8,actionY,half,36);
-        Move(third,formX,actionY+44,formWidth,30);Move(reveal,formX+formWidth-134,y+2,134,28);
+        Move(third,formX,actionY+44,formWidth,30);
         const int detailX=formX+formWidth+40;Move(detail,detailX,156,width-detailX-28,std::max(160,height-316));UpdateTranscriptScrollbar(detail);
         Move(status,detailX,height-144,width-detailX-28,72);Move(confirm,detailX,height-60,(width-detailX-36)/2,34);Move(cancel,detailX+(width-detailX-36)/2+8,height-60,(width-detailX-36)/2,34);
         InvalidateRect(window,nullptr,TRUE);

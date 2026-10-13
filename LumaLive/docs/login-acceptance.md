@@ -28,7 +28,7 @@ The actual client at `output/next/Release/luma_studio.exe` hosts **Account** in 
 - `scripts/windows/verify_client.py` includes these three checks in the existing actual-EXE regression, records the binary SHA256 and all logs. Check `output/client-verification.json` for the current run result rather than inferring that a build equals full acceptance.
 - Account screenshots are under `output/ui-account-20261013`. Synthetic IME messages do not replace a real input-method or Narrator acceptance session.
 
-Latest run: all 23 actual-EXE checks passed. EXE SHA256 `9b22c046cc4140e9d43a79786550f32ef11adc3354014991f741b8c3ae7bd68c`. Compact Chinese sign-in/registration/recovery/connection captures were inspected.
+Latest run: all 23 actual-EXE checks passed. EXE SHA256 `14427495494c0670884b65ff499f3ba68db7e6c8e68dcf818ee230655bca8266`. Compact Chinese sign-in/registration/recovery/connection captures were inspected.
 
 ## How to try it
 
@@ -67,3 +67,5 @@ The native client now uses nonblocking sockets with monotonic deadlines for conn
 The hosted account test now supplies isolated email/SMS adapters through explicit service construction. Only the test fixture exposes captured synthetic codes through its private stdin/stdout pipe; no external delivery, user database or production debug-code response is used. Coverage includes delivery failures with localized status, invalid/correct email verification, phone-number/challenge mismatch, successful phone verification and SMS sign-in, incorrect/correct password changes, rejected old password, reset completed in a fresh client, consumed reset-token rejection and confirmed account deletion. This validates local end-to-end workflows, not production email/SMS providers.
 
 All 23 actual-EXE checks passed after the deadline and delivery-flow changes. The real-provider, TLS, database-deployment and physical-device gates remain open.
+
+Password visibility now works for registration, recovery, password changes and other password fields; it resets when changing pages. Actions follow the form instead of sitting at the window bottom. Native UI regression verifies masking/reveal/restoration and hidden reveal controls on profile, with all 23 checks passed. Compact Chinese captures are in output/ui-account-forms-20261013.
