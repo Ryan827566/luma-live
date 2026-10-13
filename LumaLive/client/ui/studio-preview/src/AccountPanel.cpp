@@ -2,6 +2,7 @@
 #include "IAccountService.hpp"
 #include "UiTheme.hpp"
 #include "UiAccessibility.hpp"
+#include "TranscriptView.hpp"
 #include <array>
 #include <atomic>
 #include <functional>
@@ -199,7 +200,7 @@ struct AccountPanel::Impl {
         }else text=UiLabel(L"一个账户，连接你的工作空间。\r\n\r\n在这里管理身份、个人资料和登录设备。通话与会议会在切换页面时继续运行。",L"One account for your workspace.\r\n\r\nManage your identity, profile and signed-in devices here. Calls and meetings keep running when you switch pages.");
         if(page==Page::Service)text=UiLabel(L"账户服务连接\r\n\r\n输入管理员提供的服务器 IPv4 地址和端口。连接成功后可使用登录、注册及账户管理。",L"Account service connection\r\n\r\nUse the server IPv4 address and port provided by your administrator. Connect to sign in, create an account and manage your profile.");
         if(page==Page::Security&&section==4){text=UiLabel(L"安全记录（本地时间）\r\n\r\n",L"Security activity (local time)\r\n\r\n");for(const auto& event:state.events)text+=EventText(event);if(state.events.empty())text+=UiLabel(L"暂无记录。",L"No activity yet.");}
-        SetWindowTextW(detail,text.c_str());
+        SetWindowTextW(detail,text.c_str());UpdateTranscriptScrollbar(detail);
     }
     void Move(HWND h,int x,int y,int w,int heightValue){MoveWindow(h,S(x),S(y),S(std::max(1,w)),S(heightValue),TRUE);}
     void Layout(){
@@ -211,7 +212,7 @@ struct AccountPanel::Impl {
         const int actionY=std::max(y+8,height-144),half=(formWidth-8)/2;
         Move(primary,formX,actionY,second==Action::None?formWidth:half,36);Move(secondary,formX+half+8,actionY,half,36);
         Move(third,formX,actionY+44,formWidth,30);Move(reveal,formX+formWidth-134,y+2,134,28);
-        const int detailX=formX+formWidth+40;Move(detail,detailX,156,width-detailX-28,std::max(160,height-316));
+        const int detailX=formX+formWidth+40;Move(detail,detailX,156,width-detailX-28,std::max(160,height-316));UpdateTranscriptScrollbar(detail);
         Move(status,detailX,height-144,width-detailX-28,72);Move(confirm,detailX,height-60,(width-detailX-36)/2,34);Move(cancel,detailX+(width-detailX-36)/2+8,height-60,(width-detailX-36)/2,34);
         InvalidateRect(window,nullptr,TRUE);
     }
@@ -302,7 +303,7 @@ struct AccountPanel::Impl {
             if(action==Action::Events)RefreshDetail();
             if(action==Action::PhoneCode)phoneChallenge=Part(message,"challenge="," expires=");
             if(action==Action::RequestPhone)verifyChallenge=Part(message,"challenge="," expires=");
-            if(action==Action::EnableMfa){Configure();std::wstring text=UiLabel(L"身份验证器密钥\r\n",L"Authenticator key\r\n")+Wide(Part(message,"TOTP secret=","; otpauth="))+L"\r\n\r\n"+UiLabel(L"恢复码（妥善保存）\r\n",L"Recovery codes (keep safe)\r\n")+Wide(Part(message,"recovery codes=","; TOTP secret="));SetWindowTextW(detail,text.c_str());if(IsWindowVisible(window))SetFocus(detail);}
+            if(action==Action::EnableMfa){Configure();std::wstring text=UiLabel(L"身份验证器密钥\r\n",L"Authenticator key\r\n")+Wide(Part(message,"TOTP secret=","; otpauth="))+L"\r\n\r\n"+UiLabel(L"恢复码（妥善保存）\r\n",L"Recovery codes (keep safe)\r\n")+Wide(Part(message,"recovery codes=","; TOTP secret="));SetWindowTextW(detail,text.c_str());UpdateTranscriptScrollbar(detail);if(IsWindowVisible(window))SetFocus(detail);}
         }else Notice(ErrorLabel(state.result.code.empty()?message:state.result.code),true);
         if(!message.empty())SecureZeroMemory(message.data(),message.size());Enable();InvalidateRect(window,nullptr,FALSE);
     }

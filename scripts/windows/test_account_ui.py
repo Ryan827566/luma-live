@@ -77,6 +77,7 @@ try:
             rect=w.RECT();u.GetWindowRect(h,c.byref(rect));u.MapWindowPoints(None,panel,c.byref(rect),2)
             assert 0<=rect.left<rect.right<=bounds.right and 0<=rect.top<rect.bottom<=bounds.bottom,(i,rect.bottom,bounds.bottom)
     assert visible(control(2163)) and visible(control(2164)), 'Status or account details hidden'
+    assert not u.GetWindowLongW(control(2164),-16)&0x200000, 'Short account details show a scrollbar'
     click(2103);fields('127.0.0.1','70000');click(2160);done('Port must be')
     fields('127.0.0.1',str(port));click(2160);done('Connected')
     click(2101);fits();fields('ui.person','ui@example.com','UI Person','secure ui password','different');click(2160);done('do not match')
@@ -116,6 +117,11 @@ try:
     assert text(control(2160))=='Turn on verification', 'MFA toggle did not refresh'
     u.SendMessageW(control(2165),0x14E,4,0);u.SendMessageW(panel,0x111,(1<<16)|2165,0)
     done('Done');assert 'Security activity' in text(control(2164)) and 'Password sign-in succeeded' in text(control(2164))
+    assert u.GetWindowLongW(control(2164),-16)&0x200000, 'Overflowing activity cannot scroll'
+    u.SendMessageW(control(2164),0xB6,0,1000)
+    assert u.SendMessageW(control(2164),0xCE,0,0)>0, 'Activity scroll position did not advance'
+    click(2100)
+    assert not u.GetWindowLongW(control(2164),-16)&0x200000, 'Short profile retained the activity scrollbar'
     click(2100);click(2161);done('signed out');assert text(control(2100))=='Sign in'
     click(2102);fits();fields('ui.person');click(2161);done('check your email')
     print('PASS: account UI including actual message-loop Enter and simulated IME Enter suppression')
