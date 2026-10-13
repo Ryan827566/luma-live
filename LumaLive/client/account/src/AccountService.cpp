@@ -88,8 +88,8 @@ public:
         Packet q;
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
-        if(q.type!=Type::RegisterChallenge||q.fields.size()!=3)return{false,"invalid registration challenge"};
-        const auto iterations=static_cast<std::uint32_t>(std::stoul(q.fields[2]));
+        std::uint32_t iterations=0;
+        if(!ValidPasswordChallenge(q,Type::RegisterChallenge,iterations))return InvalidChallengeLocked();
         const auto verifier=pbkdf2_hmac_sha256(p,from_hex(q.fields[0]),iterations);
         if(!Send({Type::RegisterFinish,{hex(verifier)} }))return{false,"send failed"};
         if(!Recv(q))return{false,"receive failed"};
@@ -111,9 +111,8 @@ public:
         Packet q;
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
-        if(q.type!=Type::LoginChallenge||q.fields.size()!=4)return{false,"invalid login challenge"};
-
-        const auto iterations=static_cast<std::uint32_t>(std::stoul(q.fields[3]));
+        std::uint32_t iterations=0;
+        if(!ValidPasswordChallenge(q,Type::LoginChallenge,iterations))return InvalidChallengeLocked();
         const auto verifier=pbkdf2_hmac_sha256(p,from_hex(q.fields[0]),iterations);
         const auto proof=hmac_sha256(verifier,from_hex(q.fields[1]));
         const bool mfa_required=q.fields[2]=="1";
@@ -362,9 +361,8 @@ public:
         if(!Send({Type::ChangePasswordBegin,{session_.token}}))return{false,"send failed"};
         Packet q;if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
-        if(q.type!=Type::ChangePasswordChallenge||q.fields.size()!=4)return{false,"invalid password change challenge"};
-
-        const auto current_iterations=static_cast<std::uint32_t>(std::stoul(q.fields[3]));
+        std::uint32_t current_iterations=0;
+        if(!ValidPasswordChallenge(q,Type::ChangePasswordChallenge,current_iterations))return InvalidChallengeLocked();
         const auto current_verifier=pbkdf2_hmac_sha256(current_password,from_hex(q.fields[0]),current_iterations);
         const auto current_proof=hmac_sha256(current_verifier,from_hex(q.fields[1]));
         const auto new_verifier=pbkdf2_hmac_sha256(
@@ -552,6 +550,36 @@ public:
     }
 
 private:
+    // Validate the complete challenge before any password work, including fields
+    // consumed only after the first derivation. Keep generic crypto primitives unchanged.
+    static bool ValidPasswordChallenge(const Packet& packet,Type expected,std::uint32_t& iterations){
+        if(packet.type!=expected||packet.fields.size()!=(expected==Type::RegisterChallenge?3u:4u))return false;
+        const auto valid_hex=[](std::string_view text,std::size_t bytes){
+            if(text.size()!=bytes*2)return false;
+            for(char c:text)if(!((c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F')))return false;
+            return true;
+        };
+        if(!valid_hex(packet.fields[0],16)||!valid_hex(packet.fields[1],32))return false;
+        if(expected==Type::ChangePasswordChallenge&&!valid_hex(packet.fields[2],16))return false;
+        if(expected==Type::LoginChallenge&&packet.fields[2]!="0"&&packet.fields[2]!="1")return false;
+        const auto& text=packet.fields.back();
+        if(text.empty()||text.size()>10)return false;
+        constexpr auto maximum=luma::contracts::auth::crypto::kPasswordPbkdf2Iterations;
+        iterations=0;
+        for(char c:text){
+            if(c<'0'||c>'9')return false;
+            const auto digit=static_cast<std::uint32_t>(c-'0');
+            if(iterations>(maximum-digit)/10)return false;
+            iterations=iterations*10+digit;
+        }
+        return iterations!=0;
+    }
+
+    OperationResult InvalidChallengeLocked(){
+        DisconnectLocked();
+        return{false,"invalid authentication challenge","invalid_challenge"};
+    }
+
     void ClearSessionLocked(){
         session_={};
         security_={};

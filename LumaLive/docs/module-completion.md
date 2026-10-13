@@ -6,6 +6,8 @@ The client now includes a hosted Account page in the left navigation. Registrati
 
 Account detail scrollbars now follow content size. Successful connection endpoints persist across client restarts, with invalid-file recovery and isolated native/UI tests; passwords and session tokens are not saved.
 
+Password challenges are now fully validated before derivation, preventing unbounded or malformed server parameters from stalling the account worker. All 23 actual-EXE checks, including 77 malformed loopback-server cases, passed.
+
 The detailed earlier snapshots below are chronological history; their earlier branch/UI instructions are superseded by the user's main-only development request and the latest checkpoint.
 
 ---

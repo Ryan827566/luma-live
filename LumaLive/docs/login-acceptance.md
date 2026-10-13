@@ -28,7 +28,7 @@ The actual client at `output/next/Release/luma_studio.exe` hosts **Account** in 
 - `scripts/windows/verify_client.py` includes these three checks in the existing actual-EXE regression, records the binary SHA256 and all logs. Check `output/client-verification.json` for the current run result rather than inferring that a build equals full acceptance.
 - Account screenshots are under `output/ui-account-20261013`. Synthetic IME messages do not replace a real input-method or Narrator acceptance session.
 
-Latest run: all 23 actual-EXE checks passed. EXE SHA256 `eccbe99b8d3bbba6f6c0ac58aa40b2f4ae7459e8ed2413db4ea3fb35d24b8732`. Compact Chinese sign-in/registration/recovery/connection captures were inspected.
+Latest run: all 23 actual-EXE checks passed. EXE SHA256 `9f0ea1c248a20579eae5c23cd83c70d74c6aa03edf44bf2e7c429f9784d4717c`. Compact Chinese sign-in/registration/recovery/connection captures were inspected.
 
 ## How to try it
 
@@ -51,3 +51,11 @@ A successful explicit connection saves only the IPv4 address and port under `%LO
 The native settings regression covers bounded parsing, strict IPv4/port validation, Unicode paths, atomic replacement failure and preservation of prior contents. Actual-EXE UI tests use a temporary `LUMALIVE_ACCOUNT_SETTINGS_PATH`, verify restart restoration and empty credentials, then verify failed connections and malformed files preserve saved bytes. Tests never modify the user's account connection settings.
 
 After this integration, all 23 actual-EXE checks passed, including the added native account settings regression.
+
+## Authentication challenge bounds (2026-10-13)
+
+Registration, password login and password change now validate the entire server challenge before password derivation: packet type/count, 16-byte salts, 32-byte nonce, hexadecimal encoding, login MFA flag and decimal iteration count from 1 through the current protocol ceiling of 600000. Invalid parameters disconnect the client, clear cached identity and return the stable `invalid_challenge` error, displayed as invalid service authentication data rather than a user verification-code error.
+
+The client regression adds 77 scripted loopback-server cases for malformed/oversized iteration counts and malformed fields. Each establishes a synthetic prior identity and verifies prompt failure without an exception or a proof/verifier reply, followed by cleared session state. A separate process with a ten-second watchdog prevents an old unbounded calculation from hanging the suite. Existing real local-server tests cover the normal 600000-iteration path. These bounds do not supply the still-missing authenticated encrypted transport.
+
+The full 23-check verifier passed after the challenge-boundary fix, including the 77 malformed-server cases and normal local-server account workflows.
