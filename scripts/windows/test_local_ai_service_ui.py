@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+from workspace_auth_fixture import WorkspaceAuthFixture
 
 u = c.WinDLL("user32", use_last_error=True)
 callback = c.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
@@ -20,6 +21,7 @@ u.FindWindowExW.argtypes = [w.HWND, w.HWND, w.LPCWSTR, w.LPCWSTR]; u.FindWindowE
 u.SendMessageW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]; u.SendMessageW.restype = c.c_ssize_t
 u.PostMessageW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
 u.IsWindowEnabled.argtypes = [w.HWND]; u.IsWindowEnabled.restype = w.BOOL
+u.GetWindowLongW.argtypes = [w.HWND, c.c_int]
 u.GetWindowTextW.argtypes = [w.HWND, w.LPWSTR, c.c_int]
 
 def wait_for(fn, message, timeout=15):
@@ -45,6 +47,7 @@ def main():
         start=subprocess.STARTUPINFO(); start.dwFlags=subprocess.STARTF_USESHOWWINDOW; start.wShowWindow=0
         process=subprocess.Popen([str(executable)],env=env,startupinfo=start)
         root=None
+        auth_fixture=None
         def find_root():
             found=[]
             @callback
@@ -63,6 +66,8 @@ def main():
             except OSError: return None
         try:
             root=wait_for(find_root,"Client did not create its main window")
+            auth_fixture=WorkspaceAuthFixture(executable)
+            auth_fixture.login(root)
             u.SendMessageW(root,0x111,127,0)
             panel=wait_for(lambda:u.FindWindowExW(root,None,"LumaSessionAi",None),"AI page missing")
             u.SendMessageW(panel,0x111,40,0)
@@ -85,12 +90,27 @@ def main():
             wait_for(lambda:u.IsWindowEnabled(u.GetDlgItem(panel,40)),"Start not restored after stopping")
             u.SendMessageW(panel,0x111,40,0)
             wait_for(health,"Service could not restart")
+            u.SendMessageW(root,0x111,129,0)
+            account=u.FindWindowExW(root,None,"LumaAccountPage",None)
+            u.SendMessageW(account,0x111,2100,0)
+            u.SendMessageW(account,0x111,2161,0)
+            wait_for(lambda:health() is None,"Signing out left the owned AI service running")
+            wait_for(lambda:not u.GetWindowLongW(u.GetDlgItem(root,117),-16)&0x10000000,
+                     "Signing out did not finish locking the workspace")
+            auth_fixture.login(root)
+            u.SendMessageW(root,0x111,127,0)
+            panel=wait_for(lambda:u.FindWindowExW(root,None,"LumaSessionAi",None),"AI page missing after re-login")
+            u.SendMessageW(panel,0x111,13,0)
+            wait_for(lambda:u.IsWindowEnabled(u.GetDlgItem(panel,40)),"AI start disabled after re-login")
+            u.SendMessageW(panel,0x111,40,0)
+            wait_for(health,"AI service could not start after re-login")
             u.PostMessageW(root,0x10,0,0)
             process.wait(timeout=15)
             assert process.returncode==0,"Client did not close cleanly"
             wait_for(lambda:health() is None,"Client exit orphaned the packaged AI process")
-            print("PASS: packaged service start, opt-in, navigation, stop, restart, exit cleanup")
+            print("PASS: packaged service start, opt-in, navigation, stop, restart, logout/re-login, exit cleanup")
         finally:
+            if auth_fixture: auth_fixture.close()
             if process.poll() is None:
                 if root: u.PostMessageW(root,0x10,0,0)
                 try: process.wait(timeout=8)

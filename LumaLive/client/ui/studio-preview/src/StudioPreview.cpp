@@ -75,6 +75,8 @@ class StudioWindow {
     bool connectionSettings_{false};
     bool aiView_{false},meetingView_{false},meetingAiContext_{false},accountView_{false};
     AccountPanel account_;
+    bool workspaceReady_{false},uiReady_{false},devicesReady_{false};
+    std::wstring accountLabel_,accountEmail_;
     std::unique_ptr<HostedMeeting> meetingPage_;
     bool cameraView_{true},paused_{false},fullscreen_{false},closing_{false};
     RECT preview_{},remotePreview_{},savedWindow_{};DWORD savedStyle_{};
@@ -127,6 +129,7 @@ class StudioWindow {
         EnableWindow(Control(MicList),!capture_->IsMicrophoneCapturing()&&!microphones_.devices.empty());EnableWindow(Control(Monitor),capture_->IsMicrophoneCapturing());InvalidateRect(window_,nullptr,FALSE);
     }
     void OpenFile(){
+        if(!workspaceReady_||!account_.IsAuthenticated())return;
         if(aiView_||meetingView_||accountView_)return;
         wchar_t path[32768]{};OPENFILENAMEW ofn{sizeof(ofn)};ofn.hwndOwner=window_;std::wstring filter=UiLabel(L"视频与音频",L"Video and audio");filter.push_back(L'\0');filter+=L"*.mp4;*.mov;*.wmv;*.avi;*.m4v;*.mp3;*.wav;*.m4a;*.wma";filter.push_back(L'\0');filter+=UiLabel(L"所有文件",L"All files");filter.push_back(L'\0');filter+=L"*.*";filter.push_back(L'\0');ofn.lpstrFilter=filter.c_str();ofn.lpstrFile=path;ofn.nMaxFile=32768;ofn.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
         if(!GetOpenFileNameW(&ofn))return;
@@ -150,13 +153,21 @@ class StudioWindow {
     }
     AiPanel& ActiveAssistant(){return meetingAiContext_&&meetingPage_?meetingPage_->Assistant():ai_;}
     void Layout(){
+        if(!uiReady_)return;
         RECT rc;GetClientRect(window_,&rc);width_=MulDiv(rc.right,96,dpi_);height_=MulDiv(rc.bottom,96,dpi_);left_=width_<1280?176:224;right_=width_<1280?248:280;
+        if(!workspaceReady_){
+            for(auto h:controls_)if(h)ShowWindow(h,SW_HIDE);
+            ShowWindow(surface_,SW_HIDE);ShowWindow(remoteSurface_,SW_HIDE);
+            if(meetingPage_)ShowWindow(meetingPage_->Handle(),SW_HIDE);
+            ai_.Hide();account_.Open(window_);account_.Place(R(0,40,width_,height_-40),dpi_);
+            InvalidateRect(window_,nullptr,FALSE);return;
+        }
         if(meetingPage_){meetingPage_->SetDpi(dpi_);ShowWindow(meetingPage_->Handle(),meetingView_?SW_SHOW:SW_HIDE);meetingPage_->Assistant().Hide();}
         ai_.Hide();account_.Hide();
         if(fullscreen_&&meetingView_&&meetingPage_){MoveWindow(meetingPage_->Handle(),0,0,rc.right,rc.bottom,TRUE);ShowWindow(surface_,SW_HIDE);ShowWindow(remoteSurface_,SW_HIDE);for(auto c:controls_)if(c)ShowWindow(c,SW_HIDE);return;}
         if(fullscreen_&&!aiView_&&!accountView_){MoveWindow(surface_,0,0,rc.right,rc.bottom,TRUE);ShowWindow(remoteSurface_,SW_HIDE);for(auto c:controls_)if(c)ShowWindow(c,SW_HIDE);return;}
         ShowWindow(remoteSurface_,SW_SHOW);for(auto c:controls_)if(c)ShowWindow(c,SW_SHOW);ShowWindow(Control(RemoteMode),SW_SHOW);
-        Place(RemoteMode,8,96,left_-16,38);Place(Meeting,8,138,left_-16,38);Place(Ai,8,180,left_-16,38);Place(Account,8,height_-54,left_-16,38);
+        Place(RemoteMode,8,96,left_-16,38);Place(Meeting,8,138,left_-16,38);Place(Ai,8,180,left_-16,38);Place(Account,8,height_-72,left_-16,38);
         if(aiView_||meetingView_||accountView_){
             for(int id=Open;id<=Account;++id)if(id!=RemoteMode&&id!=Meeting&&id!=Ai&&id!=Account)ShowWindow(Control(id),SW_HIDE);
             ShowWindow(surface_,SW_HIDE);ShowWindow(remoteSurface_,SW_HIDE);
@@ -197,13 +208,15 @@ class StudioWindow {
     }
     void Paint(HDC dc){
         RECT all;GetClientRect(window_,&all);Fill(dc,all,Bg);if(fullscreen_)return;
+        if(!workspaceReady_){DrawIconEx(dc,S(18),S(10),LoadIconW(instance_,MAKEINTRESOURCEW(101)),S(22),S(22),0,nullptr,DI_NORMAL);Label(dc,L"LumaLive",50,7,150,28,body_);return;}
         const int x=left_+16,end=width_-right_-16,total=end-x,deck=(total-16)/2,sourceWidth=(total-16)/2,mx=x+sourceWidth+16,rx=width_-right_+16;
         auto card=[&](int px,int py,int pw,int ph){Fill(dc,R(px,py,pw,ph),Border);Fill(dc,R(px+1,py+1,pw-2,ph-2),Panel);};
         Fill(dc,R(0,0,left_,height_),UiTheme::Sidebar);Fill(dc,R(left_,40,width_-left_,56),Bg);Fill(dc,R(width_-right_,40,right_,height_-40),Panel);
         Fill(dc,R(width_-right_,40,1,height_),Border);Fill(dc,R(left_,95,width_-left_-right_,1),Border);
         DrawIconEx(dc,S(18),S(15),LoadIconW(instance_,MAKEINTRESOURCEW(101)),S(22),S(22),0,nullptr,DI_NORMAL);Label(dc,L"LumaLive",50,12,left_-60,28,body_);
         Label(dc,UiLabel(L"工作空间",L"Workspace"),20,60,left_-40,24,small_,Muted);
-        Fill(dc,R(16,height_-68,left_-32,1),Border);
+        Fill(dc,R(16,height_-86,left_-32,1),Border);
+        Label(dc,accountEmail_,48,height_-33,left_-60,20,small_,Muted);
         if(meetingView_){Fill(dc,R(left_,40,width_-left_,height_-40),Bg);return;}
         if(aiView_||accountView_){Fill(dc,R(left_,40,width_-left_,height_-40),Bg);return;}
         Label(dc,UiLabel(L"视频通话",L"Video calls"),x,50,total-194,36,body_);
@@ -258,10 +271,12 @@ class StudioWindow {
         UiTheme::DrawButton(d,body_,primary,selected,d.CtlID==EndCall||d.CtlID==RejectCall,onCanvas?Bg:Panel);
     }
     void Fullscreen(){
+        if(!workspaceReady_||!account_.IsAuthenticated())return;
         if((aiView_||accountView_)&&!fullscreen_)return;
         fullscreen_=!fullscreen_;if(fullscreen_){GetWindowRect(window_,&savedWindow_);savedStyle_=static_cast<DWORD>(GetWindowLongPtrW(window_,GWL_STYLE));SetWindowLongPtrW(window_,GWL_STYLE,savedStyle_&~WS_OVERLAPPEDWINDOW);MONITORINFO mi{sizeof(mi)};GetMonitorInfoW(MonitorFromWindow(window_,MONITOR_DEFAULTTONEAREST),&mi);SetWindowPos(window_,HWND_TOP,mi.rcMonitor.left,mi.rcMonitor.top,mi.rcMonitor.right-mi.rcMonitor.left,mi.rcMonitor.bottom-mi.rcMonitor.top,SWP_FRAMECHANGED);}else{SetWindowLongPtrW(window_,GWL_STYLE,savedStyle_);SetWindowPos(window_,nullptr,savedWindow_.left,savedWindow_.top,savedWindow_.right-savedWindow_.left,savedWindow_.bottom-savedWindow_.top,SWP_FRAMECHANGED|SWP_NOZORDER);}Layout();
     }
     void Command(int id){
+        if(!workspaceReady_||!account_.IsAuthenticated())return;
         if(id==Advanced){connectionSettings_=!connectionSettings_;Layout();return;}
         if(meetingPage_&&meetingPage_->Active()&&(id==Camera||id==Microphone||id==ShareScreen||id==Join)){status_=UiLabel(L"请先离开会议，再开始通话或本地采集",L"Leave the meeting before starting a call or local capture.");InvalidateRect(window_,nullptr,FALSE);return;}
         switch(id){
@@ -303,10 +318,37 @@ class StudioWindow {
         }
         InvalidateRect(window_,nullptr,FALSE);InvalidateRect(surface_,nullptr,FALSE);for(int i:{CameraMode,FileMode,RemoteMode})InvalidateRect(Control(i),nullptr,TRUE);
     }
+    void SyncAccount(){
+        const bool authenticated=account_.IsAuthenticated();
+        if(authenticated!=workspaceReady_){
+            if(!authenticated){
+                // Restore geometry before locking commands; account loss always ends media.
+                if(fullscreen_){fullscreen_=false;SetWindowLongPtrW(window_,GWL_STYLE,savedStyle_);SetWindowPos(window_,nullptr,savedWindow_.left,savedWindow_.top,savedWindow_.right-savedWindow_.left,savedWindow_.bottom-savedWindow_.top,SWP_FRAMECHANGED|SWP_NOZORDER);}
+                aiCallActive_=false;ai_.session.Enable(false);
+                monitor_=false;expectCamera_=false;expectMicrophone_=false;screen_.Stop();
+                if(capture_){capture_->StopCamera();capture_->StopMicrophone();}
+                call_.Stop();remoteAudio_.Close();audio_.Close();CloseFile();video_.Clear();remoteVideo_.Clear();
+                // Stop active media before joining any pending AI HTTP worker.
+                ai_.Close();LocalAiService::Instance().Stop();meetingPage_.reset();ai_.session.Reset();
+                peak_=0;remotePeak_=0;shownPeers_.clear();SendMessageW(Control(Peers),CB_RESETCONTENT,0,0);
+                SetWindowTextW(Control(Camera),UiLabel(L"开启摄像头",L"Start camera"));SetWindowTextW(Control(Microphone),UiLabel(L"开启麦克风",L"Start microphone"));SetWindowTextW(Control(ShareScreen),UiLabel(L"共享主屏幕",L"Share screen"));SetWindowTextW(Control(Monitor),UiLabel(L"监听：关闭",L"Monitoring off"));
+                EnableWindow(Control(Monitor),FALSE);EnableWindow(Control(CameraList),!cameras_.devices.empty());EnableWindow(Control(MicList),!microphones_.devices.empty());
+                for(int id:{Host,Room,Identity})EnableWindow(Control(id),TRUE);
+                SetWindowTextW(Control(Join),UiLabel(L"加入房间",L"Join room"));
+            }
+            workspaceReady_=authenticated;accountView_=!authenticated;aiView_=false;meetingView_=false;meetingAiContext_=false;
+            if(authenticated&&!devicesReady_){auto result=capture_->Start();devicesReady_=result.IsOk();if(!result.IsOk())status_=UiLabel(L"设备初始化失败，请检查设备后重新登录。",L"Device initialization failed. Check your devices and sign in again.");Enumerate();}
+            Layout();
+            if(authenticated)SetFocus(Control(RemoteMode));
+        }
+        const auto name=authenticated?account_.DisplayName():std::wstring();const auto email=authenticated?account_.Email():std::wstring();
+        if(name!=accountLabel_||email!=accountEmail_){accountLabel_=name;accountEmail_=email;SetWindowTextW(Control(Account),name.empty()?UiLabel(L"账户",L"Account"):name.c_str());SetAccessibleName(Control(Account),(std::wstring(UiLabel(L"账户：",L"Account: "))+name+L" "+email).c_str());InvalidateRect(window_,nullptr,FALSE);}
+    }
     void Shutdown(){if(closing_)return;closing_=true;aiCallActive_=false;account_.Close();meetingPage_.reset();ai_.Close();KillTimer(window_,1);monitor_=false;screen_.Stop();if(capture_){capture_->StopCamera();capture_->StopMicrophone();capture_->Stop();}call_.Stop();remoteAudio_.Close();CloseFile();audio_.Close();}
     LRESULT Handle(UINT message,WPARAM wp,LPARAM lp){
         switch(message){
         case RequestMeetingMedia:
+            if(!workspaceReady_||!account_.IsAuthenticated())return FALSE;
             if(call_.Active())return FALSE;
             if(capture_&&capture_->IsCameraCapturing())ToggleCamera();
             if(capture_&&capture_->IsMicrophoneCapturing())ToggleMicrophone();
@@ -327,6 +369,7 @@ class StudioWindow {
         case WM_COMMAND:if(HIWORD(wp)==BN_CLICKED)Command(LOWORD(wp));return 0;
         case WM_HSCROLL:if(reinterpret_cast<HWND>(lp)==Control(Volume)){volume_=static_cast<int>(SendMessageW(Control(Volume),TBM_GETPOS,0,0));audio_.SetVolume(volume_/100.f);remoteAudio_.SetVolume(volume_/100.f);if(player_)player_->SetVolume(volume_/100.f);InvalidateRect(window_,nullptr,FALSE);}return 0;
         case WM_TIMER:{
+            SyncAccount();if(!workspaceReady_)return 0;
             if(expectCamera_&&!capture_->IsCameraCapturing()){expectCamera_=false;capture_->StopCamera();call_.SetVideoSource("off");video_.Clear();SetWindowTextW(Control(Camera),UiLabel(L"开启摄像头",L"Start camera"));EnableWindow(Control(CameraList),!cameras_.devices.empty());status_=UiLabel(L"摄像头采集意外停止，请检查设备后重新开启",L"Camera disconnected. Check the device and restart it.");}
             if(expectMicrophone_&&!capture_->IsMicrophoneCapturing()){expectMicrophone_=false;capture_->StopMicrophone();monitor_=false;audio_.Close();peak_=0;SetWindowTextW(Control(Microphone),UiLabel(L"开启麦克风",L"Start microphone"));SetWindowTextW(Control(Monitor),UiLabel(L"监听：关闭",L"Monitoring off"));EnableWindow(Control(Monitor),FALSE);EnableWindow(Control(MicList),!microphones_.devices.empty());status_=UiLabel(L"麦克风采集意外停止，请检查设备后重新开启",L"Microphone disconnected. Check the device and restart it.");}
             remotePeak_.store(remotePeak_.load()*0.9f);
@@ -367,9 +410,9 @@ public:
         for(int id:{RemoteMode,Meeting,Ai,Account,Open,CameraMode,FileMode,Pause,Stop,FullScreen,CameraList,Camera,Refresh,MicList,Microphone,ShareScreen,Monitor,Volume,TestSound,Identity,Room,Advanced,Host,Join,Peers,Dial,AcceptCall,RejectCall,EndCall,Reconnect})SetWindowPos(Control(id),HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
         audio_.SetVolume(volume_/100.f);remoteAudio_.SetVolume(volume_/100.f);
         for(auto [id,label]:{std::pair<int,const wchar_t*>{Host,UiLabel(L"信令服务器",L"Signaling server")},{Room,UiLabel(L"房间号",L"Room ID")},{Identity,UiLabel(L"显示名称",L"Display name")},{Peers,UiLabel(L"通话对象",L"Participant")},{CameraList,UiLabel(L"摄像头",L"Camera")},{MicList,UiLabel(L"麦克风",L"Microphone")},{Volume,UiLabel(L"输出音量",L"Output volume")}})SetAccessibleName(Control(id),label);
-        capture_=media::CreateDeviceCaptureService();auto result=capture_->Start();if(!result.IsOk()){OutputDebugStringW((L"LumaLive device initialization: "+Wide(result.Message())+L"\n").c_str());status_=UiLabel(L"设备初始化失败。请检查设备连接后重启 LumaLive。",L"Unable to initialize devices. Check device connections, then restart LumaLive.");}Enumerate();Layout();
+        capture_=media::CreateDeviceCaptureService();uiReady_=true;accountView_=true;Layout();
         const auto renderPath=Option(L"--render-check");if(!renderPath.empty()){const bool rendered=RenderCheck(renderPath);Shutdown();DestroyWindow(window_);return rendered?0:2;}
-        const auto mediaPath=Option(L"--media");if(!mediaPath.empty())OpenMedia(mediaPath.c_str());
+        // Media can be opened from the workspace after authentication.
         if(std::wstring(GetCommandLineW()).find(L"--account")!=std::wstring::npos)Command(Account);
         SetTimer(window_,1,33,nullptr);ShowWindow(window_,show);UpdateWindow(window_);
         MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){if(msg.message==WM_KEYDOWN){if(msg.wParam==VK_F11){if(!(msg.lParam&(LPARAM(1)<<30)))Fullscreen();continue;}if(msg.wParam==VK_ESCAPE){if(msg.lParam&(LPARAM(1)<<30))continue;if(accountView_&&account_.CancelPendingAction())continue;if(meetingView_&&meetingPage_&&meetingPage_->CancelPendingAction())continue;if(fullscreen_){Fullscreen();continue;}}if(msg.wParam=='O'&&(GetKeyState(VK_CONTROL)&0x8000)){if(!(msg.lParam&(LPARAM(1)<<30)))OpenFile();continue;}if(msg.wParam==VK_SPACE&&msg.hwnd==window_){Command(Pause);continue;}}if(!IsDialogMessageW(window_,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
@@ -378,7 +421,6 @@ public:
 };
 }
 int RunStudioPreview(HINSTANCE instance,int show){
-    if(std::wstring(GetCommandLineW()).find(L"--meeting")!=std::wstring::npos)return RunMeetingPreview(instance,show);
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const auto com=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);if(FAILED(com))return 1;
     INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_BAR_CLASSES|ICC_STANDARD_CLASSES};InitCommonControlsEx(&controls);

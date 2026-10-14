@@ -8,6 +8,7 @@ import time
 import uuid
 import shutil
 import threading
+from workspace_auth_fixture import WorkspaceAuthFixture
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "LumaLive/server/ai-gateway/python"))
@@ -48,6 +49,7 @@ env["LUMALIVE_AI_GATEWAY_PORT"] = str(health_server.server_port)
 process = subprocess.Popen([sys.argv[1]], startupinfo=startup, env=env)
 root = None
 fixture = None
+auth_fixture = None
 try:
     until = time.monotonic() + 20
     while time.monotonic() < until and not root:
@@ -63,6 +65,8 @@ try:
         if process.poll() is not None: raise RuntimeError("Studio exited before initialization")
         time.sleep(.1)
     assert root, "No studio window"
+    auth_fixture = WorkspaceAuthFixture(sys.argv[1])
+    auth_fixture.login(root)
     time.sleep(2)
     u.GetDpiForWindow.argtypes = [w.HWND]; u.GetDpiForWindow.restype = w.UINT
     scale = u.GetDpiForWindow(root) / 96
@@ -107,7 +111,7 @@ try:
         assert 0 <= rect.left < rect.right <= sidebar_width, f"Module {control_id} outside sidebar: {rect.left}, {rect.right}, scale={scale}"
     account_bounds = w.RECT(); u.GetWindowRect(u.GetDlgItem(root, 129), c.byref(account_bounds))
     u.MapWindowPoints(None, root, c.byref(account_bounds), 2)
-    assert abs(sidebar_bounds.bottom - account_bounds.bottom - 16 * scale) <= 2, 'Account entry is not anchored to sidebar bottom'
+    assert abs(sidebar_bounds.bottom - account_bounds.bottom - 34 * scale) <= 2, 'Account entry is not anchored to sidebar bottom'
     # Native owner-drawn combos include non-client borders in their outer height.
     # Validate geometry as well as CB_GETITEMHEIGHT, so taller fields cannot cover actions.
     for combo_id, button_id in ((107, 101), (108, 102), (119, 120)):
@@ -454,6 +458,7 @@ try:
         print("PASS: three real participants retained across tabs, call exclusivity and end flow")
     print("PASS: left sidebar, embedded call/meeting AI, retained meeting page and isolated contexts")
 finally:
+    if auth_fixture: auth_fixture.close()
     health_server.shutdown(); health_server.server_close(); health_thread.join(2)
     if fixture and fixture.poll() is None: fixture.terminate(); fixture.wait()
     if root: u.PostMessageW(root, 0x10, 0, 0)

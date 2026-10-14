@@ -19,7 +19,7 @@ using Service = luma::client::account::IAccountService;
 using Result = luma::client::account::OperationResult;
 enum class Page { Login, Register, Recovery, Profile, Security, Devices, Service };
 enum class Action { None, Connect, Login, Register, RequestReset, Reset, Profile, Logout,
-    Refresh, RequestEmail, VerifyEmail, RequestPhone, VerifyPhone, PhoneCode, PhoneLogin,
+    Refresh, Validate, RequestEmail, VerifyEmail, RequestPhone, VerifyPhone, PhoneCode, PhoneLogin,
     Password, EnableMfa, DisableMfa, Sessions, Revoke, RevokeOthers, Events, Delete };
 constexpr int TabBase=2100, FieldBase=2120, LabelBase=2140, Primary=2160, Secondary=2161,
     Third=2162, Status=2163, Detail=2164, Mode=2165, Confirm=2166, Cancel=2167, Reveal=2168;
@@ -101,6 +101,7 @@ std::wstring EventText(const contracts::auth::SecurityEvent& event){
 }
 struct Snapshot {
     Action action{};Result result;bool connected{},authenticated{};std::wstring settingsError;
+    std::int64_t expires_at_epoch_seconds{};
     contracts::auth::UserProfile profile;contracts::auth::SecuritySummary security;
     std::vector<contracts::auth::DeviceSession> sessions;
     std::vector<contracts::auth::SecurityEvent> events;
@@ -120,10 +121,11 @@ struct AccountPanel::Impl {
     Snapshot state;Page page{Page::Login};Action first{},second{},thirdAction{},pending{};
     std::wstring statusText;std::string host{"127.0.0.1"};std::uint16_t port{9100};
     std::string phoneChallenge,verifyChallenge,phoneNumber,verifyNumber,pendingDevice;
-    bool busy{},error{},showPassword{};UINT dpi{96};
+    bool busy{},validating{},error{},showPassword{};UINT dpi{96};ULONGLONG nextValidationAt{};
     int width{},height{},formX{},formWidth{},fieldCount{},section{};
     ~Impl(){Close();if(body)DeleteObject(body);if(heading)DeleteObject(heading);DeleteObject(background);DeleteObject(surface);}
     int S(int value)const{return MulDiv(value,int(dpi),96);}
+    bool IsAuthenticated()const{return window&&state.connected&&state.authenticated&&state.expires_at_epoch_seconds>std::time(nullptr);}
     void Close(){if(window){DestroyWindow(window);window=nullptr;}worker.reset();}
     HWND Make(int id,const wchar_t* cls,const wchar_t* label,DWORD style=0) {
         auto h=CreateWindowExW(0,cls,label,WS_CHILD|style,0,0,1,1,window,reinterpret_cast<HMENU>(INT_PTR(id)),GetModuleHandleW(nullptr),nullptr);
@@ -204,7 +206,7 @@ struct AccountPanel::Impl {
             text+=state.security.phone_verified?UiLabel(L"手机已验证",L"Phone verified"):UiLabel(L"手机未验证",L"Phone not verified");text+=L"\r\n";
             text+=state.security.mfa_enabled?UiLabel(L"双重验证已启用",L"Two-step verification on"):UiLabel(L"双重验证未启用",L"Two-step verification off");
             if(page==Page::Devices){text+=L"\r\n\r\n";for(const auto& device:state.sessions)text+=Wide(device.device_name)+L"\r\n"+Wide(device.remote_address)+L"\r\n\r\n";}
-        }else text=UiLabel(L"管理身份与登录设备。切换页面时，通话和会议会继续运行。",L"Manage your identity and signed-in devices. Calls and meetings keep running when you switch pages.");
+        }else text=UiLabel(L"登录后，即可使用视频通话、视频会议和 AI 助手。",L"Sign in to use video calls, meetings and your AI assistant.");
         if(page==Page::Service)text=UiLabel(L"输入管理员提供的 IPv4 地址和端口。连接成功后保存，下次自动填入。",L"Enter your administrator's server IPv4 address and port. A successful connection saves them for your next visit.");
         if(page==Page::Security&&section==4){text=UiLabel(L"安全记录（本地时间）\r\n\r\n",L"Security activity (local time)\r\n\r\n");for(const auto& event:state.events)text+=EventText(event);if(state.events.empty())text+=UiLabel(L"暂无记录。",L"No activity yet.");}
         SetWindowTextW(detail,text.c_str());UpdateTranscriptScrollbar(detail);
@@ -257,8 +259,11 @@ struct AccountPanel::Impl {
         InvalidateRect(window,nullptr,TRUE);
     }
     void Enable(){
-        for(auto f:fields)EnableWindow(f,!busy);for(auto t:tabs)EnableWindow(t,!busy);
+        // Quiet session checks must not disable the focused input or clear edits.
+        for(auto f:fields)EnableWindow(f,!busy||validating);for(auto t:tabs)EnableWindow(t,!busy);
         for(auto h:{primary,secondary,third,mode,reveal,confirm,cancel})EnableWindow(h,!busy);
+        if(pending!=Action::None)EnableWindow(mode,FALSE);
+        if(validating)EnableWindow(reveal,TRUE);
         if(page==Page::Devices&&state.sessions.empty())EnableWindow(secondary,FALSE);
         SetWindowTextW(status,statusText.c_str());InvalidateRect(status,nullptr,TRUE);
     }
@@ -327,15 +332,41 @@ struct AccountPanel::Impl {
                 if(out.result.success&&s.IsAuthenticated()&&(action==Action::Login||action==Action::PhoneLogin||action==Action::Profile||action==Action::Refresh||action==Action::VerifyEmail||action==Action::VerifyPhone)){
                     auto checked=s.GetSecuritySummary();if(checked.success)checked=s.GetProfile();if(!checked.success)out.result=std::move(checked);
                 }
-                out.authenticated=s.IsAuthenticated();out.connected=s.IsRunning();out.profile=s.Session().user;out.security=s.Security();out.sessions=s.Sessions();out.events=s.SecurityEvents();
+                const auto session=s.Session();out.authenticated=s.IsAuthenticated();out.connected=s.IsRunning();out.profile=session.user;out.expires_at_epoch_seconds=session.expires_at_epoch_seconds;out.security=s.Security();out.sessions=s.Sessions();out.events=s.SecurityEvents();
             }catch(...){s.Stop();out.result={false,"request failed"};}
             for(auto& value:values)if(!value.empty())SecureZeroMemory(value.data(),value.size());
             std::lock_guard lock(shared->mutex);shared->completed=std::move(out);
         }).detach();}catch(...){busy=false;Notice(UiLabel(L"暂时无法启动请求，请重试。",L"Unable to start the request. Try again."),true);Enable();}
     }
+    void StartValidation(){
+        if(busy||!state.authenticated)return;
+        busy=true;validating=true;Enable();auto shared=worker;
+        try{std::thread([shared]{
+            Snapshot out;out.action=Action::Validate;auto& s=*shared->service;
+            try{
+                out.result=s.ValidateSession();
+                if(out.result.success&&!s.IsAuthenticated())out.result={false,"session expired","invalid_session"};
+                // Validation never reconnects or refreshes. Malformed replies must also fail closed.
+                if(!out.result.success)s.Stop();
+                const auto session=s.Session();out.connected=s.IsRunning();out.authenticated=s.IsAuthenticated();out.profile=session.user;out.expires_at_epoch_seconds=session.expires_at_epoch_seconds;out.security=s.Security();out.sessions=s.Sessions();out.events=s.SecurityEvents();
+            }catch(...){s.Stop();out={};out.action=Action::Validate;out.result={false,"session validation failed","invalid_session"};}
+            std::lock_guard lock(shared->mutex);shared->completed=std::move(out);
+        }).detach();}catch(...){
+            busy=false;validating=false;state={};page=Page::Login;section=0;phoneChallenge.clear();verifyChallenge.clear();Configure();
+            Notice(UiLabel(L"无法验证登录状态，请重新登录。",L"Unable to verify your session. Sign in again."),true);
+        }
+    }
     void Poll(){
-        std::optional<Snapshot> completed;{std::lock_guard lock(worker->mutex);completed.swap(worker->completed);}if(!completed)return;
-        busy=false;const bool wasAuthenticated=state.authenticated;state=std::move(*completed);const auto action=state.action;auto message=std::move(state.result.message);const bool success=state.result.success;
+        std::optional<Snapshot> completed;{std::lock_guard lock(worker->mutex);completed.swap(worker->completed);}
+        if(!completed){if(state.authenticated&&!busy&&(!IsAuthenticated()||GetTickCount64()>=nextValidationAt))StartValidation();return;}
+        busy=false;validating=false;const bool wasAuthenticated=state.authenticated;state=std::move(*completed);const auto action=state.action;
+        if(action==Action::Validate){
+            nextValidationAt=GetTickCount64()+60000;
+            if(state.result.success&&IsAuthenticated()){Enable();return;}
+            state.authenticated=false;state.expires_at_epoch_seconds=0;
+            if(state.result.success)state.result={false,"session expired","invalid_session"};
+        }else if(state.authenticated&&!wasAuthenticated)nextValidationAt=GetTickCount64()+60000;
+        auto message=std::move(state.result.message);const bool success=state.result.success;
         if(success&&state.authenticated&&(action==Action::Login||action==Action::PhoneLogin)){page=Page::Profile;section=0;Configure();if(IsWindowVisible(window))SetFocus(fields[0]);}
         else if((success&&(action==Action::Register||action==Action::Reset||action==Action::Password||action==Action::Logout||action==Action::Delete))||(wasAuthenticated&&!state.authenticated)){page=Page::Login;section=0;phoneChallenge.clear();verifyChallenge.clear();Configure();if(IsWindowVisible(window))SetFocus(fields[0]);}
         else if(success&&(action==Action::Profile||action==Action::Connect||action==Action::Refresh||action==Action::DisableMfa||action==Action::VerifyEmail||action==Action::VerifyPhone||action==Action::Revoke||action==Action::RevokeOthers||action==Action::Sessions)){if(page==Page::Devices||action==Action::DisableMfa)Configure();else RefreshDetail();}
@@ -391,5 +422,8 @@ void AccountPanel::Open(HWND owner){impl_->Open(owner);}
 void AccountPanel::Hide(){if(impl_->window)ShowWindow(impl_->window,SW_HIDE);}
 void AccountPanel::Place(RECT bounds,UINT dpi){if(impl_->dpi!=dpi){impl_->dpi=dpi;impl_->Fonts();}MoveWindow(impl_->window,bounds.left,bounds.top,bounds.right-bounds.left,bounds.bottom-bounds.top,TRUE);impl_->Layout();}
 bool AccountPanel::CancelPendingAction(){return impl_->CancelPending();}
+bool AccountPanel::IsAuthenticated()const{return impl_->IsAuthenticated();}
+std::wstring AccountPanel::DisplayName()const{return IsAuthenticated()?Wide(impl_->state.profile.display_name.empty()?impl_->state.profile.username:impl_->state.profile.display_name):std::wstring{};}
+std::wstring AccountPanel::Email()const{return IsAuthenticated()?Wide(impl_->state.profile.email):std::wstring{};}
 void AccountPanel::Close(){impl_->Close();}
 }

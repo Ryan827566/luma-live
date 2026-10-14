@@ -69,3 +69,14 @@ The hosted account test now supplies isolated email/SMS adapters through explici
 All 23 actual-EXE checks passed after the deadline and delivery-flow changes. The real-provider, TLS, database-deployment and physical-device gates remain open.
 
 Password visibility now works for registration, recovery, password changes and other password fields; it resets when changing pages. Actions follow the form instead of sitting at the window bottom. Native UI regression verifies masking/reveal/restoration and hidden reveal controls on profile, with all 23 checks passed. Compact Chinese captures are in output/ui-account-forms-20261013.
+
+
+## 2026-10-14 authenticated workspace gate
+
+Production starts at sign-in/registration only. Registration does not unlock modules. Valid sign-in shows the workspace and sidebar name/email. Direct hidden commands and legacy meeting switches cannot bypass authentication; meeting renders now use a separate diagnostic executable requiring an absolute output path.
+
+Immutable UI snapshots avoid reading worker-owned service state. Quiet 60-second validation preserves edits and pending confirmations on success, and returns to sign-in on failure even while the account page is hidden. Pending confirmations no longer suspend validation. Already-running account requests finish before validation. Logout stops primary media and AI speech before destroying pages that may wait for HTTP, stops the owned gateway, and restores controls for re-login. Physical device/audio shutdown remains separate acceptance.
+
+All 24 unified checks passed on client SHA256 `99ce034743201dbb3bffa463ebacf74baecde48a1eed8c1532778a1664d6bed4`; report `output/client-verification.json`. Checks combine native tests, actual-client workflows and independent meeting render diagnostics. New tests cover real local registration/sign-in, identity, locked commands, logout/re-entry, hidden pending confirmation during server loss, owned AI gateway logout cleanup and restart. Independent review findings were fixed and re-reviewed. No user database or real provider was contacted.
+
+Compact Chinese/English captures: `output/ui-auth-gate-20261014/{zh-CN,en-US}`. Login, registration and account profile were inspected. Known visual follow-up: the English account title needs DT_NOPREFIX to render its ampersand literally; post-login account layout and product-wide final visual acceptance remain pending. Real SMS/email, TLS, PostgreSQL deployment, physical media/TURN/provider checks remain open.

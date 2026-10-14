@@ -1,6 +1,7 @@
 #pragma once
 #include <windows.h>
 #include <memory>
+#include <string>
 
 namespace luma::client::ui::preview {
 // The account page shares the workspace lifetime; switching pages never reconnects.
@@ -12,6 +13,10 @@ public:
     void Hide();
     void Place(RECT bounds, UINT dpi);
     bool CancelPendingAction();
+    // UI-thread snapshot access only; never reads the worker's live service or tokens.
+    bool IsAuthenticated() const;
+    std::wstring DisplayName() const;
+    std::wstring Email() const;
     void Close();
 private:
     struct Impl;

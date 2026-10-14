@@ -18,7 +18,7 @@ def render(name):
     env["LUMALIVE_MEETING_RENDER_PATH"] = str(path)
     if path.exists():
         path.unlink()
-    subprocess.run([str(binary / "luma_studio.exe"), "--meeting"],
+    subprocess.run([str(binary / "luma_meeting_render_tests.exe")],
                    env=env, startupinfo=startup, check=True, timeout=20)
     assert path.is_file() and path.stat().st_size > 54, "Render missing"
     print("PASS:", name, flush=True)

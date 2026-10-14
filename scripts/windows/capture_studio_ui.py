@@ -3,6 +3,7 @@ import ctypes as c
 from ctypes import wintypes as w
 from pathlib import Path
 import struct, subprocess, sys, time, os
+from workspace_auth_fixture import WorkspaceAuthFixture
 u=c.WinDLL("user32",use_last_error=True);g=c.WinDLL("gdi32",use_last_error=True)
 cbtype=c.WINFUNCTYPE(w.BOOL,w.HWND,w.LPARAM)
 u.EnumWindows.argtypes=[cbtype,w.LPARAM];u.GetWindowThreadProcessId.argtypes=[w.HWND,c.POINTER(w.DWORD)]
@@ -25,6 +26,7 @@ env={key.upper():value for key,value in os.environ.items()};env["LOCALAPPDATA"]=
 fixture=Path(sys.argv[1]).resolve().parent/"luma_session_archive_tests.exe"
 if fixture.is_file():subprocess.run([str(fixture),"--write-fixture",str(profile/"LumaLive/records")],env=env,check=True)
 process=subprocess.Popen([sys.argv[1]],startupinfo=startup,env=env);root=None
+auth_fixture=None
 try:
     deadline=time.monotonic()+20
     while not root and time.monotonic()<deadline:
@@ -45,7 +47,9 @@ try:
         u.SetWindowPos.argtypes=[w.HWND,w.HWND,c.c_int,c.c_int,c.c_int,c.c_int,w.UINT]
         assert u.SetWindowPos(root,None,0,0,round(width*scale),round(height*scale),0x16)
     directory=Path(sys.argv[2]);directory.mkdir(parents=True,exist_ok=True)
-    for name,control,subpage in [("account",129,None),("account-register",129,2101),("account-recovery",129,2102),("account-connection",129,2103),("calls",117,None),("meetings",126,None),("assistant",127,11),("assistant-history",127,12),("assistant-history-delete",127,12),("assistant-settings",127,13)]:
+    for name,control,subpage in [("account",129,None),("account-register",129,2101),("account-recovery",129,2102),("account-connection",129,2103),("calls",117,None),("account-profile",129,2100),("meetings",126,None),("assistant",127,11),("assistant-history",127,12),("assistant-history-delete",127,12),("assistant-settings",127,13)]:
+        if name=="calls":
+            auth_fixture=WorkspaceAuthFixture(sys.argv[1]);auth_fixture.login(root)
         u.SendMessageW(root,0x111,control,0);time.sleep(.5)
         if subpage:
             panel=u.FindWindowExW(root,None,"LumaAccountPage" if control==129 else "LumaSessionAi",None)
@@ -88,6 +92,7 @@ try:
             g.SelectObject(dc,old);g.DeleteObject(bitmap);g.DeleteDC(dc);u.ReleaseDC(root,reference)
         print("CAPTURE:",name,width,height,flush=True)
 finally:
+    if auth_fixture:auth_fixture.close()
     if root:u.PostMessageW(root,0x10,0,0)
     try:process.wait(timeout=15)
     except subprocess.TimeoutExpired:process.terminate();process.wait();raise RuntimeError("Client did not close")

@@ -81,6 +81,9 @@ try:
     def done(expected):
         wait(lambda:u.IsWindowEnabled(control(2160)))
         assert expected in text(control(2163)),text(control(2163))
+        authenticated=text(control(2100))=='Profile'
+        wait(lambda:bool(u.GetWindowLongW(u.GetDlgItem(root,117),-16)&0x10000000)==authenticated)
+        if authenticated:u.SendMessageW(root,0x111,129,0)
         fits()
     def password_visibility(*indices):
         assert visible(control(2168)), 'Password reveal action is missing'
@@ -109,6 +112,9 @@ try:
                 assert rects[i].left==field.left and rects[i].right==field.right,'Account guidance is not in the form column'
             assert rects[2163].top>=rects[2160].bottom+round(8*scale),'Result crowds the primary action'
             assert rects[2164].top>=rects[2163].bottom+round(8*scale),'Account guidance covers the result'
+    assert not visible(u.GetDlgItem(root,117)), 'Workspace visible before login'
+    u.SendMessageW(root,0x111,126,0)
+    assert not u.FindWindowExW(root,None,'LumaMeetingPreview',None), 'Hidden meeting command bypassed sign-in'
     assert visible(control(2163)) and visible(control(2164)), 'Status or account details hidden'
     assert not u.GetWindowLongW(control(2164),-16)&0x200000, 'Short account details show a scrollbar'
     for tab in (2100,2101,2102,2103):click(tab);fits()
@@ -131,6 +137,7 @@ try:
     done('signed in')
 
     assert text(control(2100))=='Profile';fits();assert not visible(control(2168))
+    assert text(u.GetDlgItem(root,129))=='UI Person', 'Sidebar did not show signed-in account'
     fields('ui.person','ui@example.com','Updated UI','');click(2160);done('Done')
     assert 'Updated UI' in text(control(2164))
     # The page and its authenticated session survive module switches.
