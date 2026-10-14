@@ -104,14 +104,55 @@ try:
         for index,(first,a) in enumerate(visible_bounds):
             for second,b in visible_bounds[index+1:]:
                 assert min(a.right,b.right)<=max(a.left,b.left) or min(a.bottom,b.bottom)<=max(a.top,b.top),f'Account controls overlap: {first}, {second}'
+        rects=dict(visible_bounds)
         if text(control(2100))=='Sign in':
-            rects=dict(visible_bounds)
             field=rects[2120]
             assert abs(field.left+field.right-bounds.right)<=2,'Signed-out form is not centered'
             for i in (2163,2164):
                 assert rects[i].left==field.left and rects[i].right==field.right,'Account guidance is not in the form column'
             assert rects[2163].top>=rects[2160].bottom+round(8*scale),'Result crowds the primary action'
             assert rects[2164].top>=rects[2163].bottom+round(8*scale),'Account guidance covers the result'
+        else:
+            # Results belong to the form, not the remote bottom corner of the page.
+            primary=rects[2160];status=rects[2163]
+            action_bottom=max(rects[i].bottom for i in (2160,2161,2162) if i in rects)
+            action_height=primary.bottom-primary.top
+            assert status.left<=primary.left<primary.right<=status.right,'Result left the form column'
+            if 2120 in rects:
+                field=rects[2120]
+                assert status.left<=field.left<field.right<=status.right,'Result is detached from its fields'
+            assert 0<status.top-action_bottom<=action_height,'Result is not next to its form actions'
+            if 2166 in rects or 2167 in rects:
+                assert 2166 in rects and 2167 in rects,'Confirmation is missing its cancel action'
+                for i in (2166,2167):
+                    action=rects[i]
+                    assert status.left<=action.left<action.right<=status.right,'Confirmation left the form column'
+                    assert 0<action.top-status.bottom<=action_height,'Confirmation is detached from its prompt'
+    def at_sizes(check=None):
+        """Check compact and attainable wide sizes, then restore the current size."""
+        original=w.RECT();u.GetWindowRect(root,c.byref(original))
+        try:
+            for width,height in ((1024,700),(1440,900)):
+                # Windows clamps oversized windows to the current desktop's tracking
+                # limit. Exercise the available wide size and report it accurately.
+                requested=(min(round(width*scale),u.GetSystemMetrics(59)),
+                           min(round(height*scale),u.GetSystemMetrics(60)))
+                assert u.SetWindowPos(root,None,0,0,*requested,0x16),'Account resize failed'
+                actual=w.RECT();u.GetWindowRect(root,c.byref(actual))
+                assert (actual.right-actual.left,actual.bottom-actual.top)==requested,('Account size was not exercised',requested,(actual.right-actual.left,actual.bottom-actual.top),scale)
+                fits()
+                if check:check()
+        finally:
+            u.SetWindowPos(root,None,0,0,original.right-original.left,original.bottom-original.top,0x16)
+        fits()
+    def short_details():
+        assert not u.GetWindowLongW(control(2164),-16)&0x200000,'Short profile has an unnecessary scrollbar'
+    def scrolling_activity():
+        assert u.GetWindowLongW(control(2164),-16)&0x200000,'Overflowing activity cannot scroll'
+        u.SendMessageW(control(2164),0xB6,0,-100000)
+        assert u.SendMessageW(control(2164),0xCE,0,0)==0,'Activity could not scroll back to the beginning'
+        u.SendMessageW(control(2164),0xB6,0,1000)
+        assert u.SendMessageW(control(2164),0xCE,0,0)>0,'Activity scroll position did not advance'
     assert not visible(u.GetDlgItem(root,117)), 'Workspace visible before login'
     u.SendMessageW(root,0x111,126,0)
     assert not u.FindWindowExW(root,None,'LumaMeetingPreview',None), 'Hidden meeting command bypassed sign-in'
@@ -140,6 +181,16 @@ try:
     assert text(u.GetDlgItem(root,129))=='UI Person', 'Sidebar did not show signed-in account'
     fields('ui.person','ui@example.com','Updated UI','');click(2160);done('Done')
     assert 'Updated UI' in text(control(2164))
+    at_sizes(short_details)
+    # Every authenticated page and security mode must fit before submitting anything.
+    click(2101)
+    for mode_index in range(5):
+        select_mode(mode_index)
+        if mode_index==4:done('Done')
+        at_sizes()
+    click(2102);done('Done');at_sizes()
+    click(2103);at_sizes()
+    click(2100)
     # The page and its authenticated session survive module switches.
     u.SendMessageW(root,0x111,127,0);u.SendMessageW(root,0x111,129,0)
     assert text(control(2100))=='Profile'
@@ -158,14 +209,22 @@ try:
     click(2100)
     # Destructive actions stay inline and Escape uses the application's message loop.
     click(2162);assert visible(control(2166))
+    at_sizes()
     u.PostMessageW(control(2167),0x100,0x1B,0);wait(lambda:not visible(control(2166)))
+    fits()
     click(2102);done('Done');assert u.SendMessageW(control(2165),0x146,0,0)==1
+    for action in (2161,2162):
+        click(action);assert visible(control(2166)) and visible(control(2167))
+        at_sizes();click(2167)
+        assert not visible(control(2166)) and not visible(control(2167))
+        fits()
     click(2101)
     u.SendMessageW(control(2165),0x14E,3,0);u.SendMessageW(panel,0x111,(1<<16)|2165,0)
     click(2160);done('Two-step verification is on')
     assert text(control(2160))=='Turn off verification'
+    at_sizes()
     recovery=text(control(2164)).split('Recovery codes (keep safe)\r\n')[1].strip().split(',')[0]
-    fields('');click(2160);click(2166);done('required')
+    fields('');click(2160);at_sizes();click(2166);done('required')
     assert u.IsWindowEnabled(control(2165)), 'Rejected confirmation left mode disabled'
     fields(recovery);click(2160);click(2166);done('Done')
     assert text(control(2160))=='Turn on verification', 'MFA toggle did not refresh'
@@ -174,8 +233,10 @@ try:
     assert u.GetWindowLongW(control(2164),-16)&0x200000, 'Overflowing activity cannot scroll'
     u.SendMessageW(control(2164),0xB6,0,1000)
     assert u.SendMessageW(control(2164),0xCE,0,0)>0, 'Activity scroll position did not advance'
+    at_sizes(scrolling_activity)
     click(2100)
     assert not u.GetWindowLongW(control(2164),-16)&0x200000, 'Short profile retained the activity scrollbar'
+    at_sizes(short_details)
     click(2100);click(2161);done('signed out');assert text(control(2100))=='Sign in'
     select_mode(1);fields('+14155552671','','');click(2161);done('Text message sent')
     phone_login=mailbox('phone_login')
@@ -217,7 +278,9 @@ try:
     click(2103)
     assert text(control(2120))=='127.0.0.1' and text(control(2121))=='9100'
     assert settings_path.read_text(encoding='utf-8')=='malformed settings', 'Loading overwrote invalid settings'
-    print('PASS: account UI, delivery failure, email/phone verification, SMS sign-in, password change, cross-client recovery, deletion, keyboard and endpoint persistence')
+    print('PASS: account UI, authenticated page/confirmation layouts at compact and desktop-limited wide sizes',
+          (min(round(1440*scale),u.GetSystemMetrics(59)),min(round(900*scale),u.GetSystemMetrics(60))),
+          'form results, short/long detail scrolling, delivery failure, email/phone verification, SMS sign-in, password change, cross-client recovery, deletion, keyboard and endpoint persistence')
 finally:
     if root:u.PostMessageW(root,0x10,0,0)
     try:process.wait(timeout=10)

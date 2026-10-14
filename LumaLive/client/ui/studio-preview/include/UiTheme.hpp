@@ -114,6 +114,18 @@ inline void DrawButton(const DRAWITEMSTRUCT& d,HFONT font,bool primary=false,boo
  RestoreDC(d.hDC,saved);DeleteObject(brush);DeleteObject(pen);
 }
 enum class NavIcon {Call,Meeting,Assistant,Account};
+inline void DrawTab(const DRAWITEMSTRUCT& d,HFONT font,bool selected){
+ const int saved=SaveDC(d.hDC);const bool disabled=(d.itemState&ODS_DISABLED)!=0;
+ auto px=[&](int value){return MulDiv(value,int(GetDpiForWindow(d.hwndItem)),96);};
+ const COLORREF fill=Blend(selected?Elevated:Background,Border,disabled?0:HoverAmount(d.hwndItem));
+ Fill(d.hDC,d.rcItem,Background);auto brush=CreateSolidBrush(fill);auto pen=CreatePen(PS_SOLID,1,fill);
+ SelectObject(d.hDC,brush);SelectObject(d.hDC,pen);RoundRect(d.hDC,d.rcItem.left,d.rcItem.top,d.rcItem.right,d.rcItem.bottom,px(16),px(16));
+ SelectObject(d.hDC,font);SetBkMode(d.hDC,TRANSPARENT);SetTextColor(d.hDC,disabled?Muted:(selected?Text:Muted));
+ wchar_t label[256]{};GetWindowTextW(d.hwndItem,label,256);auto content=d.rcItem;InflateRect(&content,-px(8),-px(2));
+ DrawTextW(d.hDC,label,-1,&content,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS|DT_NOPREFIX);
+ if(d.itemState&ODS_FOCUS){auto focus=d.rcItem;InflateRect(&focus,-px(3),-px(3));DrawFocusRect(d.hDC,&focus);}
+ RestoreDC(d.hDC,saved);DeleteObject(brush);DeleteObject(pen);
+}
 inline void DrawNavigation(const DRAWITEMSTRUCT& d,HFONT font,bool selected,NavIcon icon){
  const int saved=SaveDC(d.hDC);auto px=[&](int v){return MulDiv(v,int(GetDpiForWindow(d.hwndItem)),96);};
  const bool disabled=(d.itemState&ODS_DISABLED)!=0;const auto ink=disabled?Muted:Text;

@@ -2,9 +2,9 @@
 
 The user requests Codex-style login and post-login workspace layouts. The latest instruction adds an authentication gate: only sign-in/registration/recovery/connection are available before authentication. Registration still requires a separate successful sign-in. The sidebar then shows the current name/email; sign-out or lost session returns to the entrance and stops media and this client's owned AI gateway. This supersedes the earlier no-gate scope. See [codex-style-ui-plan.md](codex-style-ui-plan.md) for estimates and [account-flow-and-storage.md](account-flow-and-storage.md) for the account server, database, tokens and deployment boundaries.
 
-Latest gate verification: all 24 unified checks passed, client SHA256 `99ce034743201dbb3bffa463ebacf74baecde48a1eed8c1532778a1664d6bed4`. See login-acceptance.md for actual coverage and limitations.
+Latest account layout verification: all 24 unified checks passed, client SHA256 `5ed686e1eaf1a113d3398ef685c206cce5bcdfc2531513efc92cb2b322f070b2`. See login-acceptance.md for actual coverage and limitations.
 
-Main-only development continues. The neutral theme, icon navigation and centered signed-out forms were published in `9954f15b`. Post-login account settings/call/meeting/AI layout refinement and final visual acceptance remain pending. Quota wrap-ups must include a work/test/remaining/progress/time table. Detailed dated verification below is historical; the newest acceptance entry identifies the current binary and workflow coverage.
+Main-only development continues. The neutral theme, icon navigation and centered signed-out forms were published in `9954f15b`. The account settings layout is also refined and locally verified. Call/meeting/AI layout refinement and final visual acceptance remain pending. Quota wrap-ups must include a work/test/remaining/progress/time table. Detailed dated verification below is historical; the newest acceptance entry identifies the current binary and workflow coverage.
 
 ---
 

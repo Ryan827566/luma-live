@@ -3,6 +3,8 @@ import ctypes as c
 from ctypes import wintypes as w
 from pathlib import Path
 import struct, subprocess, sys, time, os
+import hashlib, json
+from datetime import datetime, timezone
 from workspace_auth_fixture import WorkspaceAuthFixture
 u=c.WinDLL("user32",use_last_error=True);g=c.WinDLL("gdi32",use_last_error=True)
 cbtype=c.WINFUNCTYPE(w.BOOL,w.HWND,w.LPARAM)
@@ -25,7 +27,11 @@ profile.mkdir(parents=True,exist_ok=True)
 env={key.upper():value for key,value in os.environ.items()};env["LOCALAPPDATA"]=str(profile)
 fixture=Path(sys.argv[1]).resolve().parent/"luma_session_archive_tests.exe"
 if fixture.is_file():subprocess.run([str(fixture),"--write-fixture",str(profile/"LumaLive/records")],env=env,check=True)
-process=subprocess.Popen([sys.argv[1]],startupinfo=startup,env=env);root=None
+binary=Path(sys.argv[1]).resolve()
+manifest={"created_utc":datetime.now(timezone.utc).isoformat(),"binary":str(binary),
+          "sha256":hashlib.sha256(binary.read_bytes()).hexdigest(),
+          "language_override":env.get("LUMALIVE_UI_LANGUAGE"),"captures":[]}
+process=subprocess.Popen([str(binary)],startupinfo=startup,env=env);root=None
 auth_fixture=None
 try:
     deadline=time.monotonic()+20
@@ -47,7 +53,7 @@ try:
         u.SetWindowPos.argtypes=[w.HWND,w.HWND,c.c_int,c.c_int,c.c_int,c.c_int,w.UINT]
         assert u.SetWindowPos(root,None,0,0,round(width*scale),round(height*scale),0x16)
     directory=Path(sys.argv[2]);directory.mkdir(parents=True,exist_ok=True)
-    for name,control,subpage in [("account",129,None),("account-register",129,2101),("account-recovery",129,2102),("account-connection",129,2103),("calls",117,None),("account-profile",129,2100),("meetings",126,None),("assistant",127,11),("assistant-history",127,12),("assistant-history-delete",127,12),("assistant-settings",127,13)]:
+    for name,control,subpage in [("account",129,None),("account-register",129,2101),("account-recovery",129,2102),("account-connection",129,2103),("calls",117,None),("account-profile",129,2100),("account-delete",129,2100),("account-security",129,2101),("account-password",129,2101),("account-devices",129,2102),("account-service",129,2103),("meetings",126,None),("assistant",127,11),("assistant-history",127,12),("assistant-history-delete",127,12),("assistant-settings",127,13)]:
         if name=="calls":
             auth_fixture=WorkspaceAuthFixture(sys.argv[1]);auth_fixture.login(root)
         u.SendMessageW(root,0x111,control,0);time.sleep(.5)
@@ -58,6 +64,11 @@ try:
             u.SendMessageW(panel,0x111,subpage,0);time.sleep(.2)
             if name == 'assistant-history-delete':
                 u.SendMessageW(panel, 0x111, 36, 0);time.sleep(.1)
+            if name == 'account-delete':
+                u.SendMessageW(panel,0x111,2162,0);time.sleep(.1)
+            if name == 'account-password':
+                u.SendMessageW(u.GetDlgItem(panel,2165),0x14E,2,0)
+                u.SendMessageW(panel,0x111,(1<<16)|2165,0);time.sleep(.1)
         if os.environ.get("LUMALIVE_TEST_ADVANCED"):
             if name=="calls":u.SendMessageW(root,0x111,128,0)
             if name=="meetings":
@@ -91,6 +102,9 @@ try:
         finally:
             g.SelectObject(dc,old);g.DeleteObject(bitmap);g.DeleteDC(dc);u.ReleaseDC(root,reference)
         print("CAPTURE:",name,width,height,flush=True)
+        manifest["captures"].append({"file":name+".bmp","client_width":width,"client_height":height})
+    assert hashlib.sha256(binary.read_bytes()).hexdigest()==manifest["sha256"],"Client changed during capture"
+    (directory/"capture-manifest.json").write_text(json.dumps(manifest,indent=2),encoding="utf-8")
 finally:
     if auth_fixture:auth_fixture.close()
     if root:u.PostMessageW(root,0x10,0,0)

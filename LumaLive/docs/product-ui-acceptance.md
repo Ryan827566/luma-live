@@ -208,3 +208,12 @@ Immutable UI snapshots avoid reading worker-owned service state. Quiet 60-second
 All 24 unified checks passed on client SHA256 `99ce034743201dbb3bffa463ebacf74baecde48a1eed8c1532778a1664d6bed4`; report `output/client-verification.json`. Checks combine native tests, actual-client workflows and independent meeting render diagnostics. New tests cover real local registration/sign-in, identity, locked commands, logout/re-entry, hidden pending confirmation during server loss, owned AI gateway logout cleanup and restart. Independent review findings were fixed and re-reviewed. No user database or real provider was contacted.
 
 Compact Chinese/English captures: `output/ui-auth-gate-20261014/{zh-CN,en-US}`. Login, registration and account profile were inspected. Known visual follow-up: the English account title needs DT_NOPREFIX to render its ampersand literally; post-login account layout and product-wide final visual acceptance remain pending. Real SMS/email, TLS, PostgreSQL deployment, physical media/TURN/provider checks remain open.
+
+
+## 2026-10-14 account settings visual refinement
+
+The authenticated Account page now uses a centered, bounded content region and quiet native tabs. Form results and inline confirmations follow their initiating actions. Short profile/connection details use measured text height without a large empty frame; device, MFA and activity records retain native selection and scrolling. Literal ampersands in page titles render correctly. No authentication protocol or storage behavior changed.
+
+All 24 unified checks passed on EXE SHA256 `5ed686e1eaf1a113d3398ef685c206cce5bcdfc2531513efc92cb2b322f070b2`. The account workflow additionally exercises all authenticated pages, five security modes, delete/device/MFA confirmations and cancellation, result proximity and short/long text scrolling at 1024x700 and 1386x788. The requested 1440x900 window was capped by Windows at 1386x788, so full 1440x900 and physical DPI acceptance are not claimed. The independent code review found no blocking issue.
+
+Captures in `output/ui-account-refinement-20261014/en-US`, `zh-CN` and `zh-wide` include login, profile, deletion confirmation, security, password, device and connection pages. Their capture-manifest.json files bind every set to this EXE hash and actual client dimensions. English profile/delete and Chinese password/wide-profile images were inspected. Physical IME/Narrator/multiple monitors, real provider/media/TURN and final whole-product visual acceptance remain separate.

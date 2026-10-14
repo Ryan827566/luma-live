@@ -122,7 +122,7 @@ struct AccountPanel::Impl {
     std::wstring statusText;std::string host{"127.0.0.1"};std::uint16_t port{9100};
     std::string phoneChallenge,verifyChallenge,phoneNumber,verifyNumber,pendingDevice;
     bool busy{},validating{},error{},showPassword{};UINT dpi{96};ULONGLONG nextValidationAt{};
-    int width{},height{},formX{},formWidth{},fieldCount{},section{};
+    int width{},height{},formX{},formWidth{},fieldCount{},section{},contentWidth{},detailX{};
     ~Impl(){Close();if(body)DeleteObject(body);if(heading)DeleteObject(heading);DeleteObject(background);DeleteObject(surface);}
     int S(int value)const{return MulDiv(value,int(dpi),96);}
     bool IsAuthenticated()const{return window&&state.connected&&state.authenticated&&state.expires_at_epoch_seconds>std::time(nullptr);}
@@ -209,7 +209,7 @@ struct AccountPanel::Impl {
         }else text=UiLabel(L"登录后，即可使用视频通话、视频会议和 AI 助手。",L"Sign in to use video calls, meetings and your AI assistant.");
         if(page==Page::Service)text=UiLabel(L"输入管理员提供的 IPv4 地址和端口。连接成功后保存，下次自动填入。",L"Enter your administrator's server IPv4 address and port. A successful connection saves them for your next visit.");
         if(page==Page::Security&&section==4){text=UiLabel(L"安全记录（本地时间）\r\n\r\n",L"Security activity (local time)\r\n\r\n");for(const auto& event:state.events)text+=EventText(event);if(state.events.empty())text+=UiLabel(L"暂无记录。",L"No activity yet.");}
-        SetWindowTextW(detail,text.c_str());UpdateTranscriptScrollbar(detail);
+        SetWindowTextW(detail,text.c_str());UpdateTranscriptScrollbar(detail);if(state.authenticated)Layout();
     }
     void Move(HWND h,int x,int y,int w,int heightValue){MoveWindow(h,S(x),S(y),S(std::max(1,w)),S(heightValue),TRUE);}
     void Layout(){
@@ -237,25 +237,38 @@ struct AccountPanel::Impl {
             const int statusY=actionY+48;
             Move(status,formX,statusY,formWidth,52);
             SetPropW(detail,L"LumaQuietField",HANDLE(1));
+            SendMessageW(detail,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(S(12),S(12)));
             Move(detail,formX,statusY+60,formWidth,48);UpdateTranscriptScrollbar(detail);
             Move(confirm,formX,statusY+116,half,34);Move(cancel,formX+half+8,statusY+116,half,34);
             InvalidateRect(window,nullptr,TRUE);return;
         }
-        RemovePropW(detail,L"LumaQuietField");
-        formX=28;const int content=width-56;formWidth=std::min(440,(content*57)/100);
-        const int tabWidth=std::min(152,(content-24)/4);for(int i=0;i<4;++i)Move(tabs[i],formX+i*(tabWidth+8),96,tabWidth,36);
-        int y=156;if(GetWindowLongPtrW(mode,GWL_STYLE)&WS_VISIBLE){Move(mode,formX,y,formWidth,180);UiTheme::SetComboDpi(mode,dpi);y+=52;}
+        contentWidth=std::min(880,std::max(1,width-56));formX=(width-contentWidth)/2;
+        formWidth=std::min(464,(contentWidth*57)/100);detailX=formX+formWidth+32;
+        const int tabWidth=std::min(152,(contentWidth-24)/4);for(int i=0;i<4;++i)Move(tabs[i],formX+i*(tabWidth+8),96,tabWidth,36);
+        int y=160;if(GetWindowLongPtrW(mode,GWL_STYLE)&WS_VISIBLE){Move(mode,formX,y,formWidth,180);UiTheme::SetComboDpi(mode,dpi);y+=44;}
         int revealField=-1;for(int i=0;i<fieldCount;++i)if(secrets[i])revealField=i;
         for(int i=0;i<fieldCount;++i){
-            Move(labels[i],formX,y,formWidth-(i==revealField?142:0),20);
+            Move(labels[i],formX,y,formWidth-(i==revealField?142:0),18);
             if(i==revealField)Move(reveal,formX+formWidth-134,y-2,134,24);
-            Move(fields[i],formX,y+24,formWidth,34);y+=68;
+            Move(fields[i],formX,y+22,formWidth,34);y+=60;
         }
-        const int actionY=y+12,half=(formWidth-8)/2;
+        const int actionY=y+8,half=(formWidth-8)/2;
         Move(primary,formX,actionY,second==Action::None?formWidth:half,36);Move(secondary,formX+half+8,actionY,half,36);
-        Move(third,formX,actionY+44,formWidth,30);
-        const int detailX=formX+formWidth+40;Move(detail,detailX,156,width-detailX-28,std::max(160,height-316));UpdateTranscriptScrollbar(detail);
-        Move(status,detailX,height-144,width-detailX-28,72);Move(confirm,detailX,height-60,(width-detailX-36)/2,34);Move(cancel,detailX+(width-detailX-36)/2+8,height-60,(width-detailX-36)/2,34);
+        Move(third,formX,actionY+44,half,30);
+        const int statusY=actionY+(thirdAction==Action::None?48:88);
+        Move(status,formX,statusY,formWidth,52);Move(confirm,formX,statusY+60,half,34);Move(cancel,formX+half+8,statusY+60,half,34);
+        const bool recordView=page==Page::Devices||(page==Page::Security&&(section==3||section==4));
+        if(recordView)RemovePropW(detail,L"LumaQuietField");else SetPropW(detail,L"LumaQuietField",HANDLE(1));
+        SendMessageW(detail,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(recordView?S(12):0,recordView?S(12):0));
+        const int detailWidth=formX+contentWidth-detailX;
+        int detailHeight=std::max(160,height-220);
+        if(!recordView){
+            // Size short account/service guidance to its wrapped text, not the whole page.
+            auto dc=GetDC(detail);auto old=SelectObject(dc,body);RECT measured{0,0,S(std::max(1,detailWidth-28)),0};const auto text=Text(detail);
+            DrawTextW(dc,text.c_str(),-1,&measured,DT_CALCRECT|DT_WORDBREAK|DT_EDITCONTROL|DT_NOPREFIX);
+            SelectObject(dc,old);ReleaseDC(detail,dc);detailHeight=std::clamp(MulDiv(measured.bottom,96,int(dpi))+12,60,std::max(60,height-220));
+        }
+        Move(detail,detailX,192,detailWidth,detailHeight);UpdateTranscriptScrollbar(detail);
         InvalidateRect(window,nullptr,TRUE);
     }
     void Enable(){
@@ -392,8 +405,18 @@ struct AccountPanel::Impl {
             if(page==Page::Recovery){titleText=UiLabel(L"找回密码",L"Reset your password");subtitle=UiLabel(L"通过邮箱验证，重新访问账户",L"Verify your email to regain access");}
             if(page==Page::Service){titleText=UiLabel(L"连接账户服务",L"Connect your account service");subtitle=UiLabel(L"使用管理员提供的连接信息",L"Use the connection details from your administrator");}
         }
-        RECT title{S(28),S(22+offset),r.right-S(28),S(56+offset)};DrawTextW(dc,titleText,-1,&title,alignment|DT_SINGLELINE|DT_VCENTER);SelectObject(dc,body);SetTextColor(dc,UiTheme::Muted);
-        RECT sub{S(28),S(60+offset),r.right-S(28),S(82+offset)};DrawTextW(dc,subtitle,-1,&sub,alignment|DT_SINGLELINE|DT_END_ELLIPSIS);
+        const int inset=state.authenticated?formX:28;
+        RECT title{S(inset),S(22+offset),r.right-S(inset),S(56+offset)};DrawTextW(dc,titleText,-1,&title,alignment|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);SelectObject(dc,body);SetTextColor(dc,UiTheme::Muted);
+        RECT sub{S(inset),S(60+offset),r.right-S(inset),S(82+offset)};DrawTextW(dc,subtitle,-1,&sub,alignment|DT_SINGLELINE|DT_END_ELLIPSIS|DT_NOPREFIX);
+        if(state.authenticated){
+            UiTheme::Fill(dc,RECT{S(formX),S(144),S(formX+contentWidth),S(145)},UiTheme::Border);
+            const wchar_t* label=UiLabel(L"账户状态",L"Account status");
+            if(page==Page::Service)label=UiLabel(L"连接说明",L"Connection details");
+            if(page==Page::Devices)label=UiLabel(L"已登录的设备",L"Signed-in devices");
+            if(page==Page::Security&&section==3)label=UiLabel(L"双重验证信息",L"Two-step verification details");
+            if(page==Page::Security&&section==4)label=UiLabel(L"近期安全活动",L"Recent security activity");
+            RECT caption{S(detailX),S(160),S(formX+contentWidth),S(182)};DrawTextW(dc,label,-1,&caption,DT_SINGLELINE|DT_END_ELLIPSIS|DT_NOPREFIX);
+        }
         RestoreDC(dc,saved);
     }
     LRESULT Handle(UINT m,WPARAM w,LPARAM l){
@@ -405,9 +428,9 @@ struct AccountPanel::Impl {
             if(HIWORD(w)!=BN_CLICKED)return 0;
             if(id==Primary)Start(first);if(id==Secondary)Start(second);if(id==Third)Start(thirdAction);if(id==Confirm)Start(pending,true);if(id==Cancel)CancelPending();
             if(id==Reveal){showPassword=!showPassword;for(int i=0;i<6;++i)if(secrets[i]){SendMessageW(fields[i],EM_SETPASSWORDCHAR,showPassword?0:L'\x25cf',0);InvalidateRect(fields[i],nullptr,TRUE);}SetWindowTextW(reveal,showPassword?UiLabel(L"隐藏密码",L"Hide password"):UiLabel(L"显示密码",L"Show password"));}return 0;}
-        case WM_CTLCOLORSTATIC:case WM_CTLCOLOREDIT:case WM_CTLCOLORLISTBOX:{auto dc=reinterpret_cast<HDC>(w);const auto control=reinterpret_cast<HWND>(l);const bool quiet=control==detail&&!state.authenticated;const bool edit=!quiet&&(m!=WM_CTLCOLORSTATIC||control==detail);SetTextColor(dc,control==status&&error?UiTheme::Danger:(quiet?UiTheme::Muted:UiTheme::Text));SetBkColor(dc,edit?UiTheme::Surface:UiTheme::Background);return reinterpret_cast<LRESULT>(edit?surface:background);}
+        case WM_CTLCOLORSTATIC:case WM_CTLCOLOREDIT:case WM_CTLCOLORLISTBOX:{auto dc=reinterpret_cast<HDC>(w);const auto control=reinterpret_cast<HWND>(l);const bool quiet=control==detail&&GetPropW(detail,L"LumaQuietField");const bool edit=!quiet&&(m!=WM_CTLCOLORSTATIC||control==detail);SetTextColor(dc,control==status&&error?UiTheme::Danger:(quiet?UiTheme::Muted:UiTheme::Text));SetBkColor(dc,edit?UiTheme::Surface:UiTheme::Background);return reinterpret_cast<LRESULT>(edit?surface:background);}
         case WM_MEASUREITEM:if(auto d=reinterpret_cast<MEASUREITEMSTRUCT*>(l);d->CtlType==ODT_COMBOBOX){d->itemHeight=S(d->itemID==UINT(-1)?34:30);return TRUE;}break;
-        case WM_DRAWITEM:{auto& d=*reinterpret_cast<DRAWITEMSTRUCT*>(l);if(d.CtlType==ODT_COMBOBOX)UiTheme::DrawComboItem(d,body);else UiTheme::DrawButton(d,body,d.CtlID==Primary||d.CtlID==Confirm,d.CtlID>=TabBase&&d.CtlID<TabBase+4&&pages[d.CtlID-TabBase]==page,d.CtlID==Third&&thirdAction==Action::Delete);return TRUE;}
+        case WM_DRAWITEM:{auto& d=*reinterpret_cast<DRAWITEMSTRUCT*>(l);if(d.CtlType==ODT_COMBOBOX)UiTheme::DrawComboItem(d,body);else if(d.CtlID>=TabBase&&d.CtlID<TabBase+4)UiTheme::DrawTab(d,body,pages[d.CtlID-TabBase]==page);else UiTheme::DrawButton(d,body,d.CtlID==Primary||d.CtlID==Confirm,false,d.CtlID==Third&&thirdAction==Action::Delete);return TRUE;}
         case WM_ERASEBKGND:return 1;
         case WM_PAINT:{PAINTSTRUCT ps;auto dc=BeginPaint(window,&ps);Paint(dc);EndPaint(window,&ps);return 0;}
         case WM_PRINTCLIENT:Paint(reinterpret_cast<HDC>(w));return 0;
