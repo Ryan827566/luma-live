@@ -217,3 +217,10 @@ The authenticated Account page now uses a centered, bounded content region and q
 All 24 unified checks passed on EXE SHA256 `5ed686e1eaf1a113d3398ef685c206cce5bcdfc2531513efc92cb2b322f070b2`. The account workflow additionally exercises all authenticated pages, five security modes, delete/device/MFA confirmations and cancellation, result proximity and short/long text scrolling at 1024x700 and 1386x788. The requested 1440x900 window was capped by Windows at 1386x788, so full 1440x900 and physical DPI acceptance are not claimed. The independent code review found no blocking issue.
 
 Captures in `output/ui-account-refinement-20261014/en-US`, `zh-CN` and `zh-wide` include login, profile, deletion confirmation, security, password, device and connection pages. Their capture-manifest.json files bind every set to this EXE hash and actual client dimensions. English profile/delete and Chinese password/wide-profile images were inspected. Physical IME/Narrator/multiple monitors, real provider/media/TURN and final whole-product visual acceptance remain separate.
+
+
+## 2026-10-14 call workspace visual consistency
+
+The call page now uses the shared quiet source tabs, a clearer title, wider canvas gutters and open device/audio sections instead of repeated enclosing cards. Join/start/answer are emphasized; opening media is secondary. Inactive local preview and idle connection text no longer imply an active blue media state, and a duration is only displayed when a remote participant exists. Literal ampersands are preserved in painted text. Media actions, signaling and authentication are unchanged.
+
+All 24 unified checks passed on EXE SHA256 `25497616faeaeba6e8104cba20ab982ac5ded181b5441b86ebfd342c92680b6e`; English 1024x700 and Chinese 1386x788 captures in `output/ui-call-refinement-20261014` have matching manifests and their call pages were inspected. Independent review found no added media/state/lifetime blockers. This is a partial call/meeting visual package: video/control proportions, meeting-state refinement and final full visual acceptance remain open. No physical/provider acceptance is inferred.

@@ -33,7 +33,7 @@ std::wstring Wide(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,0,s.da
 std::wstring CallMessage(const std::string& value){return LocalizedCallMessage(value);}
 
 void Fill(HDC dc,RECT r,COLORREF c){auto b=CreateSolidBrush(c);FillRect(dc,&r,b);DeleteObject(b);}
-void Text(HDC dc,const std::wstring& s,RECT r,HFONT font,COLORREF color=Ink,UINT flags=DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS){auto old=SelectObject(dc,font);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,color);DrawTextW(dc,s.c_str(),-1,&r,flags);SelectObject(dc,old);}
+void Text(HDC dc,const std::wstring& s,RECT r,HFONT font,COLORREF color=Ink,UINT flags=DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS){auto old=SelectObject(dc,font);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,color);DrawTextW(dc,s.c_str(),-1,&r,flags|DT_NOPREFIX);SelectObject(dc,old);}
 std::wstring Hr(HRESULT hr){wchar_t b[24];swprintf_s(b,L"0x%08X",static_cast<unsigned>(hr));return b;}
 
 struct PlaybackState {std::atomic<bool> closing{false},ready{false},ended{false};std::atomic<HRESULT> error{S_OK};};
@@ -177,14 +177,14 @@ class StudioWindow {
             InvalidateRect(window_,nullptr,FALSE);return;
         }
         ai_.Hide();ShowWindow(surface_,SW_SHOW);
-        const int x=left_+16, end=width_-right_-16, total=end-x, deck=(total-16)/2;
+        const int x=left_+24, end=width_-right_-24, total=end-x, deck=(total-16)/2;
         const int deckHeight=std::clamp(deck*9/16,96,std::max(96,height_-546));
         preview_=R(x,130,deck,deckHeight);remotePreview_=R(x+deck+16,130,deck,deckHeight);
         MoveWindow(surface_,preview_.left,preview_.top,preview_.right-preview_.left,preview_.bottom-preview_.top,TRUE);
         MoveWindow(remoteSurface_,remotePreview_.left,remotePreview_.top,remotePreview_.right-remotePreview_.left,remotePreview_.bottom-remotePreview_.top,TRUE);
         lower_=130+deckHeight+66;
         const int sourceWidth=(total-16)/2,mx=x+sourceWidth+16,rx=width_-right_+16;
-        Place(Open,width_-right_-174,52,158,32);Place(CameraMode,x,130+deckHeight+10,94,32);Place(FileMode,x+102,130+deckHeight+10,94,32);
+        Place(Open,end-158,52,158,32);Place(CameraMode,x,130+deckHeight+10,94,32);Place(FileMode,x+102,130+deckHeight+10,94,32);
         Place(Pause,x+206,130+deckHeight+10,74,32);Place(Stop,x+288,130+deckHeight+10,74,32);Place(FullScreen,end-112,130+deckHeight+10,112,32);
         Place(CameraList,x+12,lower_+66,sourceWidth-24,160);Place(Camera,x+12,lower_+114,sourceWidth-128,34);Place(Refresh,x+sourceWidth-108,lower_+114,96,34);
         Place(MicList,x+12,lower_+182,sourceWidth-24,160);Place(Microphone,x+12,lower_+230,sourceWidth-24,34);Place(ShareScreen,x+12,lower_+272,sourceWidth-24,28);
@@ -209,8 +209,7 @@ class StudioWindow {
     void Paint(HDC dc){
         RECT all;GetClientRect(window_,&all);Fill(dc,all,Bg);if(fullscreen_)return;
         if(!workspaceReady_){DrawIconEx(dc,S(18),S(10),LoadIconW(instance_,MAKEINTRESOURCEW(101)),S(22),S(22),0,nullptr,DI_NORMAL);Label(dc,L"LumaLive",50,7,150,28,body_);return;}
-        const int x=left_+16,end=width_-right_-16,total=end-x,deck=(total-16)/2,sourceWidth=(total-16)/2,mx=x+sourceWidth+16,rx=width_-right_+16;
-        auto card=[&](int px,int py,int pw,int ph){Fill(dc,R(px,py,pw,ph),Border);Fill(dc,R(px+1,py+1,pw-2,ph-2),Panel);};
+        const int x=left_+24,end=width_-right_-24,total=end-x,deck=(total-16)/2,sourceWidth=(total-16)/2,mx=x+sourceWidth+16,rx=width_-right_+16;
         Fill(dc,R(0,0,left_,height_),UiTheme::Sidebar);Fill(dc,R(left_,40,width_-left_,56),Bg);Fill(dc,R(width_-right_,40,right_,height_-40),Panel);
         Fill(dc,R(width_-right_,40,1,height_),Border);Fill(dc,R(left_,95,width_-left_-right_,1),Border);
         DrawIconEx(dc,S(18),S(15),LoadIconW(instance_,MAKEINTRESOURCEW(101)),S(22),S(22),0,nullptr,DI_NORMAL);Label(dc,L"LumaLive",50,12,left_-60,28,body_);
@@ -219,19 +218,20 @@ class StudioWindow {
         Label(dc,accountEmail_,48,height_-33,left_-60,20,small_,Muted);
         if(meetingView_){Fill(dc,R(left_,40,width_-left_,height_-40),Bg);return;}
         if(aiView_||accountView_){Fill(dc,R(left_,40,width_-left_,height_-40),Bg);return;}
-        Label(dc,UiLabel(L"视频通话",L"Video calls"),x,50,total-194,36,body_);
-        Label(dc,UiLabel(L"我的画面",L"Your preview"),x,100,deck,28,small_,Mint);Label(dc,UiLabel(L"对方画面",L"Other participant"),x+deck+16,100,deck,28,small_,call_.Active()?Mint:Muted);
-        RECT border=preview_;InflateRect(&border,1,1);Fill(dc,border,Mint);border=remotePreview_;InflateRect(&border,1,1);Fill(dc,border,call_.Active()?Mint:Border);
-        card(x,lower_,sourceWidth,std::max(302,height_-lower_-48));card(mx,lower_,sourceWidth,std::max(302,height_-lower_-48));
-        Label(dc,UiLabel(L"输入设备",L"Input devices"),x+12,lower_+8,sourceWidth-24,28,small_,Muted);
+        Label(dc,UiLabel(L"视频通话",L"Video calls"),x,50,total-174,36,title_);
+        const bool localVideo=(cameraView_&&(capture_->IsCameraCapturing()||screen_.IsCapturing()))||(!cameraView_&&player_&&playback_&&playback_->ready);
+        Label(dc,UiLabel(L"我的画面",L"Your preview"),x,100,deck,28,small_,localVideo?Mint:Muted);Label(dc,UiLabel(L"对方画面",L"Other participant"),x+deck+16,100,deck,28,small_,call_.Active()?Mint:Muted);
+        RECT border=preview_;InflateRect(&border,1,1);Fill(dc,border,localVideo?Mint:Border);border=remotePreview_;InflateRect(&border,1,1);Fill(dc,border,call_.Active()?Mint:Border);
+        Fill(dc,R(x,lower_,total,1),Border);
+        Label(dc,UiLabel(L"输入设备",L"Input devices"),x+12,lower_+8,sourceWidth-24,28,body_);
         Label(dc,UiLabel(L"摄像头",L"Camera"),x+12,lower_+40,sourceWidth-24,22,small_);Label(dc,UiLabel(L"麦克风",L"Microphone"),x+12,lower_+154,sourceWidth-24,24,small_);
-        Label(dc,UiLabel(L"音频",L"Audio"),mx+12,lower_+8,sourceWidth-24,28,small_,Muted);
+        Label(dc,UiLabel(L"音频",L"Audio"),mx+12,lower_+8,sourceWidth-24,28,body_);
         Label(dc,UiLabel(L"我的麦克风",L"Your microphone"),mx+12,lower_+42,sourceWidth/2,22,small_);Label(dc,UiLabel(L"对方声音",L"Other participant"),mx+sourceWidth/2+6,lower_+42,sourceWidth/2-18,22,small_);
         const int meterWidth=(sourceWidth-36)/2;const float localPeak=std::clamp(peak_.load(),0.f,1.f),remotePeak=std::clamp(remotePeak_.load(),0.f,1.f);
         Fill(dc,R(mx+12,lower_+76,meterWidth,8),Border);Fill(dc,R(mx+12,lower_+76,int(meterWidth*localPeak),8),RGB(47,207,127));Fill(dc,R(mx+sourceWidth/2+6,lower_+76,meterWidth,8),Border);Fill(dc,R(mx+sourceWidth/2+6,lower_+76,int(meterWidth*remotePeak),8),RGB(47,207,127));
         Label(dc,capture_&&capture_->IsMicrophoneCapturing()?UiLabel(L"正在采集",L"Capturing"):UiLabel(L"输入关闭",L"Input off"),mx+12,lower_+90,meterWidth,20,small_,Muted);Label(dc,remoteAudios_>0?UiLabel(L"已收到音频",L"Receiving audio"):UiLabel(L"等待音频",L"Waiting for audio"),mx+sourceWidth/2+6,lower_+90,meterWidth,20,small_,Muted);
         Label(dc,UiLabel(L"输出音量  ",L"Output volume  ")+std::to_wstring(volume_)+L"%",mx+12,lower_+172,sourceWidth-24,24,body_);
-        Label(dc,UiLabel(L"通话连接",L"Call connection"),rx,54,right_-32,30,small_,Ink);
+        Label(dc,UiLabel(L"通话连接",L"Call connection"),rx,54,right_-32,30,body_,Ink);
         if(!CompactHeight())Label(dc,UiLabel(L"与房间内的成员发起一对一通话",L"Call someone in your room"),rx,104,right_-32,28,small_,Muted);
         Label(dc,UiLabel(L"显示名称",L"Display name"),rx,CompactHeight()?92:146,right_-32,22,small_,Muted);
         Label(dc,UiLabel(L"房间号码",L"Room"),rx,CompactHeight()?160:222,right_-32,22,small_,Muted);
@@ -239,8 +239,8 @@ class StudioWindow {
         const int connectY=ConnectY();
         Label(dc,UiLabel(L"选择通话对象",L"Choose a participant"),rx,connectY+(CompactHeight()?46:54),right_-32,22,small_,Muted);
         const wchar_t* state=UiLabel(L"未加入房间",L"Join a room to start");switch(call_.State()){case CallState::Joining:state=UiLabel(L"正在加入",L"Joining room");break;case CallState::Ready:state=UiLabel(L"就绪 · 请选择通话对象",L"Ready. Choose a participant.");break;case CallState::Outgoing:state=UiLabel(L"呼叫中 · 等待对方接听",L"Calling. Waiting for an answer.");break;case CallState::Incoming:state=UiLabel(L"收到来电 · 请接听或拒绝",L"Incoming call. Accept or decline.");break;case CallState::Connecting:state=UiLabel(L"正在连接音视频",L"Connecting audio and video");break;case CallState::Connected:state=UiLabel(L"通话已连接",L"Call connected");break;default:break;}
-        Label(dc,state,rx,CompactHeight()?connectY+244:(connectionSettings_?672:620),right_-32,CompactHeight()?20:26,body_,call_.State()==CallState::Incoming?RGB(255,187,80):Mint);
-        Label(dc,Wide(call_.Remote())+L"   "+std::to_wstring(call_.DurationSeconds())+UiLabel(L" 秒",L" s"),rx,CompactHeight()?connectY+266:(connectionSettings_?704:650),right_-32,24,small_,Muted);
+        Label(dc,state,rx,CompactHeight()?connectY+244:(connectionSettings_?672:620),right_-32,CompactHeight()?20:26,body_,call_.State()==CallState::Incoming?RGB(255,187,80):(call_.State()==CallState::Offline||call_.State()==CallState::Ready?Muted:Mint));
+        if(!call_.Remote().empty())Label(dc,Wide(call_.Remote())+L"   "+std::to_wstring(call_.DurationSeconds())+UiLabel(L" 秒",L" s"),rx,CompactHeight()?connectY+266:(connectionSettings_?704:650),right_-32,24,small_,Muted);
         Fill(dc,R(left_,height_-38,width_-left_,38),Bg);Fill(dc,R(left_,height_-39,width_-left_,1),Border);Label(dc,status_,x,height_-36,width_-x-16,32,small_,Muted);
     }
     // Render only this application's own drawing and controls, without capturing the desktop.
@@ -265,9 +265,10 @@ class StudioWindow {
     }
     void DrawButton(const DRAWITEMSTRUCT& d){
         if(d.CtlType==ODT_COMBOBOX){UiTheme::DrawComboItem(d,body_);return;}
-        bool primary=d.CtlID==Open||d.CtlID==Join,selected=(d.CtlID==Ai&&aiView_)||(d.CtlID==Account&&accountView_)||(d.CtlID==RemoteMode&&!aiView_&&!meetingView_&&!accountView_)||(d.CtlID==Meeting&&meetingView_)||(d.CtlID==CameraMode&&cameraView_)||(d.CtlID==FileMode&&!cameraView_);bool disabled=(d.itemState&ODS_DISABLED)!=0;
+        bool primary=d.CtlID==Join||d.CtlID==Dial||d.CtlID==AcceptCall,selected=(d.CtlID==Ai&&aiView_)||(d.CtlID==Account&&accountView_)||(d.CtlID==RemoteMode&&!aiView_&&!meetingView_&&!accountView_)||(d.CtlID==Meeting&&meetingView_)||(d.CtlID==CameraMode&&cameraView_)||(d.CtlID==FileMode&&!cameraView_);bool disabled=(d.itemState&ODS_DISABLED)!=0;
         if(d.CtlID==RemoteMode||d.CtlID==Meeting||d.CtlID==Ai||d.CtlID==Account){const auto icon=d.CtlID==RemoteMode?UiTheme::NavIcon::Call:d.CtlID==Meeting?UiTheme::NavIcon::Meeting:d.CtlID==Ai?UiTheme::NavIcon::Assistant:UiTheme::NavIcon::Account;UiTheme::DrawNavigation(d,body_,selected,icon);return;}
-        const bool onCanvas=d.CtlID==Open||d.CtlID==CameraMode||d.CtlID==FileMode||d.CtlID==Pause||d.CtlID==Stop||d.CtlID==FullScreen;
+        if(d.CtlID==CameraMode||d.CtlID==FileMode){UiTheme::DrawTab(d,body_,selected);return;}
+        const bool onCanvas=d.CtlID==Open||d.CtlID==Pause||d.CtlID==Stop||d.CtlID==FullScreen||d.CtlID==Camera||d.CtlID==Refresh||d.CtlID==Microphone||d.CtlID==ShareScreen||d.CtlID==Monitor||d.CtlID==TestSound;
         UiTheme::DrawButton(d,body_,primary,selected,d.CtlID==EndCall||d.CtlID==RejectCall,onCanvas?Bg:Panel);
     }
     void Fullscreen(){
