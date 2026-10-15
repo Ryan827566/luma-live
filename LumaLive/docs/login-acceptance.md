@@ -89,3 +89,15 @@ The authenticated Account page now uses a centered, bounded content region and q
 All 24 unified checks passed on EXE SHA256 `5ed686e1eaf1a113d3398ef685c206cce5bcdfc2531513efc92cb2b322f070b2`. The account workflow additionally exercises all authenticated pages, five security modes, delete/device/MFA confirmations and cancellation, result proximity and short/long text scrolling at 1024x700 and 1386x788. The requested 1440x900 window was capped by Windows at 1386x788, so full 1440x900 and physical DPI acceptance are not claimed. The independent code review found no blocking issue.
 
 Captures in `output/ui-account-refinement-20261014/en-US`, `zh-CN` and `zh-wide` include login, profile, deletion confirmation, security, password, device and connection pages. Their capture-manifest.json files bind every set to this EXE hash and actual client dimensions. English profile/delete and Chinese password/wide-profile images were inspected. Physical IME/Narrator/multiple monitors, real provider/media/TURN and final whole-product visual acceptance remain separate.
+
+
+## 2026-10-16：简洁登录入口与可复现验收
+
+- 默认登录仅显示账号、密码、登录和上下文链接；注册、找回密码、短信与双重验证按需展开，未登录不显示服务连接或账户页签。注册只填写用户名、邮箱、密码与确认，初始显示名称取用户名，登录后可编辑。
+- 找回密码先填写账户，发送后显示验证码与新密码；短信先填写手机号，成功请求后显示验证码。区号根据 Windows 区域设置选中，可切换；完整 +E.164 号码优先，验证码仍绑定规范化号码。
+- 密码显示/隐藏改为可聚焦、可读屏的小眼睛。登录默认560×560 DIP，范围480×560至960×800并受当前工作区限制；登录成功展开工作区，退出恢复入口尺寸。采用本机 Codex 的紧凑引导尺寸，不宣称所有 Codex 版本都只有这一尺寸。
+- 应用图标保留LumaLive原创图形，ICO资源现含与本机Codex资源相同的15档像素尺寸；界面图标20 DIP，按DPI加载图标，不将单一32像素图重复放大。
+- 实际客户端25项统一检查全部通过；SHA256 `574c35d6b90e7870c1da11eca2a067106a498f127e2d8c97164544a0f20bcb97`。其中405组原生入口几何/文字测量覆盖简体、繁体、英文，96/144/192模拟DPI、三种尺寸和15种状态。真实UI协议验证注册→登录→工作区、MFA凭据保留、短信区号与挑战绑定、重置、退出、无效连接不覆盖配置。
+- 截图：`output/ui-focused-entrance-20261016/{zh-CN,en-US}`，包含注册、初始找回/验证码页、短信、双重验证与工作区；清单绑定实际EXE哈希。物理IME/读屏/多屏另待验收。
+- `scripts/windows/run_client_checks.cmd`可双击运行统一测试，交互终端保留结果；测试EXE是命令行测试，不是客户端。
+- 本机正式账户服务仍未部署成功。已重新构建 `output/next/Release/luma_auth_server.exe`；无运行账户服务/PG/连接配置，解释了用户无法登录。PostgreSQL部署进行中；TLS和真实投递配置仍未完成。上述测试使用独立内存fixture，不代表生产服务验收。

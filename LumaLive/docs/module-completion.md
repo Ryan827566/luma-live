@@ -1,3 +1,7 @@
+# Latest priority: real local account deployment (2026-10-16)
+
+User requires production-oriented implementation and authorized deployment on this Windows PC; real email/SMS providers are not opened yet, so implement configurable integration without pretending delivery works. Minimal entrance checkpoint passed25 actual-EXE checks and405 synthetic-DPI layout cases; see latest login-acceptance.md. Local server was rebuilt, but no running PostgreSQL/auth backend or saved connection existed. Native PostgreSQL provisioning is underway; TLS, provider configuration and actual persistent registration/login are next gates. Preserve every user change; directly main only.
+
 # Current priority: authenticated Codex-style workspace (2026-10-14)
 
 The user requests Codex-style login and post-login workspace layouts. The latest instruction adds an authentication gate: only sign-in/registration/recovery/connection are available before authentication. Registration still requires a separate successful sign-in. The sidebar then shows the current name/email; sign-out or lost session returns to the entrance and stops media and this client's owned AI gateway. This supersedes the earlier no-gate scope. See [codex-style-ui-plan.md](codex-style-ui-plan.md) for estimates and [account-flow-and-storage.md](account-flow-and-storage.md) for the account server, database, tokens and deployment boundaries.

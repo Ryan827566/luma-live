@@ -10,6 +10,7 @@ import time
 import tempfile
 
 u = c.WinDLL('user32', use_last_error=True)
+g = c.WinDLL('gdi32', use_last_error=True)
 cb = c.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
 u.EnumWindows.argtypes = [cb, w.LPARAM]
 u.GetWindowThreadProcessId.argtypes = [w.HWND, c.POINTER(w.DWORD)]
@@ -26,6 +27,20 @@ u.GetClientRect.argtypes = [w.HWND,c.POINTER(w.RECT)]
 u.MapWindowPoints.argtypes = [w.HWND,w.HWND,c.c_void_p,w.UINT]
 u.SetWindowPos.argtypes = [w.HWND,w.HWND,c.c_int,c.c_int,c.c_int,c.c_int,w.UINT]
 u.GetDpiForWindow.argtypes = [w.HWND]; u.GetDpiForWindow.restype = w.UINT
+u.GetDC.argtypes=[w.HWND];u.GetDC.restype=w.HDC
+u.ReleaseDC.argtypes=[w.HWND,w.HDC]
+u.DrawTextW.argtypes=[w.HDC,w.LPCWSTR,c.c_int,c.POINTER(w.RECT),w.UINT]
+g.GetObjectW.argtypes=[w.HGDIOBJ,c.c_int,c.c_void_p]
+g.CreateFontIndirectW.argtypes=[c.c_void_p];g.CreateFontIndirectW.restype=w.HFONT
+g.SelectObject.argtypes=[w.HDC,w.HGDIOBJ];g.SelectObject.restype=w.HGDIOBJ
+g.GetTextExtentPoint32W.argtypes=[w.HDC,w.LPCWSTR,c.c_int,c.POINTER(w.SIZE)]
+g.DeleteObject.argtypes=[w.HGDIOBJ]
+class LogFont(c.Structure):
+    _fields_=[('height',w.LONG),('width',w.LONG),('escapement',w.LONG),('orientation',w.LONG),('weight',w.LONG),
+              ('italic',w.BYTE),('underline',w.BYTE),('strikeout',w.BYTE),('charset',w.BYTE),('out_precision',w.BYTE),
+              ('clip_precision',w.BYTE),('quality',w.BYTE),('pitch_family',w.BYTE),('face',w.WCHAR*32)]
+class MinMaxInfo(c.Structure):
+    _fields_=[('reserved',w.POINT),('max_size',w.POINT),('max_position',w.POINT),('min_track',w.POINT),('max_track',w.POINT)]
 
 def wait(check, timeout=20):
     end=time.monotonic()+timeout
@@ -54,6 +69,7 @@ def mailbox(command):
 
 settings_dir=tempfile.TemporaryDirectory(prefix='luma-account-ui-')
 settings_path=Path(settings_dir.name)/'account-connection.conf'
+settings_path.write_text(f'LumaLiveAccountConnection 1\nhost=127.0.0.1\nport={port}\n',encoding='utf-8')
 env={k.upper():v for k,v in os.environ.items()};env['LUMALIVE_UI_LANGUAGE']='en-US'
 env['LUMALIVE_ACCOUNT_SETTINGS_PATH']=str(settings_path)
 startup=subprocess.STARTUPINFO();startup.dwFlags=subprocess.STARTF_USESHOWWINDOW;startup.wShowWindow=0
@@ -71,13 +87,28 @@ try:
     root=wait(find)
     panel=wait(lambda:u.FindWindowExW(root,None,'LumaAccountPage',None))
     scale=u.GetDpiForWindow(root)/96
-    u.SetWindowPos(root,None,0,0,round(1024*scale),round(700*scale),0x16)
+    initial=w.RECT();u.GetWindowRect(root,c.byref(initial))
+    assert (initial.right-initial.left,initial.bottom-initial.top)==(round(560*scale),round(560*scale)), 'Sign-in default is not the compact Codex-style size'
+    limits=MinMaxInfo();u.SendMessageW(root,0x24,0,c.addressof(limits))
+    assert (limits.min_track.x,limits.min_track.y)==(round(480*scale),round(560*scale)), 'Sign-in minimum is incorrect'
+    assert limits.min_track.x<=limits.max_track.x<=round(960*scale) and limits.min_track.y<=limits.max_track.y<=round(800*scale), 'Sign-in maximum is not bounded to the desktop'
     def control(i):return u.GetDlgItem(panel,i)
     def click(i):u.SendMessageW(panel,0x111,i,0)
     def select_mode(index):
         u.SendMessageW(control(2165),0x14E,index,0);u.SendMessageW(panel,0x111,(1<<16)|2165,0)
     def fields(*values):
         for i,value in enumerate(values):put(control(2120+i),value)
+    def country(iso,prefix):
+        combo=control(2177)
+        assert combo and visible(combo),'SMS country selector is missing'
+        count=u.SendMessageW(combo,0x146,0,0)
+        for index in range(count):
+            label=c.create_unicode_buffer(128)
+            u.SendMessageW(combo,0x148,index,c.cast(label,c.c_void_p).value)
+            if iso in label.value and prefix in label.value:
+                u.SendMessageW(combo,0x14E,index,0);u.SendMessageW(panel,0x111,(1<<16)|2177,0)
+                return
+        raise AssertionError(f'Country option {iso} {prefix} missing')
     def done(expected):
         wait(lambda:u.IsWindowEnabled(control(2160)))
         assert expected in text(control(2163)),text(control(2163))
@@ -92,26 +123,53 @@ try:
         for index in indices:assert u.SendMessageW(control(2120+index),0xD2,0,0)==0
         click(2168)
         for index in indices:assert u.SendMessageW(control(2120+index),0xD2,0,0)!=0
+    def label_fits(i,h,rect):
+        label=text(h)
+        if not label:return
+        font=c.c_void_p(u.SendMessageW(h,0x31,0,0));description=LogFont()
+        assert font.value and g.GetObjectW(font,c.sizeof(description),c.byref(description))==c.sizeof(description),('Could not inspect control font',i)
+        local_font=g.CreateFontIndirectW(c.byref(description));assert local_font
+        dc=u.GetDC(h);assert dc
+        previous=g.SelectObject(dc,local_font)
+        try:
+            width=rect.right-rect.left;height=rect.bottom-rect.top
+            if i==2163:
+                measured=w.RECT(0,0,width,0)
+                u.DrawTextW(dc,label,len(label),c.byref(measured),0x400|0x10|0x800) # CALCRECT, WORDBREAK, NOPREFIX
+                assert measured.bottom<=height,('Status text clipped',label,measured.bottom,height)
+            else:
+                size=w.SIZE();assert g.GetTextExtentPoint32W(dc,label,len(label),c.byref(size))
+                inset_x=0;inset_y=0
+                if 2160<=i<=2168 and i!=2163:inset_x=8;inset_y=2
+                if i>=2170 and i<=2176 or i==2168:inset_x=round(8*scale);inset_y=round(2*scale)
+                if i==2177:inset_x=round(23*scale)
+                assert size.cx<=width-2*inset_x and size.cy<=height-2*inset_y,('Control text clipped',i,label,(size.cx,size.cy),(width-2*inset_x,height-2*inset_y))
+        finally:
+            g.SelectObject(dc,previous);u.ReleaseDC(h,dc);g.DeleteObject(local_font)
     def fits():
         bounds=w.RECT();u.GetClientRect(panel,c.byref(bounds))
         visible_bounds=[]
-        for i in [*range(2100,2104),*range(2120,2126),*range(2140,2146),*range(2160,2169)]:
+        for i in [*range(2100,2104),*range(2120,2126),*range(2140,2146),*range(2160,2178)]:
             h=control(i)
             if not h or not visible(h):continue
             rect=w.RECT();u.GetWindowRect(h,c.byref(rect));u.MapWindowPoints(None,panel,c.byref(rect),2)
             assert 0<=rect.left<rect.right<=bounds.right and 0<=rect.top<rect.bottom<=bounds.bottom,(i,rect.bottom,bounds.bottom)
             visible_bounds.append((i,rect))
+            if text(control(2100))=='Sign in' and (2140<=i<=2145 or i>=2160 and i not in (2164,2165,2168)):
+                label_fits(i,h,rect)
         for index,(first,a) in enumerate(visible_bounds):
             for second,b in visible_bounds[index+1:]:
                 assert min(a.right,b.right)<=max(a.left,b.left) or min(a.bottom,b.bottom)<=max(a.top,b.top),f'Account controls overlap: {first}, {second}'
         rects=dict(visible_bounds)
         if text(control(2100))=='Sign in':
-            field=rects[2120]
-            assert abs(field.left+field.right-bounds.right)<=2,'Signed-out form is not centered'
-            for i in (2163,2164):
-                assert rects[i].left==field.left and rects[i].right==field.right,'Account guidance is not in the form column'
-            assert rects[2163].top>=rects[2160].bottom+round(8*scale),'Result crowds the primary action'
-            assert rects[2164].top>=rects[2163].bottom+round(8*scale),'Account guidance covers the result'
+            assert not any(i in rects for i in (*range(2100,2104),2164,2165)), 'Signed-out entrance exposed tabs/details/modes'
+            column=rects[2163]
+            assert abs(column.left+column.right-bounds.right)<=2,'Signed-out form is not centered'
+            for i in range(2120,2126):
+                if i in rects:assert column.left<=rects[i].left<rects[i].right<=column.right,'Input left the form column'
+            if 2163 in rects:
+                action_bottom=max(rects[i].bottom for i in (2160,2161) if i in rects)
+                assert rects[2163].top>=action_bottom+round(8*scale),'Result crowds the primary action'
         else:
             # Results belong to the form, not the remote bottom corner of the page.
             primary=rects[2160];status=rects[2163]
@@ -128,6 +186,17 @@ try:
                     action=rects[i]
                     assert status.left<=action.left<action.right<=status.right,'Confirmation left the form column'
                     assert 0<action.top-status.bottom<=action_height,'Confirmation is detached from its prompt'
+    def entrance_sizes():
+        """Exercise every entrance state at the supported outer sizes."""
+        original=w.RECT();u.GetWindowRect(root,c.byref(original))
+        try:
+            for width,height in ((limits.min_track.x,limits.min_track.y),(round(560*scale),round(560*scale)),(limits.max_track.x,limits.max_track.y)):
+                assert u.SetWindowPos(root,None,0,0,width,height,0x16)
+                actual=w.RECT();u.GetWindowRect(root,c.byref(actual))
+                assert (actual.right-actual.left,actual.bottom-actual.top)==(width,height),'Entrance size not exercised'
+                fits()
+        finally:u.SetWindowPos(root,None,original.left,original.top,original.right-original.left,original.bottom-original.top,0x14)
+        fits()
     def at_sizes(check=None):
         """Check compact and attainable wide sizes, then restore the current size."""
         original=w.RECT();u.GetWindowRect(root,c.byref(original))
@@ -156,16 +225,29 @@ try:
     assert not visible(u.GetDlgItem(root,117)), 'Workspace visible before login'
     u.SendMessageW(root,0x111,126,0)
     assert not u.FindWindowExW(root,None,'LumaMeetingPreview',None), 'Hidden meeting command bypassed sign-in'
-    assert visible(control(2163)) and visible(control(2164)), 'Status or account details hidden'
-    assert not u.GetWindowLongW(control(2164),-16)&0x200000, 'Short account details show a scrollbar'
-    for tab in (2100,2101,2102,2103):click(tab);fits()
-    click(2103);fields('127.0.0.1','70000');click(2160);done('Port must be')
-    fields('127.0.0.1',str(port));click(2160);done('Connected')
-    click(2101);fits();password_visibility(3,4);fields('ui.person','ui@example.com','UI Person','secure ui password','different');click(2160);done('do not match')
-    fields('ui.person','ui@example.com','UI Person','secure ui password','secure ui password');click(2160);done('Your account is ready')
+    assert not visible(control(2164)) and not visible(control(2165)), 'Entrance exposed account details or method dropdown'
+    assert visible(control(2120)) and visible(control(2121)) and not visible(control(2122)), 'Sign-in must initially show exactly two fields'
+    assert not visible(control(2173)) and not visible(control(2174)), 'Optional sign-in methods were not collapsed'
+    entrance_sizes()
+    for tab in (2100,2101,2102,2103):
+        assert not visible(control(tab)), 'Signed-out navigation tab exposed'
+        click(tab);fits()
+        assert text(control(2160))=='Sign in' and not visible(control(2122)), 'Hidden tab command navigated the entrance'
+    click(2176);assert visible(control(2173)) and visible(control(2174));entrance_sizes()
+    click(2174);assert visible(control(2122));entrance_sizes()
+    click(2173);assert not visible(control(2122));entrance_sizes()
+    assert visible(control(2177)) and '+' in text(control(2177)), 'SMS entry has no automatic calling code'
+    assert not visible(control(2121)) and not visible(control(2160)), 'SMS code shown before successful request'
+    click(2174);assert visible(control(2122));entrance_sizes()
+    click(2173);assert not visible(control(2122)) and not visible(control(2177));entrance_sizes()
+    click(2171);entrance_sizes();assert not visible(control(2121)) and not visible(control(2122)), 'Recovery exposed later steps before request'
+    click(2175);assert not visible(control(2120));entrance_sizes()
+    click(2172);click(2170);entrance_sizes();assert text(control(2160))=='Register';assert not visible(control(2122));password_visibility(3,4)
+    fields('ui.person','ui@example.com','','secure ui password','different');click(2160);done('do not match');entrance_sizes()
+    fields('ui.person','ui@example.com','','secure ui password','secure ui password');click(2160);done('Your account is ready')
     assert text(control(2121))=='','Password was retained after registration'
     click(2160);done('required')
-    fields('ui.person','wrong password','');click(2160);done('incorrect')
+    fields('ui.person','wrong password','');click(2160);done('incorrect');entrance_sizes()
     fields('ui.person','secure ui password','')
     u.SendMessageW(control(2121),0x10D,0,0)
     u.PostMessageW(control(2121),0x100,0x0D,0)
@@ -178,7 +260,9 @@ try:
     done('signed in')
 
     assert text(control(2100))=='Profile';fits();assert not visible(control(2168))
-    assert text(u.GetDlgItem(root,129))=='UI Person', 'Sidebar did not show signed-in account'
+    signedin_limits=MinMaxInfo();u.SendMessageW(root,0x24,0,c.addressof(signedin_limits))
+    assert (signedin_limits.min_track.x,signedin_limits.min_track.y)==(round(1024*scale),round(700*scale)), 'Workspace kept sign-in sizing restrictions'
+    assert text(u.GetDlgItem(root,129))=='ui.person', 'Sidebar did not show the username as initial display name'
     fields('ui.person','ui@example.com','Updated UI','');click(2160);done('Done')
     assert 'Updated UI' in text(control(2164))
     at_sizes(short_details)
@@ -190,6 +274,8 @@ try:
         at_sizes()
     click(2102);done('Done');at_sizes()
     click(2103);at_sizes()
+    fields('127.0.0.1','70000');click(2160);done('Port must be')
+    saved=settings_path.read_bytes()
     click(2100)
     # The page and its authenticated session survive module switches.
     u.SendMessageW(root,0x111,127,0);u.SendMessageW(root,0x111,129,0)
@@ -223,7 +309,18 @@ try:
     click(2160);done('Two-step verification is on')
     assert text(control(2160))=='Turn off verification'
     at_sizes()
-    recovery=text(control(2164)).split('Recovery codes (keep safe)\r\n')[1].strip().split(',')[0]
+    recovery_codes=text(control(2164)).split('Recovery codes (keep safe)\r\n')[1].strip().split(',')
+    recovery=recovery_codes[1]
+    click(2100);click(2161);done('signed out')
+    fields('ui.person','secure ui password');click(2160);done('authenticator or recovery code')
+    assert visible(control(2122)), 'Server MFA requirement did not reveal the verification field'
+    assert u.SendMessageW(control(2121),0xD2,0,0)!=0, 'MFA challenge exposed the password'
+    click(2168)
+    assert text(control(2120))=='ui.person' and text(control(2121))=='secure ui password', 'MFA reveal discarded sign-in input'
+    click(2168);entrance_sizes()
+    # Submit only the additional factor: successful login proves masked credentials survived.
+    put(control(2122),recovery_codes[0]);click(2160);done('signed in')
+    click(2101);select_mode(3)
     fields('');click(2160);at_sizes();click(2166);done('required')
     assert u.IsWindowEnabled(control(2165)), 'Rejected confirmation left mode disabled'
     fields(recovery);click(2160);click(2166);done('Done')
@@ -238,9 +335,18 @@ try:
     assert not u.GetWindowLongW(control(2164),-16)&0x200000, 'Short profile retained the activity scrollbar'
     at_sizes(short_details)
     click(2100);click(2161);done('signed out');assert text(control(2100))=='Sign in'
-    select_mode(1);fields('+14155552671','','');click(2161);done('Text message sent')
+    signedout=w.RECT();u.GetWindowRect(root,c.byref(signedout))
+    assert (signedout.right-signedout.left,signedout.bottom-signedout.top)==(round(560*scale),round(560*scale)), 'Logout did not restore entrance dimensions'
+    click(2176);click(2173);country('GB','+44')
+    fields('+14155552671','','');click(2161);done('Text message sent')
+    assert visible(control(2121)) and visible(control(2160)), 'Successful SMS request did not reveal code entry'
+    entrance_sizes()
     phone_login=mailbox('phone_login')
-    fields('+14155552671',phone_login,'');click(2160);done('signed in')
+    # A changed national number cannot reuse the challenge requested for another number.
+    country('US','+1');fields('4155552672',phone_login,'');click(2160);done('Request a code for this phone number')
+    # Correcting the number reuses its outstanding challenge; do not violate the
+    # production resend throttle merely to exercise national-number normalization.
+    fields('4155552671',phone_login,'');click(2160);done('signed in')
     assert text(control(2100))=='Profile'
     click(2101);select_mode(2);fits();password_visibility(0,1,2);fields('wrong password','changed password','changed password');click(2160);done('incorrect')
     fields('secure ui password','changed password','changed password');click(2160);done('Password updated')
@@ -248,7 +354,9 @@ try:
     fields('ui.person','secure ui password','');click(2160);done('incorrect')
     fields('ui.person','changed password','');click(2160);done('signed in')
     click(2161);done('signed out')
-    click(2102);fits();password_visibility(2,3);fields('ui.person');click(2161);done('check your email')
+    click(2171);entrance_sizes();fields('ui.person');click(2161);done('check your email');entrance_sizes()
+    assert visible(control(2121)) and visible(control(2122)) and visible(control(2123)), 'Successful reset request did not reveal reset fields'
+    password_visibility(2,3)
     reset_code=mailbox('password_reset')
 
     # A fresh client restores only the successful endpoint, without remembered credentials.
@@ -260,27 +368,37 @@ try:
     wait(lambda:control(2100) and text(control(2100))=='Sign in')
     assert text(control(2120))=='' and text(control(2121))==''
     click(2103)
-    assert text(control(2120))=='127.0.0.1' and text(control(2121))==str(port), 'Endpoint was not restored'
+    assert text(control(2120))=='' and text(control(2121))=='' and text(control(2160))=='Sign in', 'Hidden connection command exposed service fields'
     # Complete recovery in a different client; consumed reset tokens cannot be reused.
-    click(2102);fields('',reset_code,'recovered password','recovered password');click(2160);done('Password updated')
-    click(2102);fields('',reset_code,'other password','other password');click(2160);done('invalid or expired')
-    click(2100);fields('ui.person','recovered password','');click(2160);done('signed in')
+    click(2171);click(2175);fields('',reset_code,'recovered password','recovered password');click(2160);done('Password updated')
+    click(2171);click(2175);fields('',reset_code,'other password','other password');click(2160);done('invalid or expired')
+    click(2172);fields('ui.person','recovered password','');click(2160);done('signed in')
+    click(2103);fields('invalid address',str(port));click(2160);done('IPv4')
+    assert settings_path.read_bytes()==saved, 'Failed connection replaced the saved endpoint'
+    fields('ui.person','recovered password');click(2160);done('signed in')
+    # Explicitly changing the authenticated service endpoint clears that session.
+    # The new endpoint is persisted and re-login uses it without a public editor.
+    click(2103);fields('127.0.0.1',str(port));click(2160);done('Connected')
+    # An explicit successful save canonicalizes line endings. Subsequent
+    # authentication must preserve this new byte-for-byte baseline.
+    assert settings_path.read_text(encoding='utf-8')==f'LumaLiveAccountConnection 1\nhost=127.0.0.1\nport={port}\n'
+    saved=settings_path.read_bytes()
+    assert not visible(control(2103)), 'Changing service exposed signed-out settings'
+    fields('ui.person','recovered password');click(2160);done('signed in')
     click(2162);click(2166);done('account has been deleted')
     fields('ui.person','recovered password','');click(2160);done('incorrect')
-    click(2103)
-    fields('invalid address',str(port));click(2160);done('IPv4')
-    assert settings_path.read_bytes()==saved, 'Failed connection replaced the saved endpoint'
+    assert settings_path.read_bytes()==saved, 'Authentication modified service configuration'
     u.PostMessageW(root,0x10,0,0);process.wait(timeout=10);root=None
     settings_path.write_text('malformed settings',encoding='utf-8')
     process=subprocess.Popen([str(binary),'--account'],env=env,startupinfo=startup)
     root=wait(find);panel=wait(lambda:u.FindWindowExW(root,None,'LumaAccountPage',None))
     wait(lambda:control(2163) and text(control(2163)))
     click(2103)
-    assert text(control(2120))=='127.0.0.1' and text(control(2121))=='9100'
+    assert text(control(2120))=='' and text(control(2121))=='' and not visible(control(2103)), 'Invalid configuration exposed a connection editor'
     assert settings_path.read_text(encoding='utf-8')=='malformed settings', 'Loading overwrote invalid settings'
     print('PASS: account UI, authenticated page/confirmation layouts at compact and desktop-limited wide sizes',
           (min(round(1440*scale),u.GetSystemMetrics(59)),min(round(900*scale),u.GetSystemMetrics(60))),
-          'form results, short/long detail scrolling, delivery failure, email/phone verification, SMS sign-in, password change, cross-client recovery, deletion, keyboard and endpoint persistence')
+          'minimal signed-out entrance, progressive MFA/recovery, hidden command rejection, form results, short/long detail scrolling, delivery failure, email/phone verification, SMS sign-in, password change, cross-client recovery, deletion, keyboard and preconfigured endpoint persistence')
 finally:
     if root:u.PostMessageW(root,0x10,0,0)
     try:process.wait(timeout=10)

@@ -10,7 +10,7 @@ assets = root / "LumaLive/client/ui/studio-preview/assets"
 source = Image.open(assets / "lumalive-master.png").convert("RGBA")
 assert source.width == source.height and source.width >= 256
 assert source.getextrema()[3][0] == 0, "Master must retain transparent corners"
-sizes = (16, 20, 24, 32, 40, 48, 64, 128, 256)
+sizes = (16, 20, 24, 30, 32, 36, 40, 44, 48, 60, 64, 72, 80, 96, 256)
 image = source.resize((256, 256), Image.Resampling.LANCZOS)
 image.save(assets / "lumalive.png")
 image.save(assets / "lumalive.ico", sizes=[(v, v) for v in sizes])
@@ -31,4 +31,4 @@ for row, color in ((0, "#cbd7e5"), (115, "#364354")):
 output = root / "output/icon-review"
 output.mkdir(parents=True, exist_ok=True)
 board.save(output / "lumalive-sizes.png")
-print("PASS: packaged nine ICO sizes with transparency; size sheet in output/icon-review")
+print("PASS: packaged fifteen ICO sizes with transparency; size sheet in output/icon-review")

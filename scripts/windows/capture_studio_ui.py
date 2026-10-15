@@ -25,14 +25,15 @@ startup=subprocess.STARTUPINFO();startup.dwFlags=subprocess.STARTF_USESHOWWINDOW
 profile=Path(sys.argv[2]).resolve()/".test-profile"
 profile.mkdir(parents=True,exist_ok=True)
 env={key.upper():value for key,value in os.environ.items()};env["LOCALAPPDATA"]=str(profile)
+env["LUMALIVE_ACCOUNT_SETTINGS_PATH"]=str(profile/"account.conf")
 fixture=Path(sys.argv[1]).resolve().parent/"luma_session_archive_tests.exe"
 if fixture.is_file():subprocess.run([str(fixture),"--write-fixture",str(profile/"LumaLive/records")],env=env,check=True)
 binary=Path(sys.argv[1]).resolve()
 manifest={"created_utc":datetime.now(timezone.utc).isoformat(),"binary":str(binary),
           "sha256":hashlib.sha256(binary.read_bytes()).hexdigest(),
           "language_override":env.get("LUMALIVE_UI_LANGUAGE"),"captures":[]}
+auth_fixture=WorkspaceAuthFixture(binary,env["LUMALIVE_ACCOUNT_SETTINGS_PATH"])
 process=subprocess.Popen([str(binary)],startupinfo=startup,env=env);root=None
-auth_fixture=None
 try:
     deadline=time.monotonic()+20
     while not root and time.monotonic()<deadline:
@@ -46,21 +47,32 @@ try:
         if found:root=found[0]
         time.sleep(.1)
     assert root,"No test client"
-    if os.environ.get("LUMALIVE_TEST_WINDOW"):
+    def requested_size():
+        if not os.environ.get("LUMALIVE_TEST_WINDOW"):return
         width,height=map(int,os.environ["LUMALIVE_TEST_WINDOW"].split("x"))
         u.GetDpiForWindow.argtypes=[w.HWND];u.GetDpiForWindow.restype=w.UINT
         scale=u.GetDpiForWindow(root)/96
         u.SetWindowPos.argtypes=[w.HWND,w.HWND,c.c_int,c.c_int,c.c_int,c.c_int,w.UINT]
-        assert u.SetWindowPos(root,None,0,0,round(width*scale),round(height*scale),0x16)
+        class MinMaxInfo(c.Structure):
+            _fields_=[('reserved',w.POINT),('max_size',w.POINT),('max_position',w.POINT),('min_track',w.POINT),('max_track',w.POINT)]
+        limits=MinMaxInfo();u.SendMessageW(root,0x24,0,c.addressof(limits))
+        width=max(limits.min_track.x,min(round(width*scale),limits.max_track.x or round(width*scale)))
+        height=max(limits.min_track.y,min(round(height*scale),limits.max_track.y or round(height*scale)))
+        assert u.SetWindowPos(root,None,0,0,width,height,0x16)
+    requested_size()
     directory=Path(sys.argv[2]);directory.mkdir(parents=True,exist_ok=True)
-    for name,control,subpage in [("account",129,None),("account-register",129,2101),("account-recovery",129,2102),("account-connection",129,2103),("calls",117,None),("account-profile",129,2100),("account-delete",129,2100),("account-security",129,2101),("account-password",129,2101),("account-devices",129,2102),("account-service",129,2103),("meetings",126,None),("assistant",127,11),("assistant-history",127,12),("assistant-history-delete",127,12),("assistant-settings",127,13)]:
+    for name,control,subpage in [("account",129,None),("account-register",129,2170),("account-recovery",129,2171),("account-recovery-code",129,2175),("account-more",129,2176),("account-sms",129,2173),("account-sms-mfa",129,2174),("calls",117,None),("account-profile",129,2100),("account-delete",129,2100),("account-security",129,2101),("account-password",129,2101),("account-devices",129,2102),("account-service",129,2103),("meetings",126,None),("assistant",127,11),("assistant-history",127,12),("assistant-history-delete",127,12),("assistant-settings",127,13)]:
         if name=="calls":
-            auth_fixture=WorkspaceAuthFixture(sys.argv[1]);auth_fixture.login(root)
+            account=u.FindWindowExW(root,None,"LumaAccountPage",None)
+            u.SendMessageW(account,0x111,2172,0)
+            auth_fixture.login(root)
+            requested_size()
         u.SendMessageW(root,0x111,control,0);time.sleep(.5)
         if subpage:
             panel=u.FindWindowExW(root,None,"LumaAccountPage" if control==129 else "LumaSessionAi",None)
             while panel and not (u.GetWindowLongW(panel,-16)&0x10000000):panel=u.FindWindowExW(root,panel,"LumaSessionAi",None)
             assert panel and u.GetDlgItem(panel,subpage),"AI subpage not present in this build"
+            if name in ('account-recovery','account-more'):u.SendMessageW(panel,0x111,2172,0)
             u.SendMessageW(panel,0x111,subpage,0);time.sleep(.2)
             if name == 'assistant-history-delete':
                 u.SendMessageW(panel, 0x111, 36, 0);time.sleep(.1)

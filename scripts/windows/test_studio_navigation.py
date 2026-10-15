@@ -38,6 +38,7 @@ profile_parent.mkdir(parents=True, exist_ok=True)
 profile = profile_parent / ("luma-ui-profile-" + uuid.uuid4().hex)
 profile.mkdir()
 env = {key.upper(): value for key, value in os.environ.items()}; env["LOCALAPPDATA"] = str(profile)
+env["LUMALIVE_ACCOUNT_SETTINGS_PATH"] = str(profile / "account.conf")
 archive_fixture = Path(sys.argv[1]).resolve().parent / "luma_session_archive_tests.exe"
 subprocess.run([str(archive_fixture), "--write-fixture", str(profile / "LumaLive/records")], env=env, check=True)
 health_server = GatewayServer(Config(), port=0)
@@ -46,10 +47,10 @@ health_server.health_checks = 0
 health_thread = threading.Thread(target=health_server.serve_forever, kwargs={"poll_interval": .01}, daemon=True)
 health_thread.start()
 env["LUMALIVE_AI_GATEWAY_PORT"] = str(health_server.server_port)
+auth_fixture = WorkspaceAuthFixture(sys.argv[1], env["LUMALIVE_ACCOUNT_SETTINGS_PATH"])
 process = subprocess.Popen([sys.argv[1]], startupinfo=startup, env=env)
 root = None
 fixture = None
-auth_fixture = None
 try:
     until = time.monotonic() + 20
     while time.monotonic() < until and not root:
@@ -65,7 +66,6 @@ try:
         if process.poll() is not None: raise RuntimeError("Studio exited before initialization")
         time.sleep(.1)
     assert root, "No studio window"
-    auth_fixture = WorkspaceAuthFixture(sys.argv[1])
     auth_fixture.login(root)
     time.sleep(2)
     u.GetDpiForWindow.argtypes = [w.HWND]; u.GetDpiForWindow.restype = w.UINT

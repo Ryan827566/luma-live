@@ -13,6 +13,7 @@ public:
     void Hide();
     void Place(RECT bounds, UINT dpi);
     bool CancelPendingAction();
+    void FocusEntry();
     // UI-thread snapshot access only; never reads the worker's live service or tokens.
     bool IsAuthenticated() const;
     std::wstring DisplayName() const;

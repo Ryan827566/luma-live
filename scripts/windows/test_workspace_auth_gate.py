@@ -23,10 +23,10 @@ with tempfile.TemporaryDirectory(prefix='luma-gate-') as profile:
     startup = subprocess.STARTUPINFO()
     startup.dwFlags = subprocess.STARTF_USESHOWWINDOW
     startup.wShowWindow = 0
+    fixture = WorkspaceAuthFixture(binary, env['LUMALIVE_ACCOUNT_SETTINGS_PATH'])
     # Legacy diagnostic switches must no longer expose an interactive meeting.
     client = subprocess.Popen([str(binary), '--meeting', '--ui-regression'], env=env, startupinfo=startup)
     root = None
-    fixture = None
     try:
         def find_root():
             found = []
@@ -38,14 +38,13 @@ with tempfile.TemporaryDirectory(prefix='luma-gate-') as profile:
             u.EnumWindows(visit, 0)
             return found[0] if found else None
         root = wait(find_root, 'Client missing')
-        fixture = WorkspaceAuthFixture(binary)
         panel = fixture.login(root)
         def visible(i): return bool(u.GetWindowLongW(u.GetDlgItem(root, i), -16) & 0x10000000)
         def text(h):
             value = c.create_unicode_buffer(512)
             u.SendMessageW(h, 0xD, len(value), c.cast(value, c.c_void_p).value)
             return value.value
-        assert text(u.GetDlgItem(root, 129)) == 'Workspace Tester', 'Account identity missing'
+        assert text(u.GetDlgItem(root, 129)) == 'workspace.tester', 'Account identity missing'
         u.SendMessageW(root, 0x111, 127, 0)
         assert u.FindWindowExW(root, None, 'LumaSessionAi', None)
         u.SendMessageW(root, 0x111, 129, 0)

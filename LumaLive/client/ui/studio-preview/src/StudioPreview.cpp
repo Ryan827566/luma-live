@@ -55,6 +55,7 @@ public:
 
 class StudioWindow {
     HWND window_{},surface_{},remoteSurface_{};HINSTANCE instance_{};
+    HICON brandIcon_{},smallIcon_{},largeIcon_{};
     HFONT body_{},small_{},title_{},brand_{};HBRUSH panelBrush_{CreateSolidBrush(Panel)};
     std::array<HWND,33> controls_{};
     std::unique_ptr<media::IDeviceCaptureService> capture_;
@@ -80,6 +81,8 @@ class StudioWindow {
     std::unique_ptr<HostedMeeting> meetingPage_;
     bool cameraView_{true},paused_{false},fullscreen_{false},closing_{false};
     RECT preview_{},remotePreview_{},savedWindow_{};DWORD savedStyle_{};
+    RECT entranceWindow_{};
+    UINT entranceDpi_{96};
     std::wstring status_{UiLabel(L"选择摄像头，或打开一个视频 / 音频文件",L"Choose a camera or open a media file")},fileName_{UiLabel(L"尚未打开媒体",L"No media selected")};
     int width_{1440},height_{900},left_{176},right_{280},lower_{420},volume_{65};
     UINT dpi_{96};
@@ -91,7 +94,13 @@ class StudioWindow {
     void Place(int id,int x,int y,int w,int h){MoveWindow(Control(id),S(x),S(y),S(w),S(h),TRUE);}
     HWND Make(int id,const wchar_t* cls,const wchar_t* label,DWORD style){if(lstrcmpW(cls,L"COMBOBOX")==0)style|=CBS_OWNERDRAWFIXED|CBS_HASSTRINGS;auto h=CreateWindowExW(0,cls,label,WS_CHILD|WS_VISIBLE|WS_TABSTOP|style,0,0,1,1,window_,reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),instance_,nullptr);controls_[id-100]=h;if(lstrcmpW(cls,L"EDIT")==0)UiTheme::InstallEdit(h);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(body_),TRUE);return h;}
     void Button(int id,const wchar_t* label){UiTheme::InstallHover(Make(id,L"BUTTON",label,BS_OWNERDRAW));}
-    void Fonts(){for(auto f:{body_,small_,title_,brand_})if(f)DeleteObject(f);auto make=[&](int size,int weight){return CreateFontW(-S(size),0,0,0,weight,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,ChineseUi()?L"Microsoft YaHei UI":L"Segoe UI");};body_=make(14,400);small_=make(12,400);title_=make(22,600);brand_=make(23,700);for(auto c:controls_)if(c)SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(body_),TRUE);}
+    void UpdateIcons(){
+        auto load=[&](int px){return static_cast<HICON>(LoadImageW(instance_,MAKEINTRESOURCEW(101),IMAGE_ICON,px,px,LR_DEFAULTCOLOR));};
+        auto brand=load(S(20)),smallHandle=load(GetSystemMetricsForDpi(SM_CXSMICON,dpi_)),largeHandle=load(GetSystemMetricsForDpi(SM_CXICON,dpi_));
+        if(window_){SendMessageW(window_,WM_SETICON,ICON_SMALL,reinterpret_cast<LPARAM>(smallHandle));SendMessageW(window_,WM_SETICON,ICON_BIG,reinterpret_cast<LPARAM>(largeHandle));}
+        for(auto icon:{brandIcon_,smallIcon_,largeIcon_})if(icon)DestroyIcon(icon);brandIcon_=brand;smallIcon_=smallHandle;largeIcon_=largeHandle;
+    }
+    void Fonts(){UpdateIcons();for(auto f:{body_,small_,title_,brand_})if(f)DeleteObject(f);auto make=[&](int size,int weight){return CreateFontW(-S(size),0,0,0,weight,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,ChineseUi()?L"Microsoft YaHei UI":L"Segoe UI");};body_=make(14,400);small_=make(12,400);title_=make(22,600);brand_=make(23,700);for(auto c:controls_)if(c)SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(body_),TRUE);}
     RECT R(int x,int y,int w,int h)const{return {S(x),S(y),S(x+w),S(y+h)};}
     void Label(HDC dc,const std::wstring& s,int x,int y,int w,int h,HFONT f,COLORREF c=Ink,UINT flags=DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS){Text(dc,s,R(x,y,w,h),f,c,flags);}
     void CloseFile(){if(playback_)playback_->closing=true;if(player_){player_->Shutdown();player_.Reset();}playback_.reset();paused_=false;}
@@ -208,11 +217,11 @@ class StudioWindow {
     }
     void Paint(HDC dc){
         RECT all;GetClientRect(window_,&all);Fill(dc,all,Bg);if(fullscreen_)return;
-        if(!workspaceReady_){DrawIconEx(dc,S(18),S(10),LoadIconW(instance_,MAKEINTRESOURCEW(101)),S(22),S(22),0,nullptr,DI_NORMAL);Label(dc,L"LumaLive",50,7,150,28,body_);return;}
+        if(!workspaceReady_){DrawIconEx(dc,S(18),S(10),brandIcon_,S(20),S(20),0,nullptr,DI_NORMAL);Label(dc,L"LumaLive",50,7,150,28,body_);return;}
         const int x=left_+24,end=width_-right_-24,total=end-x,deck=(total-16)/2,sourceWidth=(total-16)/2,mx=x+sourceWidth+16,rx=width_-right_+16;
         Fill(dc,R(0,0,left_,height_),UiTheme::Sidebar);Fill(dc,R(left_,40,width_-left_,56),Bg);Fill(dc,R(width_-right_,40,right_,height_-40),Panel);
         Fill(dc,R(width_-right_,40,1,height_),Border);Fill(dc,R(left_,95,width_-left_-right_,1),Border);
-        DrawIconEx(dc,S(18),S(15),LoadIconW(instance_,MAKEINTRESOURCEW(101)),S(22),S(22),0,nullptr,DI_NORMAL);Label(dc,L"LumaLive",50,12,left_-60,28,body_);
+        DrawIconEx(dc,S(18),S(15),brandIcon_,S(20),S(20),0,nullptr,DI_NORMAL);Label(dc,L"LumaLive",50,12,left_-60,28,body_);
         Label(dc,UiLabel(L"工作空间",L"Workspace"),20,60,left_-40,24,small_,Muted);
         Fill(dc,R(16,height_-86,left_-32,1),Border);
         Label(dc,accountEmail_,48,height_-33,left_-60,20,small_,Muted);
@@ -319,9 +328,23 @@ class StudioWindow {
         }
         InvalidateRect(window_,nullptr,FALSE);InvalidateRect(surface_,nullptr,FALSE);for(int i:{CameraMode,FileMode,RemoteMode})InvalidateRect(Control(i),nullptr,TRUE);
     }
+    RECT WorkArea()const{MONITORINFO info{sizeof(info)};GetMonitorInfoW(MonitorFromWindow(window_,MONITOR_DEFAULTTONEAREST),&info);return info.rcWork;}
+    void PlaceEntrance(){
+        const auto area=WorkArea();const int aw=area.right-area.left,ah=area.bottom-area.top;
+        const int w=std::min(aw,std::clamp(entranceWindow_.right>entranceWindow_.left?MulDiv(entranceWindow_.right-entranceWindow_.left,dpi_,entranceDpi_):S(560),S(480),S(960)));
+        const int h=std::min(ah,std::clamp(entranceWindow_.bottom>entranceWindow_.top?MulDiv(entranceWindow_.bottom-entranceWindow_.top,dpi_,entranceDpi_):S(560),S(560),S(800)));
+        const int x=entranceWindow_.right>entranceWindow_.left?std::clamp(int(entranceWindow_.left),int(area.left),int(area.right)-w):area.left+(aw-w)/2;
+        const int y=entranceWindow_.bottom>entranceWindow_.top?std::clamp(int(entranceWindow_.top),int(area.top),int(area.bottom)-h):area.top+(ah-h)/2;
+        SetWindowPos(window_,nullptr,x,y,w,h,SWP_NOZORDER|SWP_NOACTIVATE);
+    }
     void SyncAccount(){
         const bool authenticated=account_.IsAuthenticated();
         if(authenticated!=workspaceReady_){
+            if(authenticated){
+                entranceDpi_=dpi_;
+                if(!IsZoomed(window_))GetWindowRect(window_,&entranceWindow_);
+                else {WINDOWPLACEMENT placement{sizeof(placement)};if(GetWindowPlacement(window_,&placement)){entranceWindow_=placement.rcNormalPosition;MONITORINFO info{sizeof(info)};GetMonitorInfoW(MonitorFromWindow(window_,MONITOR_DEFAULTTONEAREST),&info);OffsetRect(&entranceWindow_,info.rcWork.left-info.rcMonitor.left,info.rcWork.top-info.rcMonitor.top);}}
+            }
             if(!authenticated){
                 // Restore geometry before locking commands; account loss always ends media.
                 if(fullscreen_){fullscreen_=false;SetWindowLongPtrW(window_,GWL_STYLE,savedStyle_);SetWindowPos(window_,nullptr,savedWindow_.left,savedWindow_.top,savedWindow_.right-savedWindow_.left,savedWindow_.bottom-savedWindow_.top,SWP_FRAMECHANGED|SWP_NOZORDER);}
@@ -338,6 +361,8 @@ class StudioWindow {
                 SetWindowTextW(Control(Join),UiLabel(L"加入房间",L"Join room"));
             }
             workspaceReady_=authenticated;accountView_=!authenticated;aiView_=false;meetingView_=false;meetingAiContext_=false;
+            if(authenticated){const auto area=WorkArea();RECT bounds{};GetWindowRect(window_,&bounds);const int w=std::min(int(area.right-area.left),std::max(int(bounds.right-bounds.left),S(1200))),h=std::min(int(area.bottom-area.top),std::max(int(bounds.bottom-bounds.top),S(780)));SetWindowPos(window_,nullptr,area.left+(area.right-area.left-w)/2,area.top+(area.bottom-area.top-h)/2,w,h,SWP_NOZORDER|SWP_NOACTIVATE);}
+            else {if(IsZoomed(window_))ShowWindow(window_,SW_RESTORE);PlaceEntrance();}
             if(authenticated&&!devicesReady_){auto result=capture_->Start();devicesReady_=result.IsOk();if(!result.IsOk())status_=UiLabel(L"设备初始化失败，请检查设备后重新登录。",L"Device initialization failed. Check your devices and sign in again.");Enumerate();}
             Layout();
             if(authenticated)SetFocus(Control(RemoteMode));
@@ -358,7 +383,8 @@ class StudioWindow {
         case OpenMeetingAssistant:meetingAiContext_=true;Command(Ai);return 0;
         case ToggleWorkspaceFullscreen:Fullscreen();return 0;
         case WM_SIZE:Layout();return 0;
-        case WM_GETMINMAXINFO:{auto m=reinterpret_cast<MINMAXINFO*>(lp);m->ptMinTrackSize={S(1024),S(700)};return 0;}
+        case WM_GETMINMAXINFO:{auto m=reinterpret_cast<MINMAXINFO*>(lp);m->ptMinTrackSize=workspaceReady_?POINT{S(1024),S(700)}:POINT{S(480),S(560)};
+            if(!workspaceReady_){const auto area=WorkArea();MONITORINFO info{sizeof(info)};GetMonitorInfoW(MonitorFromWindow(window_,MONITOR_DEFAULTTONEAREST),&info);const int w=std::min(S(960),int(area.right-area.left)),h=std::min(S(800),int(area.bottom-area.top));m->ptMaxTrackSize={w,h};m->ptMaxSize={w,h};m->ptMaxPosition={area.left-info.rcMonitor.left+(area.right-area.left-w)/2,area.top-info.rcMonitor.top+(area.bottom-area.top-h)/2};m->ptMinTrackSize.x=std::min(m->ptMinTrackSize.x,LONG(w));m->ptMinTrackSize.y=std::min(m->ptMinTrackSize.y,LONG(h));}return 0;}
         case WM_DPICHANGED:{dpi_=HIWORD(wp);Fonts();auto r=reinterpret_cast<RECT*>(lp);SetWindowPos(window_,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);Layout();return 0;}
         case WM_PRINTCLIENT:Paint(reinterpret_cast<HDC>(wp));return 0;
         case WM_ERASEBKGND:return 1;
@@ -396,11 +422,11 @@ class StudioWindow {
     static LRESULT CALLBACK Proc(HWND h,UINT m,WPARAM w,LPARAM l){auto self=reinterpret_cast<StudioWindow*>(GetWindowLongPtrW(h,GWLP_USERDATA));if(m==WM_NCCREATE){self=static_cast<StudioWindow*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);self->window_=h;SetWindowLongPtrW(h,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));}return self?self->Handle(m,w,l):DefWindowProcW(h,m,w,l);}
     static LRESULT CALLBACK SurfaceProc(HWND h,UINT m,WPARAM w,LPARAM l){auto self=reinterpret_cast<StudioWindow*>(GetWindowLongPtrW(h,GWLP_USERDATA));if(m==WM_NCCREATE){self=static_cast<StudioWindow*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);SetWindowLongPtrW(h,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));}if(self){if(m==WM_PRINTCLIENT){self->PaintSurface(h,reinterpret_cast<HDC>(w));return 0;}if(m==WM_ERASEBKGND)return 1;if(m==WM_PAINT){PAINTSTRUCT ps;auto dc=BeginPaint(h,&ps);self->PaintSurface(h,dc);EndPaint(h,&ps);return 0;}if(m==WM_SIZE&&h==self->surface_&&self->player_&&!self->cameraView_)self->player_->UpdateVideo();}return DefWindowProcW(h,m,w,l);}
 public:
-    ~StudioWindow(){Shutdown();for(auto f:{body_,small_,title_,brand_})if(f)DeleteObject(f);DeleteObject(panelBrush_);}
+    ~StudioWindow(){Shutdown();for(auto icon:{brandIcon_,smallIcon_,largeIcon_})if(icon)DestroyIcon(icon);for(auto f:{body_,small_,title_,brand_})if(f)DeleteObject(f);DeleteObject(panelBrush_);}
     int Run(HINSTANCE instance,int show){
         instance_=instance;WNDCLASSW wc{};wc.hInstance=instance;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.lpfnWndProc=Proc;wc.lpszClassName=L"LumaStudioPreview";wc.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(101));RegisterClassW(&wc);wc.lpfnWndProc=SurfaceProc;wc.lpszClassName=L"LumaVideoSurface";RegisterClassW(&wc);
-        window_=CreateWindowExW(0,L"LumaStudioPreview",L"LumaLive Studio",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,1440,900,nullptr,nullptr,instance,this);if(!window_)return 1;
-        dpi_=GetDpiForWindow(window_);Fonts();BOOL dark=TRUE;DwmSetWindowAttribute(window_,20,&dark,sizeof(dark));
+        window_=CreateWindowExW(0,L"LumaStudioPreview",L"LumaLive Studio",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,560,560,nullptr,nullptr,instance,this);if(!window_)return 1;
+        dpi_=GetDpiForWindow(window_);PlaceEntrance();Fonts();BOOL dark=TRUE;DwmSetWindowAttribute(window_,20,&dark,sizeof(dark));
         surface_=CreateWindowExW(0,L"LumaVideoSurface",UiLabel(L"视频预览",L"Video preview"),WS_CHILD|WS_VISIBLE,0,0,1,1,window_,nullptr,instance,this);
         remoteSurface_=CreateWindowExW(0,L"LumaVideoSurface",UiLabel(L"远端视频",L"Remote video"),WS_CHILD|WS_VISIBLE,0,0,1,1,window_,nullptr,instance,this);
         Button(Account,UiLabel(L"账户",L"Account"));Button(Advanced,UiLabel(L"连接设置",L"Connection settings"));Button(Ai,UiLabel(L"AI \u52a9\u624b",L"AI assistant"));Button(Meeting,UiLabel(L"\u89c6\u9891\u4f1a\u8bae",L"Meetings"));Button(Open,UiLabel(L"打开媒体文件",L"Open media"));Button(CameraMode,UiLabel(L"摄像头",L"Camera"));Button(FileMode,UiLabel(L"媒体文件",L"Media"));Button(Camera,UiLabel(L"开启摄像头",L"Start camera"));Button(Refresh,UiLabel(L"刷新设备",L"Refresh"));Button(Microphone,UiLabel(L"开启麦克风",L"Start microphone"));Button(Monitor,UiLabel(L"监听：关闭",L"Monitoring off"));Button(TestSound,UiLabel(L"测试扬声器",L"Test speakers"));Button(Pause,UiLabel(L"暂停",L"Pause"));Button(Stop,UiLabel(L"停止播放",L"Stop playback"));Button(FullScreen,UiLabel(L"全屏预览",L"Fullscreen"));
@@ -415,7 +441,7 @@ public:
         const auto renderPath=Option(L"--render-check");if(!renderPath.empty()){const bool rendered=RenderCheck(renderPath);Shutdown();DestroyWindow(window_);return rendered?0:2;}
         // Media can be opened from the workspace after authentication.
         if(std::wstring(GetCommandLineW()).find(L"--account")!=std::wstring::npos)Command(Account);
-        SetTimer(window_,1,33,nullptr);ShowWindow(window_,show);UpdateWindow(window_);
+        SetTimer(window_,1,33,nullptr);ShowWindow(window_,show);UpdateWindow(window_);account_.FocusEntry();
         MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){if(msg.message==WM_KEYDOWN){if(msg.wParam==VK_F11){if(!(msg.lParam&(LPARAM(1)<<30)))Fullscreen();continue;}if(msg.wParam==VK_ESCAPE){if(msg.lParam&(LPARAM(1)<<30))continue;if(accountView_&&account_.CancelPendingAction())continue;if(meetingView_&&meetingPage_&&meetingPage_->CancelPendingAction())continue;if(fullscreen_){Fullscreen();continue;}}if(msg.wParam=='O'&&(GetKeyState(VK_CONTROL)&0x8000)){if(!(msg.lParam&(LPARAM(1)<<30)))OpenFile();continue;}if(msg.wParam==VK_SPACE&&msg.hwnd==window_){Command(Pause);continue;}}if(!IsDialogMessageW(window_,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
         return static_cast<int>(msg.wParam);
     }

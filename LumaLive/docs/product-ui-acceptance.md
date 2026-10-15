@@ -224,3 +224,15 @@ Captures in `output/ui-account-refinement-20261014/en-US`, `zh-CN` and `zh-wide`
 The call page now uses the shared quiet source tabs, a clearer title, wider canvas gutters and open device/audio sections instead of repeated enclosing cards. Join/start/answer are emphasized; opening media is secondary. Inactive local preview and idle connection text no longer imply an active blue media state, and a duration is only displayed when a remote participant exists. Literal ampersands are preserved in painted text. Media actions, signaling and authentication are unchanged.
 
 All 24 unified checks passed on EXE SHA256 `25497616faeaeba6e8104cba20ab982ac5ded181b5441b86ebfd342c92680b6e`; English 1024x700 and Chinese 1386x788 captures in `output/ui-call-refinement-20261014` have matching manifests and their call pages were inspected. Independent review found no added media/state/lifetime blockers. This is a partial call/meeting visual package: video/control proportions, meeting-state refinement and final full visual acceptance remain open. No physical/provider acceptance is inferred.
+
+
+## 2026-10-16：简洁登录入口与可复现验收
+
+- 默认登录仅显示账号、密码、登录和上下文链接；注册、找回密码、短信与双重验证按需展开，未登录不显示服务连接或账户页签。注册只填写用户名、邮箱、密码与确认，初始显示名称取用户名，登录后可编辑。
+- 找回密码先填写账户，发送后显示验证码与新密码；短信先填写手机号，成功请求后显示验证码。区号根据 Windows 区域设置选中，可切换；完整 +E.164 号码优先，验证码仍绑定规范化号码。
+- 密码显示/隐藏改为可聚焦、可读屏的小眼睛。登录默认560×560 DIP，范围480×560至960×800并受当前工作区限制；登录成功展开工作区，退出恢复入口尺寸。采用本机 Codex 的紧凑引导尺寸，不宣称所有 Codex 版本都只有这一尺寸。
+- 应用图标保留LumaLive原创图形，ICO资源现含与本机Codex资源相同的15档像素尺寸；界面图标20 DIP，按DPI加载图标，不将单一32像素图重复放大。
+- 实际客户端25项统一检查全部通过；SHA256 `574c35d6b90e7870c1da11eca2a067106a498f127e2d8c97164544a0f20bcb97`。其中405组原生入口几何/文字测量覆盖简体、繁体、英文，96/144/192模拟DPI、三种尺寸和15种状态。真实UI协议验证注册→登录→工作区、MFA凭据保留、短信区号与挑战绑定、重置、退出、无效连接不覆盖配置。
+- 截图：`output/ui-focused-entrance-20261016/{zh-CN,en-US}`，包含注册、初始找回/验证码页、短信、双重验证与工作区；清单绑定实际EXE哈希。物理IME/读屏/多屏另待验收。
+- `scripts/windows/run_client_checks.cmd`可双击运行统一测试，交互终端保留结果；测试EXE是命令行测试，不是客户端。
+- 本机正式账户服务仍未部署成功。已重新构建 `output/next/Release/luma_auth_server.exe`；无运行账户服务/PG/连接配置，解释了用户无法登录。PostgreSQL部署进行中；TLS和真实投递配置仍未完成。上述测试使用独立内存fixture，不代表生产服务验收。

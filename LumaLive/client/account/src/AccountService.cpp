@@ -182,7 +182,7 @@ public:
         const auto verifier=pbkdf2_hmac_sha256(p,from_hex(q.fields[0]),iterations);
         const auto proof=hmac_sha256(verifier,from_hex(q.fields[1]));
         const bool mfa_required=q.fields[2]=="1";
-        (void)mfa_required;
+        if(mfa_required&&mfa_code.empty())return{false,"two-step code required","mfa_required"};
 
         if(!Send({Type::LoginProof,{hex(proof),mfa_code}}))return{false,"send failed"};
         if(!Recv(q))return{false,"receive failed"};

@@ -35,7 +35,9 @@ def wait(predicate, message, timeout=15):
 
 
 class WorkspaceAuthFixture:
-    def __init__(self, binary):
+    def __init__(self, binary, settings_path):
+        self.settings_path = Path(settings_path)
+        assert self.settings_path.is_absolute(), 'Use an isolated absolute settings path'
         with socket.socket() as reservation:
             reservation.bind(('127.0.0.1', 0))
             self.port = reservation.getsockname()[1]
@@ -49,6 +51,12 @@ class WorkspaceAuthFixture:
         threading.Thread(target=lambda: ready.put(self.process.stdout.readline()), daemon=True).start()
         try:
             assert ready.get(timeout=10).strip() == str(self.port), 'Account fixture failed to start'
+            # The production entrance receives its endpoint before launch. Tests
+            # never expose a connection form or write the user's real profile.
+            self.settings_path.parent.mkdir(parents=True, exist_ok=True)
+            self.settings_path.write_text(
+                f'LumaLiveAccountConnection 1\nhost=127.0.0.1\nport={self.port}\n',
+                encoding='utf-8')
         except BaseException:
             self.close()
             raise
@@ -74,10 +82,13 @@ class WorkspaceAuthFixture:
         # Even a direct command must not open the AI page before authentication.
         u.SendMessageW(root, 0x111, 127, 0)
         assert not u.FindWindowExW(root, None, 'LumaSessionAi', None), 'Pre-login command opened AI'
-        click(2103); fill('127.0.0.1', str(self.port)); click(2160); complete()
-        click(2101); fill('workspace.tester', 'workspace@example.com', 'Workspace Tester', 'local test password', 'local test password')
+        for i in range(2100, 2104):
+            assert not u.GetWindowLongW(control(i), -16) & 0x10000000, 'Signed-out tab exposed'
+            click(i)
+        assert not u.GetWindowLongW(control(2164), -16) & 0x10000000, 'Signed-out detail exposed'
+        click(2170); fill('workspace.tester', 'workspace@example.com', '', 'local test password', 'local test password')
         click(2160); complete()
         assert not u.GetWindowLongW(u.GetDlgItem(root, 117), -16) & 0x10000000, 'Registration bypassed login'
-        click(2100); fill('workspace.tester', 'local test password', ''); click(2160); complete()
+        click(2172); fill('workspace.tester', 'local test password', ''); click(2160); complete()
         wait(lambda: u.GetWindowLongW(u.GetDlgItem(root, 117), -16) & 0x10000000, 'Valid login did not unlock workspace')
         return panel

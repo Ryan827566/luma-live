@@ -44,10 +44,11 @@ def main():
     with tempfile.TemporaryDirectory(prefix="luma-service-ui-") as profile:
         env={k.upper():v for k,v in os.environ.items() if not k.upper().startswith("LUMALIVE_AI_")}
         env.update(LOCALAPPDATA=profile,LUMALIVE_AI_GATEWAY_PORT=str(port),LUMALIVE_UI_LANGUAGE="en-US")
+        env["LUMALIVE_ACCOUNT_SETTINGS_PATH"] = str(Path(profile) / "account.conf")
         start=subprocess.STARTUPINFO(); start.dwFlags=subprocess.STARTF_USESHOWWINDOW; start.wShowWindow=0
+        auth_fixture=WorkspaceAuthFixture(executable,env["LUMALIVE_ACCOUNT_SETTINGS_PATH"])
         process=subprocess.Popen([str(executable)],env=env,startupinfo=start)
         root=None
-        auth_fixture=None
         def find_root():
             found=[]
             @callback
@@ -66,7 +67,6 @@ def main():
             except OSError: return None
         try:
             root=wait_for(find_root,"Client did not create its main window")
-            auth_fixture=WorkspaceAuthFixture(executable)
             auth_fixture.login(root)
             u.SendMessageW(root,0x111,127,0)
             panel=wait_for(lambda:u.FindWindowExW(root,None,"LumaSessionAi",None),"AI page missing")
