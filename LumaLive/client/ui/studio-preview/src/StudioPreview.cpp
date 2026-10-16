@@ -427,6 +427,13 @@ public:
         instance_=instance;WNDCLASSW wc{};wc.hInstance=instance;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.lpfnWndProc=Proc;wc.lpszClassName=L"LumaStudioPreview";wc.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(101));RegisterClassW(&wc);wc.lpfnWndProc=SurfaceProc;wc.lpszClassName=L"LumaVideoSurface";RegisterClassW(&wc);
         window_=CreateWindowExW(0,L"LumaStudioPreview",L"LumaLive Studio",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,560,560,nullptr,nullptr,instance,this);if(!window_)return 1;
         dpi_=GetDpiForWindow(window_);PlaceEntrance();Fonts();BOOL dark=TRUE;DwmSetWindowAttribute(window_,20,&dark,sizeof(dark));
+        // Windows 11 supports explicit native-caption colors. Keep system resize
+        // and caption controls while matching the client surface, including inactive windows.
+        const COLORREF caption=Bg,captionText=Ink;const DWORD noBackdrop=1;
+        DwmSetWindowAttribute(window_,35,&caption,sizeof(caption));
+        DwmSetWindowAttribute(window_,36,&captionText,sizeof(captionText));
+        DwmSetWindowAttribute(window_,34,&caption,sizeof(caption));
+        DwmSetWindowAttribute(window_,38,&noBackdrop,sizeof(noBackdrop));
         surface_=CreateWindowExW(0,L"LumaVideoSurface",UiLabel(L"视频预览",L"Video preview"),WS_CHILD|WS_VISIBLE,0,0,1,1,window_,nullptr,instance,this);
         remoteSurface_=CreateWindowExW(0,L"LumaVideoSurface",UiLabel(L"远端视频",L"Remote video"),WS_CHILD|WS_VISIBLE,0,0,1,1,window_,nullptr,instance,this);
         Button(Account,UiLabel(L"账户",L"Account"));Button(Advanced,UiLabel(L"连接设置",L"Connection settings"));Button(Ai,UiLabel(L"AI \u52a9\u624b",L"AI assistant"));Button(Meeting,UiLabel(L"\u89c6\u9891\u4f1a\u8bae",L"Meetings"));Button(Open,UiLabel(L"打开媒体文件",L"Open media"));Button(CameraMode,UiLabel(L"摄像头",L"Camera"));Button(FileMode,UiLabel(L"媒体文件",L"Media"));Button(Camera,UiLabel(L"开启摄像头",L"Start camera"));Button(Refresh,UiLabel(L"刷新设备",L"Refresh"));Button(Microphone,UiLabel(L"开启麦克风",L"Start microphone"));Button(Monitor,UiLabel(L"监听：关闭",L"Monitoring off"));Button(TestSound,UiLabel(L"测试扬声器",L"Test speakers"));Button(Pause,UiLabel(L"暂停",L"Pause"));Button(Stop,UiLabel(L"停止播放",L"Stop playback"));Button(FullScreen,UiLabel(L"全屏预览",L"Fullscreen"));

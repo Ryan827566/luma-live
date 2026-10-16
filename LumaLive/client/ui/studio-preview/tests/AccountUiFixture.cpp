@@ -4,15 +4,18 @@
 #include "IEmailProvider.hpp"
 #include "ISmsProvider.hpp"
 #include <cstdlib>
+#include <atomic>
 #include <iostream>
 #include <mutex>
 #include <unordered_map>
 using namespace luma::server::auth;
+namespace shared=luma::shared;
 namespace {
 struct Mailbox {
     std::mutex mutex;
     std::unordered_map<std::string,std::string> messages;
     bool rejectEmail{},rejectSms{};
+    std::atomic<bool> rejectStorage{false};
     bool Deliver(std::string_view purpose,std::string_view code,bool email){
         std::lock_guard lock(mutex);
         if(email?rejectEmail:rejectSms)return false;
@@ -23,9 +26,26 @@ struct Mailbox {
         if(line=="reject-email"){rejectEmail=true;return "OK";}
         if(line=="reject-sms"){rejectSms=true;return "OK";}
         if(line=="accept-delivery"){rejectEmail=rejectSms=false;return "OK";}
+        if(line=="reject-storage"){rejectStorage=true;return "OK";}
+        if(line=="accept-storage"){rejectStorage=false;return "OK";}
         auto found=messages.find(line);if(found==messages.end())return "MISSING";
         auto value=std::move(found->second);messages.erase(found);return value;
     }
+};
+class Store final:public IAuthStore {
+    std::unique_ptr<IAuthStore> delegate{CreateInMemoryAuthStore()};std::shared_ptr<Mailbox> mailbox;
+public:
+    explicit Store(std::shared_ptr<Mailbox> value):mailbox(std::move(value)){}
+    shared::contracts::Result Open()override{return delegate->Open();}
+    void Close()noexcept override{delegate->Close();}
+    shared::contracts::Result LoadUsers(std::vector<AuthUserRecord>& rows)override{return delegate->LoadUsers(rows);}
+    shared::contracts::Result UpsertUser(const AuthUserRecord& row)override{
+        if(mailbox->rejectStorage)return shared::contracts::Result::Failure(shared::contracts::ErrorCode::Internal,"fixture storage rejection");
+        return delegate->UpsertUser(row);
+    }
+    shared::contracts::Result DeleteUser(std::string_view id)override{return delegate->DeleteUser(id);}
+    shared::contracts::Result LoadSecurityEvents(std::vector<AuthSecurityEventRecord>& rows)override{return delegate->LoadSecurityEvents(rows);}
+    shared::contracts::Result AppendSecurityEvent(const AuthSecurityEventRecord& row)override{return delegate->AppendSecurityEvent(row);}
 };
 class Email final:public IEmailProvider {
     std::shared_ptr<Mailbox> mailbox;
@@ -50,7 +70,7 @@ public:
 }
 int main(int argc,char** argv){
     auto mailbox=std::make_shared<Mailbox>();
-    auto server=CreateAuthService(CreateInMemoryAuthStore(),std::make_unique<Email>(mailbox),std::make_unique<Sms>(mailbox));
+    auto server=CreateAuthService(std::make_unique<Store>(mailbox),std::make_unique<Email>(mailbox),std::make_unique<Sms>(mailbox));
     const auto port=static_cast<unsigned short>(argc>1?std::stoi(argv[1]):19241);
     if(!server->StartOnPort(port).IsOk())return 1;
     std::cout<<server->Port()<<std::endl;

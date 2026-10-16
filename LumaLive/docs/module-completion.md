@@ -1,3 +1,7 @@
+# Latest checkpoint: focused entrance verified (2026-10-17)
+
+320-DIP forms, inside-field eye, exact page cleanup and accurate registration errors passed25 actual-EXE checks /648 native layout states. See login-acceptance.md for hash and screenshots. DWM caption colors are unsupported in the current test environment; same-color titlebar remains open. PostgreSQL is now running with application-role readiness and repeat-start checks passed. TLS/provider deployment is in-progress unverified code, not covered by the UI checkpoint.
+
 # Latest priority: real local account deployment (2026-10-16)
 
 User requires production-oriented implementation and authorized deployment on this Windows PC; real email/SMS providers are not opened yet, so implement configurable integration without pretending delivery works. Minimal entrance checkpoint passed25 actual-EXE checks and405 synthetic-DPI layout cases; see latest login-acceptance.md. Local server was rebuilt, but no running PostgreSQL/auth backend or saved connection existed. Native PostgreSQL provisioning is underway; TLS, provider configuration and actual persistent registration/login are next gates. Preserve every user change; directly main only.

@@ -51,6 +51,8 @@ LRESULT CALLBACK SubmitEdit(HWND h,UINT m,WPARAM w,LPARAM l,UINT_PTR id,DWORD_PT
     return DefSubclassProc(h,m,w,l);
 }
 const wchar_t* ErrorLabel(const std::string& error) {
+    if(error=="storage_error")return UiLabel(L"服务器暂时无法保存账户信息，请稍后重试。",L"The server could not save your account. Please try again later.");
+    if(error=="invalid_registration")return UiLabel(L"注册信息未通过验证，请检查用户名和邮箱。",L"Check your username and email before registering.");
     if(error=="email_delivery_failed")return UiLabel(L"邮件暂时无法发送，请稍后重试或联系服务管理员。",L"The service could not send the email. Try again later or contact your administrator.");
     if(error=="sms_delivery_failed")return UiLabel(L"短信暂时无法发送，请稍后重试或联系服务管理员。",L"The service could not send the text message. Try again later or contact your administrator.");
     if(error=="invalid_challenge")return UiLabel(L"账户服务返回了无效的认证信息，已断开连接。请联系服务管理员。",L"The account service returned invalid authentication data. Disconnected; contact your administrator.");
@@ -59,7 +61,7 @@ const wchar_t* ErrorLabel(const std::string& error) {
     if(error.find("mfa")!=std::string::npos||error.find("recovery code")!=std::string::npos)return UiLabel(L"请输入有效的身份验证器代码或恢复码。",L"Enter a valid authenticator or recovery code.");
     if(error.find("exists")!=std::string::npos||error.find("taken")!=std::string::npos)return UiLabel(L"用户名、邮箱或手机号已被使用。",L"That username, email or phone number is already in use.");
     if(error.find("session")!=std::string::npos||error.find("authenticated")!=std::string::npos)return UiLabel(L"登录状态已失效，请重新登录。",L"Your session is no longer valid. Sign in again.");
-    if(error.find("connect")!=std::string::npos||error.find("send failed")!=std::string::npos||error.find("receive failed")!=std::string::npos||error.find("timeout")!=std::string::npos)return UiLabel(L"暂时无法登录，请稍后重试。",L"Sign-in is temporarily unavailable. Please try again.");
+    if(error.find("connect")!=std::string::npos||error.find("send failed")!=std::string::npos||error.find("receive failed")!=std::string::npos||error.find("timeout")!=std::string::npos)return UiLabel(L"暂时无法连接账户服务，请稍后重试。",L"Unable to reach the account service. Please try again later.");
     if(error.find("IPv4")!=std::string::npos)return UiLabel(L"请输入有效的服务器 IPv4 地址。",L"Enter a valid server IPv4 address.");
     if(error.find("token")!=std::string::npos||error.find("challenge")!=std::string::npos||error.find("code")!=std::string::npos)return UiLabel(L"验证码无效或已过期，请重新获取。",L"The verification code is invalid or expired. Request a new one.");
     return UiLabel(L"操作未完成，请检查填写的信息后重试。",L"Unable to complete the action. Check your information and try again.");
@@ -135,7 +137,7 @@ struct AccountPanel::Impl {
     bool IsAuthenticated()const{return window&&state.connected&&state.authenticated&&state.expires_at_epoch_seconds>std::time(nullptr);}
     void Close(){if(window){DestroyWindow(window);window=nullptr;}worker.reset();}
     HWND Make(int id,const wchar_t* cls,const wchar_t* label,DWORD style=0) {
-        auto h=CreateWindowExW(0,cls,label,WS_CHILD|style,0,0,1,1,window,reinterpret_cast<HMENU>(INT_PTR(id)),GetModuleHandleW(nullptr),nullptr);
+        auto h=CreateWindowExW(0,cls,label,WS_CHILD|WS_CLIPSIBLINGS|style,0,0,1,1,window,reinterpret_cast<HMENU>(INT_PTR(id)),GetModuleHandleW(nullptr),nullptr);
         SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(body),TRUE);return h;
     }
     HWND Button(int id,const wchar_t* text){auto h=Make(id,L"BUTTON",text,WS_TABSTOP|BS_OWNERDRAW);UiTheme::InstallHover(h);return h;}
@@ -159,9 +161,9 @@ struct AccountPanel::Impl {
         reveal=Button(Reveal,UiLabel(L"显示密码",L"Show password"));primary=Button(Primary,L"");secondary=Button(Secondary,L"");third=Button(Third,L"");
         detail=Make(Detail,L"EDIT",L"",WS_TABSTOP|ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL|WS_VSCROLL|WS_BORDER);UiTheme::InstallEdit(detail);SetAccessibleName(detail,UiLabel(L"账户详情",L"Account details"));
         status=Make(Status,L"STATIC",L"",SS_LEFT);confirm=Button(Confirm,UiLabel(L"确认操作",L"Confirm"));cancel=Button(Cancel,UiLabel(L"取消",L"Cancel"));
-        const wchar_t* linkLabels[]={UiLabel(L"注册",L"Register"),UiLabel(L"忘记密码？",L"Forgot password?"),UiLabel(L"返回登录",L"Back to sign in"),UiLabel(L"短信登录",L"Text message sign-in"),UiLabel(L"使用双重验证码",L"Use a two-step code"),UiLabel(L"我已有重置验证码",L"I have a reset code"),UiLabel(L"其它登录方式",L"Other sign-in options")};
+        const wchar_t* linkLabels[]={UiLabel(L"注册",L"Register"),UiLabel(L"忘记密码？",L"Forgot password?"),UiLabel(L"返回登录",L"Back to sign in"),UiLabel(L"短信登录",L"Text message sign-in"),UiLabel(L"双重验证码",L"Two-step code"),UiLabel(L"我已有重置验证码",L"I have a reset code"),UiLabel(L"其它登录方式",L"Other sign-in options")};
         for(int i=0;i<7;++i)links[i]=Button(RegisterLink+i,linkLabels[i]);
-        ShowWindow(detail,SW_SHOW);ShowWindow(status,SW_SHOW);
+        ShowWindow(detail,SW_SHOW);ShowWindow(status,SW_HIDE);
         SendMessageW(detail,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(S(12),S(12)));
         AccountConnectionSettings saved;std::wstring settingsError;
         const bool loaded=LoadAccountConnectionSettings(saved,settingsError);host=saved.host;port=saved.port;
@@ -184,6 +186,7 @@ struct AccountPanel::Impl {
         else{pages={Page::Login,Page::Register,Page::Recovery,Page::Service};const wchar_t* names[]={UiLabel(L"登录",L"Sign in"),UiLabel(L"注册",L"Register"),UiLabel(L"找回密码",L"Reset password"),UiLabel(L"服务连接",L"Connection")};for(int i=0;i<4;++i)SetWindowTextW(tabs[i],names[i]);}
         for(auto tab:tabs)ShowWindow(tab,state.authenticated?SW_SHOW:SW_HIDE);
         for(auto link:links)ShowWindow(link,SW_HIDE);
+        ShowWindow(status,statusText.empty()?SW_HIDE:SW_SHOW);
         ShowWindow(detail,state.authenticated?SW_SHOW:SW_HIDE);
         auto setModes=[&](std::initializer_list<const wchar_t*> names){SendMessageW(mode,CB_RESETCONTENT,0,0);for(auto name:names)SendMessageW(mode,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name));SendMessageW(mode,CB_SETCURSEL,section,0);ShowWindow(mode,SW_SHOW);};
         switch(page){
@@ -195,7 +198,7 @@ struct AccountPanel::Impl {
             ShowWindow(links[3],showMethods?SW_SHOW:SW_HIDE);ShowWindow(links[4],showMethods&&!showMfa?SW_SHOW:SW_HIDE);
             SetWindowTextW(links[3],section==0?UiLabel(L"短信登录",L"Text message sign-in"):UiLabel(L"密码登录",L"Password sign-in"));break;
         case Page::Register:
-            Field(0,UiLabel(L"用户名",L"Username"));Field(1,UiLabel(L"邮箱",L"Email"));Field(3,UiLabel(L"密码（至少 8 位）",L"Password (at least 8 characters)"),L"",true);Field(4,UiLabel(L"确认密码",L"Confirm password"),L"",true);Buttons(Action::Register,UiLabel(L"注册",L"Register"));ShowWindow(links[2],SW_SHOW);break;
+            Field(0,UiLabel(L"用户名",L"Username"));Field(1,UiLabel(L"邮箱",L"Email"));Field(3,UiLabel(L"密码",L"Password"),L"",true);Field(4,UiLabel(L"确认密码",L"Confirm password"),L"",true);Buttons(Action::Register,UiLabel(L"注册",L"Register"));ShowWindow(links[2],SW_SHOW);break;
         case Page::Recovery:
             if(!resetCode)Field(0,UiLabel(L"用户名或邮箱",L"Username or email"));
             if(resetCode){Field(1,UiLabel(L"邮件中的重置验证码",L"Reset code from your email"));Field(2,UiLabel(L"新密码",L"New password"),L"",true);Field(3,UiLabel(L"确认新密码",L"Confirm new password"),L"",true);}
@@ -238,28 +241,36 @@ struct AccountPanel::Impl {
         if(!state.authenticated){
             // A focused entrance: one form, a primary action and contextual text links.
             // The compact Codex-style window is 560 DIP; the longest form fits at 560 high.
-            formWidth=std::min(384,std::max(1,width-48));formX=(width-formWidth)/2;
+            formWidth=std::min(320,std::max(1,width-48));formX=(width-formWidth)/2;
             const int pitch=60;
             const bool phone=page==Page::Login&&section==1;
             const int footer=page==Page::Login?(showMethods?100:68):(page==Page::Recovery&&!resetCode?68:36);
-            const int blockHeight=60+fieldCount*pitch+(phone?6:0)+8+36+8+44+footer;
+            int noticeHeight=24;
+            if(!statusText.empty()){
+                auto dc=GetDC(status);auto old=SelectObject(dc,body);RECT measured{0,0,S(formWidth),0};
+                DrawTextW(dc,statusText.c_str(),-1,&measured,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX);
+                SelectObject(dc,old);ReleaseDC(status,dc);noticeHeight=std::max(24,MulDiv(measured.bottom,96,int(dpi))+2);
+            }
+            const int blockHeight=60+fieldCount*pitch+(phone?6:0)+8+36+8+noticeHeight+footer;
             entranceTop=std::max(8,(height-blockHeight)/2);
             int y=entranceTop+60,revealField=-1;
             for(int i=0;i<6;++i)if(secrets[i])revealField=i;
             for(int i=0;i<6;++i){
                 if(!(GetWindowLongPtrW(fields[i],GWL_STYLE)&WS_VISIBLE))continue;
                 Move(labels[i],formX,y,formWidth,20);
-                const int eye=i==revealField?40:0;
-                if(eye)Move(reveal,formX+formWidth-32,y+22,32,34);
+                const bool eye=i==revealField;
                 const int prefix=phone&&i==0?112:0;
                 if(prefix){Move(country,formX,y+22,104,240);UiTheme::SetComboDpi(country,dpi);}
-                Move(fields[i],formX+prefix,y+22,formWidth-eye-prefix,prefix?40:34);y+=pitch+(prefix?6:0);
+                Move(fields[i],formX+prefix,y+22,formWidth-prefix,prefix?40:34);
+                SendMessageW(fields[i],EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(S(8),S(eye?38:8)));
+                if(eye){Move(reveal,formX+formWidth-32,y+25,28,28);SetWindowPos(reveal,HWND_TOP,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);}
+                y+=pitch+(prefix?6:0);
             }
             const int actionY=y+8,half=(formWidth-8)/2;
             Move(primary,formX,actionY,second==Action::None?formWidth:half,36);
             Move(secondary,first==Action::None?formX:formX+half+8,actionY,first==Action::None?formWidth:half,36);
-            const int statusY=actionY+44,linkY=statusY+44;
-            Move(status,formX,statusY,formWidth,44);
+            const int statusY=actionY+44,linkY=statusY+noticeHeight;
+            Move(status,formX,statusY,formWidth,noticeHeight);
             Move(links[0],formX,linkY,half,28);Move(links[1],formX+half+8,linkY,half,28);
             Move(links[2],formX,linkY,formWidth,28);Move(links[5],formX,linkY+32,formWidth,28);
             Move(links[6],formX,linkY+32,formWidth,28);
@@ -274,8 +285,10 @@ struct AccountPanel::Impl {
         int revealField=-1;for(int i=0;i<fieldCount;++i)if(secrets[i])revealField=i;
         for(int i=0;i<fieldCount;++i){
             Move(labels[i],formX,y,formWidth,20);
-            if(i==revealField)Move(reveal,formX+formWidth-32,y+22,32,34);
-            Move(fields[i],formX,y+22,formWidth-(i==revealField?40:0),34);y+=60;
+            Move(fields[i],formX,y+22,formWidth,34);
+            SendMessageW(fields[i],EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(S(8),S(i==revealField?38:8)));
+            if(i==revealField){Move(reveal,formX+formWidth-32,y+25,28,28);SetWindowPos(reveal,HWND_TOP,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);}
+            y+=60;
         }
         const int actionY=y+8,half=(formWidth-8)/2;
         Move(primary,formX,actionY,second==Action::None?formWidth:half,36);Move(secondary,formX+half+8,actionY,half,36);
@@ -306,7 +319,7 @@ struct AccountPanel::Impl {
         if(page==Page::Devices&&state.sessions.empty())EnableWindow(secondary,FALSE);
         SetWindowTextW(status,statusText.c_str());InvalidateRect(status,nullptr,TRUE);
     }
-    void Notice(const wchar_t* text,bool failure=false){statusText=text;error=failure;SetWindowTextW(status,statusText.c_str());InvalidateRect(status,nullptr,TRUE);}
+    void Notice(const wchar_t* text,bool failure=false){statusText=text;error=failure;SetWindowTextW(status,statusText.c_str());ShowWindow(status,statusText.empty()?SW_HIDE:SW_SHOW);if(!state.authenticated)Layout();InvalidateRect(status,nullptr,TRUE);}
     void Entrance(Page next){page=next;section=0;showMfa=false;showMethods=false;resetCode=false;smsCode=false;phoneChallenge.clear();Notice(L"");Configure();SetFocus(fields[0]);}
     bool CancelPending(){if(pending==Action::None){if(!state.authenticated&&!busy&&page!=Page::Login){Entrance(Page::Login);return true;}return false;}pending=Action::None;pendingDevice.clear();ShowWindow(confirm,SW_HIDE);ShowWindow(cancel,SW_HIDE);Notice(UiLabel(L"已取消。",L"Cancelled."));Enable();SetFocus(thirdAction==Action::Delete?third:secondary);return true;}
     bool Required(int i){if(Text(fields[i]).empty()){Notice(UiLabel(L"请填写必填信息。",L"Complete the required fields."),true);SetFocus(fields[i]);return false;}return true;}
@@ -321,7 +334,16 @@ struct AccountPanel::Impl {
         std::array<std::string,6> values;for(int i=0;i<6;++i)values[i]=UiUtf8(Text(fields[i]).c_str());
         auto required=[&](std::initializer_list<int> indices){for(int i:indices)if(!Required(i))return false;return true;};
         if((action==Action::Login&&!required({0,1}))||(action==Action::Register&&!required({0,1,3,4}))||(action==Action::Reset&&!required({1,2,3}))||(action==Action::Password&&!required({0,1,2}))||((action==Action::RequestReset||action==Action::RequestPhone||action==Action::PhoneCode||action==Action::VerifyEmail||action==Action::DisableMfa)&&!required({0})))return;
-        if(action==Action::Register)values[2]=values[0];
+        if(action==Action::Register){
+            auto invalid=[&](int field,const wchar_t* message){Notice(message,true);SetFocus(fields[field]);};
+            const auto& name=values[0];
+            if(name.size()<3||name.size()>32||name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")!=std::string::npos){invalid(0,UiLabel(L"用户名需为 3–32 位字母、数字或 . _ -。",L"Use 3–32 letters, numbers, or . _ - for your username."));return;}
+            const auto& email=values[1];const auto at=email.find('@');
+            if(email.size()>254||at==std::string::npos||at==0||at+1==email.size()||email.find('@',at+1)!=std::string::npos||email.find_first_of(" \t\r\n")!=std::string::npos){invalid(1,UiLabel(L"请输入有效的邮箱地址。",L"Enter a valid email address."));return;}
+            if(values[3].size()<8){invalid(3,UiLabel(L"密码太短，请使用更长的密码。",L"Your password is too short. Use a longer password."));return;}
+            if(values[3].size()>128){invalid(3,UiLabel(L"密码太长，请缩短后重试。",L"Your password is too long. Shorten it and try again."));return;}
+            values[2]=values[0];
+        }
         if(action==Action::PhoneCode||action==Action::PhoneLogin){
             const auto selected=SendMessageW(country,CB_GETCURSEL,0,0);
             const auto number=NormalizePhoneNumber(Text(fields[0]),selected>=0&&size_t(selected)<regions.size()?regions[selected].prefix:L"");
@@ -426,13 +448,14 @@ struct AccountPanel::Impl {
             if(action==Action::Events)RefreshDetail();
             if(action==Action::PhoneCode){phoneChallenge=Part(message,"challenge="," expires=");smsCode=true;if(!(GetWindowLongPtrW(fields[1],GWL_STYLE)&WS_VISIBLE))Field(1,UiLabel(L"短信验证码",L"Text message code"));Buttons(Action::PhoneLogin,UiLabel(L"登录",L"Sign in"),Action::PhoneCode,UiLabel(L"重新发送",L"Resend code"));Layout();SetFocus(fields[1]);}
             if(action==Action::RequestPhone)verifyChallenge=Part(message,"challenge="," expires=");
-            if(action==Action::RequestReset&&!resetCode){const auto identifier=Text(fields[0]);resetCode=true;Configure();SetWindowTextW(fields[0],identifier.c_str());Notice(SuccessLabel(action));SetFocus(fields[1]);}
+            if(action==Action::RequestReset&&!resetCode){resetCode=true;Configure();Notice(SuccessLabel(action));SetFocus(fields[1]);}
             if(action==Action::EnableMfa){Configure();std::wstring text=UiLabel(L"身份验证器密钥\r\n",L"Authenticator key\r\n")+Wide(Part(message,"TOTP secret=","; otpauth="))+L"\r\n\r\n"+UiLabel(L"恢复码（妥善保存）\r\n",L"Recovery codes (keep safe)\r\n")+Wide(Part(message,"recovery codes=","; TOTP secret="));SetWindowTextW(detail,text.c_str());UpdateTranscriptScrollbar(detail);if(IsWindowVisible(window))SetFocus(detail);}
         }else {
             if(page==Page::Login&&!showMfa&&(state.result.code=="mfa_required"||message.find("MFA")!=std::string::npos)){
                 showMfa=true;Field(2,UiLabel(L"双重验证码或恢复码",L"Two-step or recovery code"));ShowWindow(links[4],SW_HIDE);Layout();SetFocus(fields[2]);
             }
-            Notice(ErrorLabel(state.result.code.empty()?message:state.result.code),true);
+            if(action==Action::Register&&state.result.code=="already_exists")Notice(UiLabel(L"用户名或邮箱已被注册，可返回登录或找回密码。",L"That username or email is registered. Sign in or reset your password."),true);
+            else Notice(ErrorLabel(state.result.code.empty()?message:state.result.code),true);
         }
         if(!message.empty())SecureZeroMemory(message.data(),message.size());Enable();InvalidateRect(window,nullptr,FALSE);
     }
@@ -464,7 +487,7 @@ struct AccountPanel::Impl {
     }
     void PaintEye(const DRAWITEMSTRUCT& d){
         const auto dc=d.hDC;const int saved=SaveDC(dc);const auto& r=d.rcItem;
-        UiTheme::Fill(dc,r,UiTheme::Background);
+        UiTheme::Fill(dc,r,UiTheme::Surface);
         const int cx=(r.left+r.right)/2,cy=(r.top+r.bottom)/2;
         const auto color=d.itemState&ODS_DISABLED?UiTheme::Muted:UiTheme::Text;
         auto pen=CreatePen(PS_SOLID,std::max(1,S(1)),color);SelectObject(dc,pen);SelectObject(dc,GetStockObject(HOLLOW_BRUSH));
@@ -488,7 +511,7 @@ struct AccountPanel::Impl {
                 if(id==BackLink)Entrance(Page::Login);
                 if(id==MethodLink){section=section==0?1:0;showMfa=false;smsCode=false;phoneChallenge.clear();Notice(L"");Configure();SetFocus(fields[0]);}
                 if(id==MfaLink&&!showMfa){showMfa=true;Field(2,UiLabel(L"双重验证码或恢复码",L"Two-step or recovery code"));ShowWindow(links[4],SW_HIDE);Layout();SetFocus(fields[2]);}
-                if(id==ResetCodeLink){const auto identifier=Text(fields[0]);resetCode=true;Configure();SetWindowTextW(fields[0],identifier.c_str());SetFocus(fields[1]);}
+                if(id==ResetCodeLink){resetCode=true;Notice(L"");Configure();SetFocus(fields[1]);}
                 if(id==MoreLink){showMethods=!showMethods;ShowWindow(links[3],showMethods?SW_SHOW:SW_HIDE);ShowWindow(links[4],showMethods&&!showMfa?SW_SHOW:SW_HIDE);Layout();}
                 return 0;
             }

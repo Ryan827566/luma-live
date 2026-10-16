@@ -60,6 +60,16 @@ try:
         height=max(limits.min_track.y,min(round(height*scale),limits.max_track.y or round(height*scale)))
         assert u.SetWindowPos(root,None,0,0,width,height,0x16)
     requested_size()
+    dwm=c.WinDLL("dwmapi")
+    dwm.DwmGetWindowAttribute.argtypes=[w.HWND,w.DWORD,c.c_void_p,w.DWORD]
+    colors={}
+    for attr,label in [(35,"caption"),(36,"text"),(34,"border")]:
+        value=w.DWORD()
+        hr=dwm.DwmGetWindowAttribute(root,attr,c.byref(value),c.sizeof(value))
+        colors[label]={"hresult":hr,"colorref":value.value}
+    manifest["native_caption_attributes"]=colors
+    # PrintWindow draws legacy non-client fallback on some Windows versions;
+    # requested DWM colors are recorded separately, not inferred from this bitmap.
     directory=Path(sys.argv[2]);directory.mkdir(parents=True,exist_ok=True)
     for name,control,subpage in [("account",129,None),("account-register",129,2170),("account-recovery",129,2171),("account-recovery-code",129,2175),("account-more",129,2176),("account-sms",129,2173),("account-sms-mfa",129,2174),("calls",117,None),("account-profile",129,2100),("account-delete",129,2100),("account-security",129,2101),("account-password",129,2101),("account-devices",129,2102),("account-service",129,2103),("meetings",126,None),("assistant",127,11),("assistant-history",127,12),("assistant-history-delete",127,12),("assistant-settings",127,13)]:
         if name=="calls":
@@ -100,21 +110,22 @@ try:
             if edit:
                 u.SendMessageW(edit,0x201,1,(8<<16)|8);u.SendMessageW(edit,0x202,0,(8<<16)|8)
                 time.sleep(.1)
-        rect=w.RECT();u.GetClientRect(root,c.byref(rect));width,height=rect.right,rect.bottom
+        rect=w.RECT();full_frame=bool(os.environ.get("LUMALIVE_CAPTURE_FRAME"));
+        (u.GetWindowRect if full_frame else u.GetClientRect)(root,c.byref(rect));width,height=rect.right-rect.left,rect.bottom-rect.top
         reference=u.GetDC(root);dc=g.CreateCompatibleDC(reference)
         header=struct.pack("<IiiHHIIiiII",40,width,-height,1,32,0,width*height*4,0,0,0,0)
         info=c.create_string_buffer(header);memory=c.c_void_p()
         bitmap=g.CreateDIBSection(dc,info,0,c.byref(memory),None,0);assert bitmap and memory.value
         old=g.SelectObject(dc,bitmap)
         try:
-            assert u.PrintWindow(root,dc,1),"PrintWindow failed"
+            assert u.PrintWindow(root,dc,0 if full_frame else 1),"PrintWindow failed"
             g.GdiFlush()
             data=c.string_at(memory,width*height*4)
             (directory/(name+".bmp")).write_bytes(struct.pack("<HIHHI",0x4d42,54+len(data),0,0,54)+header+data)
         finally:
             g.SelectObject(dc,old);g.DeleteObject(bitmap);g.DeleteDC(dc);u.ReleaseDC(root,reference)
         print("CAPTURE:",name,width,height,flush=True)
-        manifest["captures"].append({"file":name+".bmp","client_width":width,"client_height":height})
+        manifest["captures"].append({"file":name+".bmp","width":width,"height":height,"includes_native_frame":full_frame})
     assert hashlib.sha256(binary.read_bytes()).hexdigest()==manifest["sha256"],"Client changed during capture"
     (directory/"capture-manifest.json").write_text(json.dumps(manifest,indent=2),encoding="utf-8")
 finally:

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <initializer_list>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -60,7 +61,9 @@ void TextFits(HWND control,int id,const RECT& bounds,const std::string& state){
     Require(fits,state+": text clipped on "+std::to_string(id)+" measured "+std::to_string(measured.cx)+"x"+
         std::to_string(measured.cy)+" in "+std::to_string(width)+"x"+std::to_string(height));
 }
-void Check(AccountPanel& account,HWND panel,UINT dpi,int outerWidth,int outerHeight,const std::string& state){
+void Check(AccountPanel& account,HWND panel,UINT dpi,int outerWidth,int outerHeight,const std::string& state,
+    std::initializer_list<int> visibleFields,std::initializer_list<int> visibleControls,
+    std::initializer_list<int> secretFields,bool notice,bool revealed){
     // Synthetic DPI exercises the same child layout and fonts. It does not claim
     // physical monitor switching. Reserve native frame plus the workspace brand.
     RECT available{0,0,MulDiv(outerWidth-16,int(dpi),96),MulDiv(outerHeight-79,int(dpi),96)};
@@ -68,18 +71,37 @@ void Check(AccountPanel& account,HWND panel,UINT dpi,int outerWidth,int outerHei
     RECT area{};GetClientRect(panel,&area);
     std::vector<MeasuredControl> controls;
     const std::string context=state+" "+std::to_string(dpi)+"DPI "+std::to_string(outerWidth)+"x"+std::to_string(outerHeight);
+    std::vector<int> expected(visibleControls);
+    for(int field:visibleFields){expected.push_back(2120+field);expected.push_back(2140+field);}
+    if(notice)expected.push_back(2163);
+    Require(Text(GetDlgItem(panel,2163)).empty()!=notice,context+": unexpected notice state");
     for(int id=2100;id<=2177;++id){
-        auto control=GetDlgItem(panel,id);if(!Visible(control))continue;
+        auto control=GetDlgItem(panel,id);
+        const bool shouldShow=std::find(expected.begin(),expected.end(),id)!=expected.end();
+        Require(Visible(control)==shouldShow,context+": unexpected visibility on "+std::to_string(id));
+        if(!shouldShow)continue;
         RECT bounds{};GetWindowRect(control,&bounds);MapWindowPoints(nullptr,panel,reinterpret_cast<POINT*>(&bounds),2);
         Require(bounds.left>=0&&bounds.top>=0&&bounds.left<bounds.right&&bounds.top<bounds.bottom&&bounds.right<=area.right&&bounds.bottom<=area.bottom,
             context+": bounds clipped on "+std::to_string(id)+" bottom "+std::to_string(bounds.bottom)+" > "+std::to_string(area.bottom));
-        for(const auto& other:controls)Require(std::min(bounds.right,other.bounds.right)<=std::max(bounds.left,other.bounds.left)||
-            std::min(bounds.bottom,other.bounds.bottom)<=std::max(bounds.top,other.bounds.top),context+": overlap "+std::to_string(id)+" and "+std::to_string(other.id));
+        for(const auto& other:controls){
+            if(id==2168&&other.id>=2120&&other.id<=2125&&bounds.left>other.bounds.left&&bounds.right<other.bounds.right&&bounds.top>other.bounds.top&&bounds.bottom<other.bounds.bottom){
+                const auto margins=SendMessageW(GetDlgItem(panel,other.id),EM_GETMARGINS,0,0);
+                Require(HIWORD(margins)>=other.bounds.right-bounds.left,context+": eye overlaps editable text");continue;
+            }
+            Require(std::min(bounds.right,other.bounds.right)<=std::max(bounds.left,other.bounds.left)||
+                std::min(bounds.bottom,other.bounds.bottom)<=std::max(bounds.top,other.bounds.top),context+": overlap "+std::to_string(id)+" and "+std::to_string(other.id));
+        }
         controls.push_back({id,bounds});
         // The password button paints an eye; its accessible label is not drawn.
         if((id>=2140&&id<=2145)||(id>=2160&&id!=2164&&id!=2165&&id!=2168))TextFits(control,id,bounds,context);
     }
-    for(int id:{2100,2101,2102,2103,2164,2165})Require(!Visible(GetDlgItem(panel,id)),context+": hidden entrance control exposed");
+    for(int field=0;field<6;++field){
+        auto control=GetDlgItem(panel,2120+field);
+        if(!Visible(control)){Require(Text(control).empty(),context+": hidden field retained text on "+std::to_string(field));continue;}
+        const bool secret=std::find(secretFields.begin(),secretFields.end(),field)!=secretFields.end();
+        Require((SendMessageW(control,EM_GETPASSWORDCHAR,0,0)!=0)==(secret&&!revealed),
+            context+": incorrect password masking on "+std::to_string(field));
+    }
     Require(!account.IsAuthenticated(),context+": layout diagnostic unexpectedly authenticated");
 }
 }
@@ -97,31 +119,68 @@ int main(){
             for(UINT dpi:{96u,144u,192u}){
                 OwnedHost host;Require(host.value!=nullptr,"Host creation failed");AccountPanel account;account.Open(host.value);
                 const auto panel=FindWindowExW(host.value,nullptr,L"LumaAccountPage",nullptr);Require(panel!=nullptr,"Account page missing");
-                auto check=[&](const char* state){for(const auto [width,height]:std::array<std::pair<int,int>,3>{{{480,560},{560,560},{960,800}}}){Check(account,panel,dpi,width,height,state);++checks;}};
-                check("password");
+                auto check=[&](const char* state,std::initializer_list<int> fields,std::initializer_list<int> controls,
+                    std::initializer_list<int> secrets={},bool notice=false,bool revealed=false){
+                    for(const auto [width,height]:std::array<std::pair<int,int>,3>{{{480,560},{560,560},{960,800}}}){
+                        Check(account,panel,dpi,width,height,state,fields,controls,secrets,notice,revealed);++checks;
+                    }
+                };
+                auto allFieldsEmpty=[&](const char* state){for(int field=0;field<6;++field)
+                    Require(Text(GetDlgItem(panel,2120+field)).empty(),std::string(state)+": prior field text survived on "+std::to_string(field));};
+                check("password",{0,1},{2160,2168,2170,2171,2176},{1});
                 for(int tab:{2100,2101,2102,2103})Click(panel,tab);
-                Require(Visible(GetDlgItem(panel,2121))&&!Visible(GetDlgItem(panel,2122)),"Hidden tabs changed the entrance");
-                Click(panel,2160);check("password-required");
-                Click(panel,2176);check("more-options");
-                Click(panel,2174);check("password-mfa");
-                Click(panel,2173);check("sms");
-                Require(Visible(GetDlgItem(panel,2177)),"SMS calling-code selector missing");
+                check("hidden-tabs-ignored",{0,1},{2160,2168,2170,2171,2176},{1});
+                Click(panel,2160);check("password-required",{0,1},{2160,2168,2170,2171,2176},{1},true);
+                Click(panel,2176);check("more-options",{0,1},{2160,2168,2170,2171,2173,2174,2176},{1},true);
+                Click(panel,2174);check("password-mfa",{0,1,2},{2160,2168,2170,2171,2173,2176},{1},true);
+                SetWindowTextW(GetDlgItem(panel,2120),L"prior.login");SetWindowTextW(GetDlgItem(panel,2121),L"prior password");
+                SetWindowTextW(GetDlgItem(panel,2122),L"prior recovery code");Click(panel,2168);
+                check("password-mfa-visible",{0,1,2},{2160,2168,2170,2171,2173,2176},{1},true,true);
+                Click(panel,2173);allFieldsEmpty("password-to-sms");
+                check("sms",{0},{2161,2170,2171,2173,2174,2176,2177});
                 Require(Text(GetDlgItem(panel,2177)).find(L'+')!=std::wstring::npos,"SMS calling code not selected");
-                Require(!Visible(GetDlgItem(panel,2121))&&!Visible(GetDlgItem(panel,2160)),"SMS exposed code before request");
-                Click(panel,2174);check("sms-mfa");
-                Click(panel,2176);check("sms-options-collapsed");
-                Click(panel,2171);check("recovery-initial");
-                Click(panel,2161);check("recovery-required");
-                Click(panel,2175);check("recovery-code");
-                Require(!Visible(GetDlgItem(panel,2120)),"Reset-code step retained the identity field");
-                Click(panel,2160);check("recovery-code-required");
-                Click(panel,2172);Click(panel,2170);check("register");
-                Require(!Visible(GetDlgItem(panel,2122)),"Registration exposed display-name field");
+                Click(panel,2174);check("sms-mfa",{0,2},{2161,2170,2171,2173,2176,2177});
+                Click(panel,2176);check("sms-options-collapsed",{0,2},{2161,2170,2171,2176,2177});
+                SetWindowTextW(GetDlgItem(panel,2120),L"13800138000");SetWindowTextW(GetDlgItem(panel,2122),L"old sms recovery code");
+                Click(panel,2171);allFieldsEmpty("sms-to-recovery");
+                check("recovery-initial",{0},{2161,2172,2175});
+                Click(panel,2161);check("recovery-required",{0},{2161,2172,2175},{},true);
+                SetWindowTextW(GetDlgItem(panel,2120),L"prior.recovery@example.invalid");
+                Click(panel,2175);allFieldsEmpty("recovery-to-code");
+                check("recovery-code",{1,2,3},{2160,2168,2172},{2,3});
+                Click(panel,2160);check("recovery-code-required",{1,2,3},{2160,2168,2172},{2,3},true);
+                SetWindowTextW(GetDlgItem(panel,2121),L"prior reset code");SetWindowTextW(GetDlgItem(panel,2122),L"prior new password");
+                SetWindowTextW(GetDlgItem(panel,2123),L"prior new password");Click(panel,2168);
+                check("recovery-password-visible",{1,2,3},{2160,2168,2172},{2,3},true,true);
+                Click(panel,2172);allFieldsEmpty("recovery-to-login");
+                check("recovery-back-to-login",{0,1},{2160,2168,2170,2171,2176},{1});
+                Click(panel,2170);allFieldsEmpty("login-to-register");
+                check("register",{0,1,3,4},{2160,2168,2172},{3,4});
                 const wchar_t* values[]={L"layout.person",L"layout@example.invalid",L"",L"test password",L"different password"};
                 for(int i=0;i<5;++i)SetWindowTextW(GetDlgItem(panel,2120+i),values[i]);
-                Click(panel,2160);check("register-mismatch");
-                Click(panel,2168);check("register-password-visible");
-                Require(account.CancelPendingAction(),"Recovery Escape did not return to sign in");check("back-to-sign-in");
+                Click(panel,2160);check("register-mismatch",{0,1,3,4},{2160,2168,2172},{3,4},true);
+                struct RegistrationError {const char* state;int field;std::wstring value;const wchar_t* english;};
+                const std::array<RegistrationError,4> invalid={{
+                    {"register-invalid-username",0,L"bad name",L"Use 3–32 letters, numbers, or . _ - for your username."},
+                    {"register-invalid-email",1,L"invalid@@example.invalid",L"Enter a valid email address."},
+                    {"register-short-password",3,L"short",L"Your password is too short. Use a longer password."},
+                    {"register-long-password",3,std::wstring(129,L'x'),L"Your password is too long. Shorten it and try again."}
+                }};
+                for(const auto& entry:invalid){
+                    for(int i=0;i<5;++i)SetWindowTextW(GetDlgItem(panel,2120+i),values[i]);
+                    SetWindowTextW(GetDlgItem(panel,2124),values[3]);
+                    SetWindowTextW(GetDlgItem(panel,2120+entry.field),entry.value.c_str());
+                    if(entry.field==3)SetWindowTextW(GetDlgItem(panel,2124),entry.value.c_str());
+                    Click(panel,2160);
+                    Require(IsWindowEnabled(GetDlgItem(panel,2160))!=FALSE,std::string(entry.state)+": local validation started a request");
+                    if(wcscmp(locale,L"en-US")==0)Require(Text(GetDlgItem(panel,2163))==entry.english,std::string(entry.state)+": wrong validation message");
+                    check(entry.state,{0,1,3,4},{2160,2168,2172},{3,4},true);
+                }
+                Click(panel,2168);check("register-password-visible",{0,1,3,4},{2160,2168,2172},{3,4},true,true);
+                Require(account.CancelPendingAction(),"Registration Escape did not return to sign in");allFieldsEmpty("register-to-login");
+                check("back-to-sign-in",{0,1},{2160,2168,2170,2171,2176},{1});
+                Click(panel,2170);allFieldsEmpty("register-reopened");
+                check("register-remasked",{0,1,3,4},{2160,2168,2172},{3,4});
                 account.Close();
             }
         }

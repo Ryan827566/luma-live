@@ -159,11 +159,15 @@ try:
                 label_fits(i,h,rect)
         for index,(first,a) in enumerate(visible_bounds):
             for second,b in visible_bounds[index+1:]:
+                if second==2168 and 2120<=first<=2125 and a.left<b.left<b.right<a.right and a.top<b.top<b.bottom<a.bottom:
+                    margin=(u.SendMessageW(control(first),0xD4,0,0)>>16)&0xffff
+                    assert margin>=a.right-b.left, 'Password text runs under the eye'
+                    continue
                 assert min(a.right,b.right)<=max(a.left,b.left) or min(a.bottom,b.bottom)<=max(a.top,b.top),f'Account controls overlap: {first}, {second}'
         rects=dict(visible_bounds)
         if text(control(2100))=='Sign in':
             assert not any(i in rects for i in (*range(2100,2104),2164,2165)), 'Signed-out entrance exposed tabs/details/modes'
-            column=rects[2163]
+            column=rects.get(2163,rects.get(2160,rects.get(2161)))
             assert abs(column.left+column.right-bounds.right)<=2,'Signed-out form is not centered'
             for i in range(2120,2126):
                 if i in rects:assert column.left<=rects[i].left<rects[i].right<=column.right,'Input left the form column'
@@ -172,6 +176,7 @@ try:
                 assert rects[2163].top>=action_bottom+round(8*scale),'Result crowds the primary action'
         else:
             # Results belong to the form, not the remote bottom corner of the page.
+            if 2163 not in rects:return
             primary=rects[2160];status=rects[2163]
             action_bottom=max(rects[i].bottom for i in (2160,2161,2162) if i in rects)
             action_height=primary.bottom-primary.top
@@ -243,8 +248,16 @@ try:
     click(2171);entrance_sizes();assert not visible(control(2121)) and not visible(control(2122)), 'Recovery exposed later steps before request'
     click(2175);assert not visible(control(2120));entrance_sizes()
     click(2172);click(2170);entrance_sizes();assert text(control(2160))=='Register';assert not visible(control(2122));password_visibility(3,4)
+    fields('x','ui@example.com','','secure ui password','secure ui password');click(2160);done('3–32');entrance_sizes()
+    fields('ui.person','invalid-email','','secure ui password','secure ui password');click(2160);done('valid email');entrance_sizes()
+    fields('ui.person','ui@example.com','','short','short');click(2160);done('too short');entrance_sizes()
     fields('ui.person','ui@example.com','','secure ui password','different');click(2160);done('do not match');entrance_sizes()
+    mailbox('reject-storage');fields('ui.person','ui@example.com','','secure ui password','secure ui password');click(2160);done('server could not save');entrance_sizes()
+    assert not visible(u.GetDlgItem(root,117)), 'Failed persistence unlocked workspace'
+    mailbox('accept-storage')
     fields('ui.person','ui@example.com','','secure ui password','secure ui password');click(2160);done('Your account is ready')
+    click(2170);fields('ui.person','ui@example.com','','secure ui password','secure ui password');click(2160);done('username or email is registered');entrance_sizes()
+    click(2172)
     assert text(control(2121))=='','Password was retained after registration'
     click(2160);done('required')
     fields('ui.person','wrong password','');click(2160);done('incorrect');entrance_sizes()

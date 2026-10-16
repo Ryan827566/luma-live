@@ -52,8 +52,7 @@ def main():
         print("PASS:", name, flush=True)
     save()
     try:
-        targets = ["luma_account_entrance_layout_tests", "luma_account_connection_settings_tests", "luma_auth_integration_tests", "luma_client_account_tests", "luma_account_ui_fixture", "luma_studio", "luma_signaling_server", "luma_meeting_ui_fixture", "luma_meeting_render_tests", "luma_session_ai_tests", "luma_session_ai_gateway_tests", "luma_caption_overlay_tests", "luma_ui_locale_tests", "luma_ui_accessibility_tests", "luma_transcript_view_tests", "luma_ai_provider_settings_tests", "luma_session_archive_tests", "luma_session_archive_search_tests", "luma_ai_service_health_tests", "luma_local_ai_service_tests"]
-        run("build", [cmake, "--build", str(build), "--config", "Release", "--target", *targets, "--parallel", "1", "--", "/nr:false"], 1800)
+        run("build", [cmake, "--build", str(build), "--config", "Release", "--target", "luma_client_verification", "--parallel", "1", "--", "/nr:false"], 1800)
         # The configured output must also be newer than the linked preview library.
         executable = binary / "luma_studio.exe"
         library = build / "Release/luma_studio_preview.lib"
