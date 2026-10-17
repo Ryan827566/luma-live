@@ -120,3 +120,5 @@ Captures in `output/ui-account-refinement-20261014/en-US`, `zh-CN` and `zh-wide`
 - 账户客户端生产默认要求TLS，验证CA/IP；测试模式显式隔离，不读取部署相邻CA。服务默认只监听127.0.0.1。TLS专用脚本和原生account/auth三项通过；修复停止时未完成握手等待过久的问题。
 - 真实PostgreSQL账户服务已运行，真实GUI完成注册/登录/退出/服务重启后再次登录/删除测试账户，报告 `output/local-account-verification.json`。被测实际客户端SHA256 `22b201b08c762e90de464e2046f46cc59df6590a93e0d4f89b2d5b457aa8200f`。具体启动、存储和限制见local-account-deployment.md。
 - 邮件/SMS现在支持明确disabled与可配置HTTPS webhook；生产不使用开发假投递。真实投递尚未验收，详见account-delivery.md。
+
+最终统一回归：上述22b201b0实际EXE的27项检查全部通过（含邮件/SMS配置拒绝、账户UI、门禁、AI与会议回归）。最新完整窗口截图 `output/ui-account-production-20261017/zh-CN` 清单绑定同一EXE哈希。账户服务仍保持运行；Windows Startup目录写入被系统拒绝，自动启动尚未安装，不宣称已交付开机启动。
