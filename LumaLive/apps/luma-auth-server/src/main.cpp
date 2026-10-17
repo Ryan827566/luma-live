@@ -23,13 +23,19 @@ int main(int argc,char**argv){
     const bool development=std::string(auth_env)=="development"||std::string(auth_env)=="test";
     const char* email_provider=std::getenv("LUMALIVE_EMAIL_PROVIDER");
     const char* sms_provider=std::getenv("LUMALIVE_SMS_PROVIDER");
+    const char* tls_certificate=std::getenv("LUMALIVE_AUTH_TLS_CERT_FILE");
+    const char* tls_key=std::getenv("LUMALIVE_AUTH_TLS_KEY_FILE");
     if(!development){
+        if(!tls_certificate||!*tls_certificate||!tls_key||!*tls_key){
+            std::cerr<<"LUMALIVE_AUTH_TLS_CERT_FILE and LUMALIVE_AUTH_TLS_KEY_FILE are required outside development/test\n";
+            return 1;
+        }
         if(!email_provider||!*email_provider||std::string(email_provider)=="development"||std::string(email_provider)=="mock"){
-            std::cerr<<"a real LUMALIVE_EMAIL_PROVIDER is required outside development/test\n";
+            std::cerr<<"a real LUMALIVE_EMAIL_PROVIDER or explicit disabled mode is required outside development/test\n";
             return 1;
         }
         if(!sms_provider||!*sms_provider||std::string(sms_provider)=="development"||std::string(sms_provider)=="mock"){
-            std::cerr<<"a real LUMALIVE_SMS_PROVIDER is required outside development/test\n";
+            std::cerr<<"a real LUMALIVE_SMS_PROVIDER or explicit disabled mode is required outside development/test\n";
             return 1;
         }
     }
@@ -53,7 +59,9 @@ int main(int argc,char**argv){
         return 1;
     }
 
-    std::cout<<"LumaLive auth server started on TCP "<<server->Port()<<"\n"
+    const char* bind_address=std::getenv("LUMALIVE_AUTH_BIND_ADDRESS");
+    std::cout<<"LumaLive auth server started on "<<(tls_certificate&&*tls_certificate?"TLS ":"development plaintext TCP ")
+             <<(bind_address&&*bind_address?bind_address:"127.0.0.1")<<":"<<server->Port()<<"\n"
              <<"Database: PostgreSQL (LUMALIVE_AUTH_DATABASE_URL)\n"
              <<"Press Enter to stop.\n";
     std::string line;

@@ -25,6 +25,7 @@ startup=subprocess.STARTUPINFO();startup.dwFlags=subprocess.STARTF_USESHOWWINDOW
 profile=Path(sys.argv[2]).resolve()/".test-profile"
 profile.mkdir(parents=True,exist_ok=True)
 env={key.upper():value for key,value in os.environ.items()};env["LOCALAPPDATA"]=str(profile)
+env["LUMALIVE_AUTH_ENV"]="test"; env["LUMALIVE_AUTH_TLS_CA_FILE"]=""
 env["LUMALIVE_ACCOUNT_SETTINGS_PATH"]=str(profile/"account.conf")
 fixture=Path(sys.argv[1]).resolve().parent/"luma_session_archive_tests.exe"
 if fixture.is_file():subprocess.run([str(fixture),"--write-fixture",str(profile/"LumaLive/records")],env=env,check=True)

@@ -51,6 +51,7 @@ LRESULT CALLBACK SubmitEdit(HWND h,UINT m,WPARAM w,LPARAM l,UINT_PTR id,DWORD_PT
     return DefSubclassProc(h,m,w,l);
 }
 const wchar_t* ErrorLabel(const std::string& error) {
+    if(error=="tls_configuration"||error=="tls_failed")return UiLabel(L"账户服务的安全连接不可用，请联系服务管理员。",L"A secure account connection is unavailable. Contact your administrator.");
     if(error=="storage_error")return UiLabel(L"服务器暂时无法保存账户信息，请稍后重试。",L"The server could not save your account. Please try again later.");
     if(error=="invalid_registration")return UiLabel(L"注册信息未通过验证，请检查用户名和邮箱。",L"Check your username and email before registering.");
     if(error=="email_delivery_failed")return UiLabel(L"邮件暂时无法发送，请稍后重试或联系服务管理员。",L"The service could not send the email. Try again later or contact your administrator.");

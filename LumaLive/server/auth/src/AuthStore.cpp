@@ -1,6 +1,7 @@
 #include "IAuthStore.hpp"
 #include <algorithm>
 #include <cstdlib>
+#include <filesystem>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -168,8 +169,17 @@ struct PostgresApi {
 
     shared::contracts::Result LoadClientLibrary() {
 #ifdef _WIN32
-        library=LoadLibraryA("libpq.dll");
-        if(!library) library=LoadLibraryA("libpq5.dll");
+        wchar_t configured[32768]{};
+        const auto count=GetEnvironmentVariableW(L"LUMALIVE_AUTH_LIBPQ_PATH",configured,32768);
+        std::filesystem::path library_path;
+        if(count&&count<32768)library_path=configured;
+        else if(!count){
+            wchar_t executable[32768]{};const auto length=GetModuleFileNameW(nullptr,executable,32768);
+            if(length&&length<32768)library_path=std::filesystem::path(executable).parent_path()/L"libpq.dll";
+        }
+        // Never search CWD/PATH for a database library in the production process.
+        if(library_path.is_absolute())library=LoadLibraryExW(library_path.c_str(),nullptr,
+            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_SYSTEM32);
 #else
         library=dlopen("libpq.so.5",RTLD_NOW|RTLD_LOCAL);
         if(!library) library=dlopen("libpq.so",RTLD_NOW|RTLD_LOCAL);

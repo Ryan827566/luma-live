@@ -47,5 +47,28 @@ int main() {
     const auto invalid=provider->SendToken(
         "alice@example.com","password_reset","",std::chrono::seconds(1800));
     assert(!invalid.accepted);
+
+#ifdef _WIN32
+    _putenv_s("LUMALIVE_AUTH_ENV","production");
+    _putenv_s("LUMALIVE_EMAIL_PROVIDER","development");
+    assert(!CreateEmailProviderFromEnvironment()->IsConfigured());
+    _putenv_s("LUMALIVE_EMAIL_PROVIDER","disabled");
+    auto disabled=CreateEmailProviderFromEnvironment();
+    assert(disabled->IsConfigured());
+    const auto not_sent=disabled->SendToken("recipient","test","secret",std::chrono::seconds(60));
+    assert(!not_sent.accepted&&not_sent.provider_message_id.empty());
+    _putenv_s("LUMALIVE_EMAIL_PROVIDER","webhook");
+    _putenv_s("LUMALIVE_EMAIL_WEBHOOK_TOKEN","test-token");
+    for(const char* invalid:{"http://example.com/delivery","https://user:password@example.com/delivery","https://example.com/delivery?token=secret","https://example.com/delivery#fragment","https://example.com/\r\n"}){
+        _putenv_s("LUMALIVE_EMAIL_WEBHOOK_URL",invalid);
+        assert(!CreateEmailProviderFromEnvironment()->IsConfigured());
+    }
+    _putenv_s("LUMALIVE_EMAIL_WEBHOOK_URL","https://example.com/delivery");
+    _putenv_s("LUMALIVE_EMAIL_WEBHOOK_TOKEN","bad\r\nheader");
+    assert(!CreateEmailProviderFromEnvironment()->IsConfigured());
+    _putenv_s("LUMALIVE_EMAIL_WEBHOOK_TOKEN","test-token");
+    auto configured=CreateEmailProviderFromEnvironment();assert(configured->IsConfigured());
+    assert(!configured->SendToken("","test","secret",std::chrono::seconds(60)).accepted);
+#endif
     return 0;
 }

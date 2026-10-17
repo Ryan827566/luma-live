@@ -7,6 +7,7 @@
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <future>
 #include <mutex>
 #include <string>
@@ -238,6 +239,13 @@ void SlowResponseDeadline(){
 }
 
 int main(int argc,char** argv) {
+#ifdef _WIN32
+    _putenv_s("LUMALIVE_AUTH_ENV","test");
+    _putenv_s("LUMALIVE_AUTH_TLS_CA_FILE","");
+#else
+    setenv("LUMALIVE_AUTH_ENV","test",1);
+    unsetenv("LUMALIVE_AUTH_TLS_CA_FILE");
+#endif
     using namespace luma::client::account;
     OperationResult result{false, ""};
     assert(!result.success);

@@ -42,6 +42,8 @@ def main():
         log_path = root / ("output/verify-" + name + ".log")
         with log_path.open("w", encoding="utf-8") as log:
             test_env = env.copy()
+            test_env["LUMALIVE_AUTH_ENV"] = "test"
+            test_env["LUMALIVE_AUTH_TLS_CA_FILE"] = ""
             if name.startswith("auth-"):
                 test_env.pop("LUMALIVE_AUTH_DATABASE_URL", None)
             result = subprocess.run(command, cwd=root, env=test_env, stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
@@ -63,6 +65,8 @@ def main():
         run("account-entrance-layout", [str(binary / "luma_account_entrance_layout_tests.exe")], 40)
         run("auth-integration", [str(binary / "luma_auth_integration_tests.exe")], 120)
         run("auth-client", [str(binary / "luma_client_account_tests.exe")], 30)
+        run("email-provider", [str(binary / "luma_email_provider_tests.exe")], 20)
+        run("sms-provider", [str(binary / "luma_sms_provider_tests.exe")], 20)
         run("auth-ui", [sys.executable, "scripts/windows/test_account_ui.py", str(executable)], 90)
         run("auth-workspace-gate", [sys.executable, "scripts/windows/test_workspace_auth_gate.py", str(executable)], 120)
         run("package-ai-service", [sys.executable, "scripts/windows/package_ai_service.py", "--binary-dir", str(binary)], 60)

@@ -112,3 +112,11 @@ Captures in `output/ui-account-refinement-20261014/en-US`, `zh-CN` and `zh-wide`
 - 已请求Windows11原生标题栏同色，但当前测试环境DWM颜色属性返回E_INVALIDARG，截图仍为系统旧式标题栏。**标题栏同色尚未在本机交付**，需要后续兼容实现，不能将API调用等同视觉通过。
 - 统一验证改为一次MSBuild依赖目标，仍构建实际客户端及原有测试，减少重复启动开销。
 - PostgreSQL本机实例已运行，应用账号连接和重复启动检查通过；账户TLS/正式服务启动仍在开发，本轮UI测试仍使用隔离内存fixture。
+
+
+## 2026-10-17：标题栏兼容与真实账户部署
+
+- 对DWM颜色不受支持的系统，复用品牌行作为同色标题栏，保留窗口移动、边角缩放、最小化/最大化/还原/关闭和系统菜单。实际截图 `output/ui-chrome-20261017/zh-CN` 已检查：旧浅色标题栏消失、密码眼睛位于框内。自动检查覆盖命中区域、缩放边角和窗口按钮；物理多屏/读屏另验收。
+- 账户客户端生产默认要求TLS，验证CA/IP；测试模式显式隔离，不读取部署相邻CA。服务默认只监听127.0.0.1。TLS专用脚本和原生account/auth三项通过；修复停止时未完成握手等待过久的问题。
+- 真实PostgreSQL账户服务已运行，真实GUI完成注册/登录/退出/服务重启后再次登录/删除测试账户，报告 `output/local-account-verification.json`。被测实际客户端SHA256 `22b201b08c762e90de464e2046f46cc59df6590a93e0d4f89b2d5b457aa8200f`。具体启动、存储和限制见local-account-deployment.md。
+- 邮件/SMS现在支持明确disabled与可配置HTTPS webhook；生产不使用开发假投递。真实投递尚未验收，详见account-delivery.md。

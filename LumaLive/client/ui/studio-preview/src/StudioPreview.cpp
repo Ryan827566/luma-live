@@ -1,4 +1,5 @@
 #include "UiTheme.hpp"
+#include "WindowChrome.hpp"
 #include "CallMessages.hpp"
 #include "CaptionOverlay.hpp"
 #include "StudioPreview.hpp"
@@ -76,6 +77,8 @@ class StudioWindow {
     bool connectionSettings_{false};
     bool aiView_{false},meetingView_{false},meetingAiContext_{false},accountView_{false};
     AccountPanel account_;
+    WindowChrome chrome_;
+    bool customChrome_=false;
     bool workspaceReady_{false},uiReady_{false},devicesReady_{false};
     std::wstring accountLabel_,accountEmail_;
     std::unique_ptr<HostedMeeting> meetingPage_;
@@ -163,6 +166,7 @@ class StudioWindow {
     AiPanel& ActiveAssistant(){return meetingAiContext_&&meetingPage_?meetingPage_->Assistant():ai_;}
     void Layout(){
         if(!uiReady_)return;
+        if(customChrome_)chrome_.Layout(dpi_,fullscreen_);
         RECT rc;GetClientRect(window_,&rc);width_=MulDiv(rc.right,96,dpi_);height_=MulDiv(rc.bottom,96,dpi_);left_=width_<1280?176:224;right_=width_<1280?248:280;
         if(!workspaceReady_){
             for(auto h:controls_)if(h)ShowWindow(h,SW_HIDE);
@@ -382,18 +386,23 @@ class StudioWindow {
             CloseFile();audio_.Close();return TRUE;
         case OpenMeetingAssistant:meetingAiContext_=true;Command(Ai);return 0;
         case ToggleWorkspaceFullscreen:Fullscreen();return 0;
+        case WM_NCCALCSIZE:if(customChrome_&&wp)return 0;break;
+        case WM_NCPAINT:if(customChrome_)return 0;break;
+        case WM_NCACTIVATE:if(customChrome_)return TRUE;break;
+        case WM_NCHITTEST:if(customChrome_)return chrome_.HitTest(lp);break;
         case WM_SIZE:Layout();return 0;
         case WM_GETMINMAXINFO:{auto m=reinterpret_cast<MINMAXINFO*>(lp);m->ptMinTrackSize=workspaceReady_?POINT{S(1024),S(700)}:POINT{S(480),S(560)};
-            if(!workspaceReady_){const auto area=WorkArea();MONITORINFO info{sizeof(info)};GetMonitorInfoW(MonitorFromWindow(window_,MONITOR_DEFAULTTONEAREST),&info);const int w=std::min(S(960),int(area.right-area.left)),h=std::min(S(800),int(area.bottom-area.top));m->ptMaxTrackSize={w,h};m->ptMaxSize={w,h};m->ptMaxPosition={area.left-info.rcMonitor.left+(area.right-area.left-w)/2,area.top-info.rcMonitor.top+(area.bottom-area.top-h)/2};m->ptMinTrackSize.x=std::min(m->ptMinTrackSize.x,LONG(w));m->ptMinTrackSize.y=std::min(m->ptMinTrackSize.y,LONG(h));}return 0;}
+            if(!workspaceReady_){const auto area=WorkArea();MONITORINFO info{sizeof(info)};GetMonitorInfoW(MonitorFromWindow(window_,MONITOR_DEFAULTTONEAREST),&info);const int w=std::min(S(960),int(area.right-area.left)),h=std::min(S(800),int(area.bottom-area.top));m->ptMaxTrackSize={w,h};m->ptMaxSize={w,h};m->ptMaxPosition={area.left-info.rcMonitor.left+(area.right-area.left-w)/2,area.top-info.rcMonitor.top+(area.bottom-area.top-h)/2};m->ptMinTrackSize.x=std::min(m->ptMinTrackSize.x,LONG(w));m->ptMinTrackSize.y=std::min(m->ptMinTrackSize.y,LONG(h));}
+            else if(customChrome_){MONITORINFO info{sizeof(info)};GetMonitorInfoW(MonitorFromWindow(window_,MONITOR_DEFAULTTONEAREST),&info);m->ptMaxPosition={info.rcWork.left-info.rcMonitor.left,info.rcWork.top-info.rcMonitor.top};m->ptMaxSize={info.rcWork.right-info.rcWork.left,info.rcWork.bottom-info.rcWork.top};}return 0;}
         case WM_DPICHANGED:{dpi_=HIWORD(wp);Fonts();auto r=reinterpret_cast<RECT*>(lp);SetWindowPos(window_,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);Layout();return 0;}
         case WM_PRINTCLIENT:Paint(reinterpret_cast<HDC>(wp));return 0;
         case WM_ERASEBKGND:return 1;
         case WM_PAINT:{PAINTSTRUCT ps;auto dc=BeginPaint(window_,&ps);RECT r;GetClientRect(window_,&r);auto mem=CreateCompatibleDC(dc);auto bmp=CreateCompatibleBitmap(dc,std::max(1L,r.right),std::max(1L,r.bottom));auto old=SelectObject(mem,bmp);Paint(mem);BitBlt(dc,0,0,r.right,r.bottom,mem,0,0,SRCCOPY);SelectObject(mem,old);DeleteObject(bmp);DeleteDC(mem);EndPaint(window_,&ps);return 0;}
         case WM_MEASUREITEM:{auto d=reinterpret_cast<MEASUREITEMSTRUCT*>(lp);if(d->CtlType==ODT_COMBOBOX){d->itemHeight=S(30);return TRUE;}break;}
-        case WM_DRAWITEM:DrawButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lp));return TRUE;
+        case WM_DRAWITEM:if(!customChrome_||!chrome_.Draw(*reinterpret_cast<DRAWITEMSTRUCT*>(lp)))DrawButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lp));return TRUE;
         case WM_CTLCOLORLISTBOX:case WM_CTLCOLOREDIT:case WM_CTLCOLORSTATIC:SetTextColor(reinterpret_cast<HDC>(wp),Ink);SetBkColor(reinterpret_cast<HDC>(wp),Panel);return reinterpret_cast<LRESULT>(panelBrush_);
         case WM_NOTIFY:{auto n=reinterpret_cast<NMHDR*>(lp);if(n->hwndFrom==Control(Volume)&&n->code==NM_CUSTOMDRAW)return UiTheme::DrawTrackbar(*reinterpret_cast<NMCUSTOMDRAW*>(lp));break;}
-        case WM_COMMAND:if(HIWORD(wp)==BN_CLICKED)Command(LOWORD(wp));return 0;
+        case WM_COMMAND:if(HIWORD(wp)==BN_CLICKED&&(!customChrome_||!chrome_.Command(LOWORD(wp))))Command(LOWORD(wp));return 0;
         case WM_HSCROLL:if(reinterpret_cast<HWND>(lp)==Control(Volume)){volume_=static_cast<int>(SendMessageW(Control(Volume),TBM_GETPOS,0,0));audio_.SetVolume(volume_/100.f);remoteAudio_.SetVolume(volume_/100.f);if(player_)player_->SetVolume(volume_/100.f);InvalidateRect(window_,nullptr,FALSE);}return 0;
         case WM_TIMER:{
             SyncAccount();if(!workspaceReady_)return 0;
@@ -430,10 +439,14 @@ public:
         // Windows 11 supports explicit native-caption colors. Keep system resize
         // and caption controls while matching the client surface, including inactive windows.
         const COLORREF caption=Bg,captionText=Ink;const DWORD noBackdrop=1;
-        DwmSetWindowAttribute(window_,35,&caption,sizeof(caption));
+        const auto captionResult=DwmSetWindowAttribute(window_,35,&caption,sizeof(caption));
         DwmSetWindowAttribute(window_,36,&captionText,sizeof(captionText));
         DwmSetWindowAttribute(window_,34,&caption,sizeof(caption));
         DwmSetWindowAttribute(window_,38,&noBackdrop,sizeof(noBackdrop));
+        if(FAILED(captionResult)){
+            customChrome_=true;chrome_.Open(window_);
+            SetWindowPos(window_,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED);
+        }
         surface_=CreateWindowExW(0,L"LumaVideoSurface",UiLabel(L"视频预览",L"Video preview"),WS_CHILD|WS_VISIBLE,0,0,1,1,window_,nullptr,instance,this);
         remoteSurface_=CreateWindowExW(0,L"LumaVideoSurface",UiLabel(L"远端视频",L"Remote video"),WS_CHILD|WS_VISIBLE,0,0,1,1,window_,nullptr,instance,this);
         Button(Account,UiLabel(L"账户",L"Account"));Button(Advanced,UiLabel(L"连接设置",L"Connection settings"));Button(Ai,UiLabel(L"AI \u52a9\u624b",L"AI assistant"));Button(Meeting,UiLabel(L"\u89c6\u9891\u4f1a\u8bae",L"Meetings"));Button(Open,UiLabel(L"打开媒体文件",L"Open media"));Button(CameraMode,UiLabel(L"摄像头",L"Camera"));Button(FileMode,UiLabel(L"媒体文件",L"Media"));Button(Camera,UiLabel(L"开启摄像头",L"Start camera"));Button(Refresh,UiLabel(L"刷新设备",L"Refresh"));Button(Microphone,UiLabel(L"开启麦克风",L"Start microphone"));Button(Monitor,UiLabel(L"监听：关闭",L"Monitoring off"));Button(TestSound,UiLabel(L"测试扬声器",L"Test speakers"));Button(Pause,UiLabel(L"暂停",L"Pause"));Button(Stop,UiLabel(L"停止播放",L"Stop playback"));Button(FullScreen,UiLabel(L"全屏预览",L"Fullscreen"));

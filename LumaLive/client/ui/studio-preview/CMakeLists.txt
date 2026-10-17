@@ -208,6 +208,7 @@ if(LUMA_PREVIEW_STANDALONE)
   add_custom_target(luma_client_verification DEPENDS
     luma_account_entrance_layout_tests luma_account_connection_settings_tests
     luma_auth_integration_tests luma_client_account_tests luma_account_ui_fixture
+    luma_auth_server luma_email_provider_tests luma_sms_provider_tests
     luma_studio luma_signaling_server luma_meeting_ui_fixture luma_meeting_render_tests
     luma_session_ai_tests luma_session_ai_gateway_tests luma_caption_overlay_tests
     luma_ui_locale_tests luma_ui_accessibility_tests luma_transcript_view_tests

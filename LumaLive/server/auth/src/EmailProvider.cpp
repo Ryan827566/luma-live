@@ -1,4 +1,5 @@
 #include "IEmailProvider.hpp"
+#include "DeliveryWebhook.hpp"
 #include <cstdlib>
 #include <string>
 #include <utility>
@@ -36,6 +37,24 @@ public:
     }
 };
 
+class DisabledEmailProvider final : public IEmailProvider {
+public:
+    bool IsConfigured() const override { return true; } // Explicit administrator choice.
+    EmailSendResult SendToken(std::string_view,std::string_view,std::string_view,std::chrono::seconds) override {
+        return {false,{},{},"email delivery is disabled by the service administrator"};
+    }
+};
+class WebhookEmailProvider final : public IEmailProvider {
+public:
+    bool IsConfigured() const override { return webhook_.Configured(); }
+    EmailSendResult SendToken(std::string_view recipient,std::string_view purpose,std::string_view code,std::chrono::seconds ttl) override {
+        const bool accepted=webhook_.Send("email",recipient,purpose,code,ttl);
+        return {accepted,{},{},accepted?"delivery accepted by configured gateway":"delivery gateway failed or rejected the request"};
+    }
+private:
+    delivery::Webhook webhook_{"LUMALIVE_EMAIL"};
+};
+
 class UnavailableEmailProvider final : public IEmailProvider {
 public:
     explicit UnavailableEmailProvider(std::string name):name_(std::move(name)){}
@@ -68,6 +87,8 @@ std::unique_ptr<IEmailProvider> CreateEmailProviderFromEnvironment() {
     }
     if(provider.empty()&&(auth_env=="development"||auth_env=="test"))
         return CreateDevelopmentEmailProvider();
+    if(provider=="disabled")return std::make_unique<DisabledEmailProvider>();
+    if(provider=="webhook")return std::make_unique<WebhookEmailProvider>();
     if(provider.empty())return std::make_unique<UnavailableEmailProvider>("unset");
     return std::make_unique<UnavailableEmailProvider>(provider);
 }

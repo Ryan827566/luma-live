@@ -38,6 +38,7 @@ profile_parent.mkdir(parents=True, exist_ok=True)
 profile = profile_parent / ("luma-ui-profile-" + uuid.uuid4().hex)
 profile.mkdir()
 env = {key.upper(): value for key, value in os.environ.items()}; env["LOCALAPPDATA"] = str(profile)
+env["LUMALIVE_AUTH_ENV"]="test"; env["LUMALIVE_AUTH_TLS_CA_FILE"]=""
 env["LUMALIVE_ACCOUNT_SETTINGS_PATH"] = str(profile / "account.conf")
 archive_fixture = Path(sys.argv[1]).resolve().parent / "luma_session_archive_tests.exe"
 subprocess.run([str(archive_fixture), "--write-fixture", str(profile / "LumaLive/records")], env=env, check=True)

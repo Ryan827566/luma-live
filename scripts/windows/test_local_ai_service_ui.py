@@ -43,6 +43,7 @@ def main():
         reservation.bind(("127.0.0.1",0)); port=reservation.getsockname()[1]
     with tempfile.TemporaryDirectory(prefix="luma-service-ui-") as profile:
         env={k.upper():v for k,v in os.environ.items() if not k.upper().startswith("LUMALIVE_AI_")}
+        env["LUMALIVE_AUTH_ENV"]="test"; env["LUMALIVE_AUTH_TLS_CA_FILE"]=""
         env.update(LOCALAPPDATA=profile,LUMALIVE_AI_GATEWAY_PORT=str(port),LUMALIVE_UI_LANGUAGE="en-US")
         env["LUMALIVE_ACCOUNT_SETTINGS_PATH"] = str(Path(profile) / "account.conf")
         start=subprocess.STARTUPINFO(); start.dwFlags=subprocess.STARTF_USESHOWWINDOW; start.wShowWindow=0

@@ -57,5 +57,28 @@ int main() {
         std::chrono::seconds(300));
     assert(!invalid.accepted);
 
+
+#ifdef _WIN32
+    _putenv_s("LUMALIVE_AUTH_ENV","production");
+    _putenv_s("LUMALIVE_SMS_PROVIDER","development");
+    assert(!CreateSmsProviderFromEnvironment()->IsConfigured());
+    _putenv_s("LUMALIVE_SMS_PROVIDER","disabled");
+    auto disabled=CreateSmsProviderFromEnvironment();
+    assert(disabled->IsConfigured());
+    const auto not_sent=disabled->SendOtp("recipient","test","secret",std::chrono::seconds(60));
+    assert(!not_sent.accepted&&not_sent.provider_message_id.empty());
+    _putenv_s("LUMALIVE_SMS_PROVIDER","webhook");
+    _putenv_s("LUMALIVE_SMS_WEBHOOK_TOKEN","test-token");
+    for(const char* invalid:{"http://example.com/delivery","https://user:password@example.com/delivery","https://example.com/delivery?token=secret","https://example.com/delivery#fragment","https://example.com/\r\n"}){
+        _putenv_s("LUMALIVE_SMS_WEBHOOK_URL",invalid);
+        assert(!CreateSmsProviderFromEnvironment()->IsConfigured());
+    }
+    _putenv_s("LUMALIVE_SMS_WEBHOOK_URL","https://example.com/delivery");
+    _putenv_s("LUMALIVE_SMS_WEBHOOK_TOKEN","bad\r\nheader");
+    assert(!CreateSmsProviderFromEnvironment()->IsConfigured());
+    _putenv_s("LUMALIVE_SMS_WEBHOOK_TOKEN","test-token");
+    auto configured=CreateSmsProviderFromEnvironment();assert(configured->IsConfigured());
+    assert(!configured->SendOtp("","test","secret",std::chrono::seconds(60)).accepted);
+#endif
     return 0;
 }

@@ -71,6 +71,7 @@ settings_dir=tempfile.TemporaryDirectory(prefix='luma-account-ui-')
 settings_path=Path(settings_dir.name)/'account-connection.conf'
 settings_path.write_text(f'LumaLiveAccountConnection 1\nhost=127.0.0.1\nport={port}\n',encoding='utf-8')
 env={k.upper():v for k,v in os.environ.items()};env['LUMALIVE_UI_LANGUAGE']='en-US'
+env["LUMALIVE_AUTH_ENV"]="test"; env["LUMALIVE_AUTH_TLS_CA_FILE"]=""
 env['LUMALIVE_ACCOUNT_SETTINGS_PATH']=str(settings_path)
 startup=subprocess.STARTUPINFO();startup.dwFlags=subprocess.STARTF_USESHOWWINDOW;startup.wShowWindow=0
 process=subprocess.Popen([str(binary),'--account'],env=env,startupinfo=startup)

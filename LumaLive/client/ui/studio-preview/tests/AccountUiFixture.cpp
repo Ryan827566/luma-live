@@ -69,6 +69,9 @@ public:
 };
 }
 int main(int argc,char** argv){
+    _putenv_s("LUMALIVE_AUTH_ENV","test");
+    _putenv_s("LUMALIVE_AUTH_TLS_CERT_FILE","");
+    _putenv_s("LUMALIVE_AUTH_TLS_KEY_FILE","");
     auto mailbox=std::make_shared<Mailbox>();
     auto server=CreateAuthService(std::make_unique<Store>(mailbox),std::make_unique<Email>(mailbox),std::make_unique<Sms>(mailbox));
     const auto port=static_cast<unsigned short>(argc>1?std::stoi(argv[1]):19241);

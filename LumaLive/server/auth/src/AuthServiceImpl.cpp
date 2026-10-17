@@ -5,6 +5,7 @@
 #include "contracts/auth/Auth.hpp"
 #include "contracts/auth/AuthCrypto.hpp"
 #include "contracts/auth/AuthWire.hpp"
+#include "common/AuthTls.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -27,7 +28,10 @@ inline void close_socket(Socket s){::closesocket(s);}
 inline bool init_sockets(){static bool once=[](){WSADATA d{};return WSAStartup(MAKEWORD(2,2),&d)==0;}();return once;}
 #else
 #include <arpa/inet.h>
+#include <cerrno>
+#include <fcntl.h>
 #include <netinet/in.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
 using Socket=int; constexpr Socket kInvalidSocket=-1;
@@ -52,6 +56,49 @@ using luma::contracts::auth::wire::Packet;
 using luma::contracts::auth::wire::Type;
 
 namespace {
+using IoClock=std::chrono::steady_clock;
+constexpr auto kIoTimeout=std::chrono::seconds(5);
+void ShutdownSocket(Socket socket){
+#ifdef _WIN32
+    ::shutdown(socket,SD_BOTH);
+#else
+    ::shutdown(socket,SHUT_RDWR);
+#endif
+}
+bool SetNonBlocking(Socket socket){
+#ifdef _WIN32
+    u_long enabled=1;return ::ioctlsocket(socket,FIONBIO,&enabled)==0;
+#else
+    if(socket>=FD_SETSIZE)return false;
+    const auto flags=::fcntl(socket,F_GETFL,0);
+    return flags>=0&&::fcntl(socket,F_SETFL,flags|O_NONBLOCK)==0;
+#endif
+}
+bool RetrySocket(){
+#ifdef _WIN32
+    const auto error=WSAGetLastError();return error==WSAEWOULDBLOCK||error==WSAEINTR;
+#else
+    return errno==EAGAIN||errno==EWOULDBLOCK||errno==EINTR;
+#endif
+}
+// 1 = ready, 0 = deadline, -1 = closed/error. Idle callers may wait again.
+int WaitReady(Socket socket,bool writing,IoClock::time_point deadline){
+    while(IoClock::now()<deadline){
+        const auto us=std::chrono::duration_cast<std::chrono::microseconds>(deadline-IoClock::now()).count();
+        if(us<=0)return 0;
+        timeval timeout{long(us/1000000),long(us%1000000)};
+        fd_set ready;FD_ZERO(&ready);FD_SET(socket,&ready);
+#ifdef _WIN32
+        const int result=::select(0,writing?nullptr:&ready,writing?&ready:nullptr,nullptr,&timeout);
+        if(result<0&&WSAGetLastError()==WSAEINTR)continue;
+#else
+        const int result=::select(socket+1,writing?nullptr:&ready,writing?&ready:nullptr,nullptr,&timeout);
+        if(result<0&&errno==EINTR)continue;
+#endif
+        return result>0?(IoClock::now()<deadline?1:0):result;
+    }
+    return 0;
+}
 
 std::int64_t system_now_epoch(){
     return std::chrono::duration_cast<std::chrono::seconds>(
@@ -201,6 +248,9 @@ struct Pending{
 
 struct ClientState{
     Socket socket{kInvalidSocket};
+#ifdef _WIN32
+    std::unique_ptr<luma::auth::tls::Channel> tls;
+#endif
     Pending pending;
     std::string token;
     std::string device_id{"default-device"};
@@ -252,6 +302,7 @@ public:
          sms_provider_(sms?std::move(sms):CreateSmsProviderFromEnvironment()),
          email_provider_(email?std::move(email):CreateEmailProviderFromEnvironment()),
          clock_(clock?std::move(clock):system_now_epoch){}
+    ~AuthServiceImpl()override{Stop();}
 
     Result Start()override{return StartOnPort(9100);}
 
@@ -266,6 +317,28 @@ public:
             return Result::Failure(ErrorCode::InvalidState,"email delivery provider is not configured");
         if(!sms_provider_||!sms_provider_->IsConfigured())
             return Result::Failure(ErrorCode::InvalidState,"SMS delivery provider is not configured");
+#ifdef _WIN32
+        const auto certificate=std::filesystem::path(luma::auth::tls::Environment(L"LUMALIVE_AUTH_TLS_CERT_FILE"));
+        const auto key=std::filesystem::path(luma::auth::tls::Environment(L"LUMALIVE_AUTH_TLS_KEY_FILE"));
+        tls_context_.reset();
+        if(!certificate.empty()||!key.empty()){
+            tls_context_=luma::auth::tls::Context::Create(true,certificate,key);
+            if(!tls_context_)return Result::Failure(ErrorCode::InvalidState,"invalid account TLS certificate, key or runtime");
+        }else if(!luma::auth::tls::DevelopmentMode())
+            return Result::Failure(ErrorCode::InvalidState,"account TLS certificate and key are required");
+#else
+        if(!luma::auth::tls::DevelopmentMode())
+            return Result::Failure(ErrorCode::InvalidState,"account TLS transport is unavailable on this platform");
+#endif
+        sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(port);
+        const auto* configured_bind=std::getenv("LUMALIVE_AUTH_BIND_ADDRESS");
+        const std::string bind_address=configured_bind&&*configured_bind?configured_bind:"127.0.0.1";
+#ifdef _WIN32
+        if(::InetPtonA(AF_INET,bind_address.c_str(),&a.sin_addr)!=1)
+#else
+        if(::inet_pton(AF_INET,bind_address.c_str(),&a.sin_addr)!=1)
+#endif
+            return Result::Failure(ErrorCode::InvalidArgument,"account bind address must be IPv4");
         if(auto db=auth_store_->Open();!db.IsOk())return db;
         if(!Load()){
             auth_store_->Close();
@@ -273,15 +346,10 @@ public:
         }
 
         Socket s=::socket(AF_INET,SOCK_STREAM,0);
-        if(s==kInvalidSocket)return Result::Failure(ErrorCode::Internal,"socket creation failed");
+        if(s==kInvalidSocket){auth_store_->Close();return Result::Failure(ErrorCode::Internal,"socket creation failed");}
 
         int yes=1;
         setsockopt(s,SOL_SOCKET,SO_REUSEADDR,reinterpret_cast<const char*>(&yes),sizeof(yes));
-        sockaddr_in a{};
-        a.sin_family=AF_INET;
-        a.sin_addr.s_addr=htonl(INADDR_ANY);
-        a.sin_port=htons(port);
-
         if(::bind(s,reinterpret_cast<sockaddr*>(&a),sizeof(a))!=0||::listen(s,32)!=0){
             close_socket(s);
             auth_store_->Close();
@@ -335,6 +403,9 @@ public:
             sessions_.clear();
         }
         if(auth_store_)auth_store_->Close();
+#ifdef _WIN32
+        tls_context_.reset();
+#endif
         return Result::Ok();
     }
 
@@ -464,22 +535,56 @@ private:
     }
 
     bool Send(Socket s,const Packet& p){
+        auto& client=Client(s);
         const auto msg=luma::contracts::auth::wire::encode(p);
+        const auto deadline=IoClock::now()+kIoTimeout;
+        auto failed=[&]{ShutdownSocket(s);return false;};
         std::size_t off=0;
         while(off<msg.size()){
-            const int n=::send(s,msg.data()+off,static_cast<int>(msg.size()-off),0);
-            if(n<=0)return false;
+            if(!running_||IoClock::now()>=deadline)return failed();
+#ifdef _WIN32
+            const int n=client.tls?client.tls->Write(msg.data()+off,static_cast<int>(msg.size()-off),deadline):
+                ::send(s,msg.data()+off,static_cast<int>(msg.size()-off),0);
+            if(client.tls&&n<=0)return failed();
+#else
+#ifdef MSG_NOSIGNAL
+            constexpr int flags=MSG_NOSIGNAL;
+#else
+            constexpr int flags=0;
+#endif
+            const int n=::send(s,msg.data()+off,static_cast<int>(msg.size()-off),flags);
+#endif
+            if(n<0){if(RetrySocket()&&WaitReady(s,true,deadline)==1)continue;return failed();}
+            if(n==0)return failed();
             off+=static_cast<std::size_t>(n);
         }
         return true;
     }
 
     bool RecvLine(Socket s,std::string&line){
+        auto& client=Client(s);
         line.clear();
+        // Waiting between requests is not a frame timeout. TLS may already hold
+        // plaintext or a complete record buffered during the prior operation.
+        while(running_){
+#ifdef _WIN32
+            if(client.tls&&client.tls->Pending())break;
+#endif
+            const int ready=WaitReady(s,false,IoClock::now()+std::chrono::seconds(1));
+            if(ready<0)return false;if(ready>0)break;
+        }
+        const auto deadline=IoClock::now()+kIoTimeout;
         char c=0;
         while(running_){
+            if(IoClock::now()>=deadline)return false;
+#ifdef _WIN32
+            const int n=client.tls?client.tls->Read(&c,1,deadline) : ::recv(s,&c,1,0);
+            if(client.tls&&n<=0)return false;
+#else
             const int n=::recv(s,&c,1,0);
-            if(n<=0)return false;
+#endif
+            if(n<0){if(RetrySocket()&&WaitReady(s,false,deadline)==1)continue;return false;}
+            if(n==0)return false;
             if(c=='\n')return true;
             line.push_back(c);
             if(line.size()>=64*1024)return false;
@@ -513,6 +618,7 @@ private:
                 if(running_)continue;
                 break;
             }
+            if(!SetNonBlocking(s)){close_socket(s);continue;}
 
             ClientState state{};
             state.socket=s;
@@ -526,7 +632,14 @@ private:
     }
 
     void ClientLoop(Socket s){
-        while(running_){
+        bool transport_ready=true;
+#ifdef _WIN32
+        if(tls_context_){
+            auto& client=Client(s);client.tls=std::make_unique<luma::auth::tls::Channel>();
+            transport_ready=client.tls->Open(tls_context_,s,true,{},&running_);
+        }
+#endif
+        while(running_&&transport_ready){
             std::string line;
             if(!RecvLine(s,line))break;
             if(line.empty())continue;
@@ -541,6 +654,7 @@ private:
 
         {
             std::lock_guard lock(clients_mutex_);
+            ShutdownSocket(s);
             clients_.erase(s);
         }
         close_socket(s);
@@ -1976,6 +2090,9 @@ private:
     std::vector<std::thread> client_threads_;
     mutable std::mutex lifecycle_mutex_,clients_mutex_,store_mutex_,session_mutex_,rate_mutex_,audit_mutex_;
     std::unique_ptr<IAuthStore> auth_store_;
+#ifdef _WIN32
+    std::shared_ptr<luma::auth::tls::Context> tls_context_;
+#endif
     std::unique_ptr<ISmsProvider> sms_provider_;
     std::unique_ptr<IEmailProvider> email_provider_;
     std::function<std::int64_t()> clock_;

@@ -18,6 +18,7 @@ u.PostMessageW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
 
 with tempfile.TemporaryDirectory(prefix='luma-gate-') as profile:
     env = {k.upper(): v for k, v in os.environ.items()}
+    env["LUMALIVE_AUTH_ENV"]="test"; env["LUMALIVE_AUTH_TLS_CA_FILE"]=""
     env.update(LOCALAPPDATA=profile, LUMALIVE_UI_LANGUAGE='en-US',
                LUMALIVE_ACCOUNT_SETTINGS_PATH=str(Path(profile) / 'account.conf'))
     startup = subprocess.STARTUPINFO()
@@ -38,6 +39,24 @@ with tempfile.TemporaryDirectory(prefix='luma-gate-') as profile:
             u.EnumWindows(visit, 0)
             return found[0] if found else None
         root = wait(find_root, 'Client missing')
+        if u.GetDlgItem(root,90):
+            u.GetWindowRect.argtypes=[w.HWND,c.POINTER(w.RECT)]
+            u.GetClientRect.argtypes=[w.HWND,c.POINTER(w.RECT)]
+            u.IsZoomed.argtypes=[w.HWND];u.IsIconic.argtypes=[w.HWND]
+            u.GetDpiForWindow.argtypes=[w.HWND];u.GetDpiForWindow.restype=w.UINT
+            bounds=w.RECT();client_bounds=w.RECT()
+            u.GetWindowRect(root,c.byref(bounds));u.GetClientRect(root,c.byref(client_bounds))
+            assert client_bounds.right==bounds.right-bounds.left and client_bounds.bottom==bounds.bottom-bounds.top
+            scale=u.GetDpiForWindow(root)/96
+            def hit(x,y):return u.SendMessageW(root,0x84,0,((bounds.top+int(y*scale))&65535)<<16|((bounds.left+int(x*scale))&65535))
+            assert hit(2,2)==13, 'Custom frame lost corner resizing'
+            assert hit(160,20)==2, 'Brand row cannot drag the window'
+            assert hit(160,100)==1, 'Form treated as draggable caption'
+            for i in (90,91,92):assert u.IsWindowEnabled(u.GetDlgItem(root,i))
+            u.SendMessageW(root,0x111,91,0);wait(lambda:u.IsZoomed(root),'Maximize failed')
+            u.SendMessageW(root,0x111,91,0);wait(lambda:not u.IsZoomed(root),'Restore failed')
+            u.SendMessageW(root,0x111,90,0);wait(lambda:u.IsIconic(root),'Minimize failed')
+            u.SendMessageW(root,0x112,0xF120,0);wait(lambda:not u.IsIconic(root),'Restore after minimize failed')
         panel = fixture.login(root)
         def visible(i): return bool(u.GetWindowLongW(u.GetDlgItem(root, i), -16) & 0x10000000)
         def text(h):

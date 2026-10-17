@@ -1,3 +1,9 @@
+# Latest checkpoint: real local account path passed (2026-10-17)
+
+Production TLS account service is now running at127.0.0.1:9100 against the real PostgreSQL instance15432/luma_auth. The actual GUI passed registration, persisted verifier/salt, login/workspace identity, logout, service restart/re-login and deletion of the generated test account. See local-account-deployment.md and output/local-account-verification.json. This supersedes earlier statements that no backend was running. Session tokens remain in memory; restart requires sign-in.
+
+Windows10 caption color rejection is handled by themed client chrome, with actual screenshots and move/resize/minimize/maximize/restore tests. Delivery is explicitly disabled until configured; HTTPS webhook integration exists but real delivery is not accepted. The complete account module is not declared commercially finished: supplier acceptance, backup/restore, unattended system-service installation, certificate renewal, physical IME/Narrator/multimonitor and pressure testing remain. Other video/meeting/global-AI work remains as tracked below; do not begin broadcasting based on this account checkpoint.
+
 # Latest checkpoint: focused entrance verified (2026-10-17)
 
 320-DIP forms, inside-field eye, exact page cleanup and accurate registration errors passed25 actual-EXE checks /648 native layout states. See login-acceptance.md for hash and screenshots. DWM caption colors are unsupported in the current test environment; same-color titlebar remains open. PostgreSQL is now running with application-role readiness and repeat-start checks passed. TLS/provider deployment is in-progress unverified code, not covered by the UI checkpoint.

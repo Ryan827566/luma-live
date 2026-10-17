@@ -1,6 +1,7 @@
 #include "IAccountService.hpp"
 #include "contracts/auth/AuthCrypto.hpp"
 #include "contracts/auth/AuthWire.hpp"
+#include "common/AuthTls.hpp"
 #include <atomic>
 #include <chrono>
 #include <mutex>
@@ -123,6 +124,23 @@ public:
         Stop();
         if(host.empty()||!port||!init_sockets())return{false,"invalid account server address"};
         host_=std::move(host);port_=port;
+#ifdef _WIN32
+        std::shared_ptr<luma::auth::tls::Context> context;
+        auto ca=std::filesystem::path(luma::auth::tls::Environment(L"LUMALIVE_AUTH_TLS_CA_FILE"));
+        if(ca.empty()&&!luma::auth::tls::DevelopmentMode()){
+            const auto adjacent=luma::auth::tls::ExecutableDirectory()/L"lumalive-auth-ca.pem";
+            std::error_code error;
+            const bool exists=std::filesystem::exists(adjacent,error);
+            if(error)return{false,"unable to inspect account TLS trust configuration","tls_configuration"};
+            if(exists)ca=adjacent;
+        }
+        if(!ca.empty()){
+            context=luma::auth::tls::Context::Create(false,ca);
+            if(!context)return{false,"unable to load account TLS trust configuration","tls_configuration"};
+        }else if(!luma::auth::tls::DevelopmentMode())return{false,"account TLS CA file is required","tls_configuration"};
+#else
+        if(!luma::auth::tls::DevelopmentMode())return{false,"account TLS transport is unavailable on this platform","tls_configuration"};
+#endif
         Socket s=::socket(AF_INET,SOCK_STREAM,0);
         if(s==kInvalidSocket)return{false,"socket creation failed"};
         if(!SetNonBlocking(s)){close_socket(s);return{false,"unable to configure account connection"};}
@@ -133,14 +151,22 @@ public:
         if(::inet_pton(AF_INET,host_.c_str(),&a.sin_addr)!=1){close_socket(s);return{false,"host must be an IPv4 address"};}
 #endif
         if(!ConnectSocket(s,a)){close_socket(s);return{false,"unable to connect to auth server"};}
+#ifdef _WIN32
+        if(context){
+            auto channel=std::make_unique<luma::auth::tls::Channel>();
+            if(!channel->Open(std::move(context),s,false,host_)){
+                ::shutdown(s,SD_BOTH);channel.reset();close_socket(s);
+                return{false,"account TLS connection or certificate verification failed","tls_failed"};
+            }
+            tls_=std::move(channel);
+        }
+#endif
         socket_=s;running_=true;return{true,"connected"};
     }
 
     OperationResult Stop()override{
         std::lock_guard lock(mutex_);
-        if(socket_!=kInvalidSocket){close_socket(socket_);socket_=kInvalidSocket;}
-        running_=false;
-        ClearSessionLocked();
+        DisconnectLocked();
         return{true,"stopped"};
     }
 
@@ -657,7 +683,14 @@ private:
     }
 
     bool DisconnectLocked(){
-        if(socket_!=kInvalidSocket){close_socket(socket_);socket_=kInvalidSocket;}
+        if(socket_!=kInvalidSocket){
+#ifdef _WIN32
+            ::shutdown(socket_,SD_BOTH);tls_.reset();
+#else
+            ::shutdown(socket_,SHUT_RDWR);
+#endif
+            close_socket(socket_);socket_=kInvalidSocket;
+        }
         running_=false;
         ClearSessionLocked();
         return false;
@@ -704,7 +737,13 @@ private:
 #else
             constexpr int flags=0;
 #endif
+#ifdef _WIN32
+            const int n=tls_?tls_->Write(msg.data()+off,static_cast<int>(msg.size()-off),deadline):
+                ::send(socket_,msg.data()+off,static_cast<int>(msg.size()-off),flags);
+            if(tls_&&n<=0)return DisconnectLocked();
+#else
             const int n=::send(socket_,msg.data()+off,static_cast<int>(msg.size()-off),flags);
+#endif
             if(n<0){
                 const auto error=SocketError();
                 if(Interrupted(error))continue;
@@ -722,7 +761,12 @@ private:
         std::string line;char c=0;
         while(true){
             if(IoClock::now()>=deadline)return DisconnectLocked();
+#ifdef _WIN32
+            const int n=tls_?tls_->Read(&c,1,deadline) : ::recv(socket_,&c,1,0);
+            if(tls_&&n<=0)return DisconnectLocked();
+#else
             const int n=::recv(socket_,&c,1,0);
+#endif
             if(n<0){
                 const auto error=SocketError();
                 if(Interrupted(error))continue;
@@ -749,6 +793,9 @@ private:
     std::uint16_t port_{9100};
     std::atomic<bool>running_{false};
     Socket socket_{kInvalidSocket};
+#ifdef _WIN32
+    std::unique_ptr<luma::auth::tls::Channel> tls_;
+#endif
     mutable std::mutex mutex_;
     contracts::auth::AuthSession session_;
     contracts::auth::SecuritySummary security_;
