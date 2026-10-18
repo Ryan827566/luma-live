@@ -110,6 +110,16 @@ try:
                 u.SendMessageW(combo,0x14E,index,0);u.SendMessageW(panel,0x111,(1<<16)|2177,0)
                 return
         raise AssertionError(f'Country option {iso} {prefix} missing')
+    def sms_state(code=False,mfa=False,notice=False):
+        expected={2120,2140,2161,2173,2177}
+        if code:expected.update((2121,2141,2160))
+        if mfa:expected.update((2122,2142))
+        if notice:expected.add(2163)
+        actual={i for i in range(2100,2178) if control(i) and visible(control(i))}
+        assert actual==expected,('Unexpected SMS controls',actual,expected)
+        for i in range(2120,2126):
+            if i not in expected:assert text(control(i))=='',('Hidden SMS input retained text',i)
+        entrance_sizes()
     def done(expected):
         wait(lambda:u.IsWindowEnabled(control(2160)))
         assert expected in text(control(2163)),text(control(2163))
@@ -243,8 +253,9 @@ try:
     click(2174);assert visible(control(2122));entrance_sizes()
     click(2173);assert not visible(control(2122));entrance_sizes()
     assert visible(control(2177)) and '+' in text(control(2177)), 'SMS entry has no automatic calling code'
-    assert not visible(control(2121)) and not visible(control(2160)), 'SMS code shown before successful request'
-    click(2174);assert visible(control(2122));entrance_sizes()
+    sms_state()
+    for hidden in (2170,2171,2172,2174,2175,2176):click(hidden)
+    sms_state()
     click(2173);assert not visible(control(2122)) and not visible(control(2177));entrance_sizes()
     click(2171);entrance_sizes();assert not visible(control(2121)) and not visible(control(2122)), 'Recovery exposed later steps before request'
     click(2175);assert not visible(control(2120));entrance_sizes()
@@ -334,6 +345,40 @@ try:
     click(2168);entrance_sizes()
     # Submit only the additional factor: successful login proves masked credentials survived.
     put(control(2122),recovery_codes[0]);click(2160);done('signed in')
+    click(2100);click(2161);done('signed out')
+    click(2176);click(2173);country('US','+1');sms_state()
+    # IME Enter cannot send an SMS. Regular Enter requests a code in the first stage.
+    put(control(2120),'4155552673')
+    u.SendMessageW(control(2120),0x10D,0,0);u.PostMessageW(control(2120),0x100,0x0D,0)
+    time.sleep(.2);sms_state()
+    u.SendMessageW(control(2120),0x10E,0,0);u.PostMessageW(control(2120),0x100,0x0D,0)
+    wait(lambda:'linked to an account' in text(control(2163)));done('linked to an account');sms_state(code=True,notice=True)
+    # Equivalent formatting retains the challenge; changing its calling code does not.
+    put(control(2121),'old-code');put(control(2120),'(415) 555-2673')
+    assert text(control(2121))=='old-code';sms_state(code=True,notice=True)
+    country('GB','+44');sms_state()
+    # Unknown numbers have the same conditional response, without claiming SMS delivery.
+    put(control(2120),'+14155552674');u.PostMessageW(control(2120),0x100,0x0D,0)
+    wait(lambda:'linked to an account' in text(control(2163)));done('linked to an account');sms_state(code=True,notice=True)
+    put(control(2121),'old-code');put(control(2120),'+14155552671');sms_state()
+    u.PostMessageW(control(2120),0x100,0x0D,0)
+    wait(lambda:'linked to an account' in text(control(2163)));done('linked to an account');sms_state(code=True,notice=True)
+    phone_login=mailbox('phone_login')
+    # Explicit international input ignores the selector; equivalent national input preserves its challenge.
+    country('US','+1');put(control(2120),'4155552671');sms_state(code=True,notice=True)
+    put(control(2121),phone_login);click(2161);done('Too many attempts')
+    assert text(control(2121))==phone_login,'Rejected resend discarded the outstanding code'
+    sms_state(code=True,notice=True)
+    # SMS failures must not claim the account/password is incorrect.
+    put(control(2121),'not-a-code');click(2160);done('text message code is incorrect');sms_state(code=True,notice=True)
+    put(control(2121),phone_login);u.PostMessageW(control(2121),0x100,0x0D,0)
+    wait(lambda:visible(control(2122)));done('authenticator or recovery code');sms_state(code=True,mfa=True,notice=True)
+    assert text(control(2121))==phone_login,'MFA challenge discarded the text message code'
+    put(control(2122),'not-a-recovery-code');click(2160);done('authenticator or recovery code')
+    assert text(control(2121))==phone_login,'Incorrect MFA discarded the text message code'
+    sms_state(code=True,mfa=True,notice=True)
+    put(control(2122),recovery_codes[2]);u.PostMessageW(control(2122),0x100,0x0D,0)
+    wait(lambda:'signed in' in text(control(2163)));done('signed in')
     click(2101);select_mode(3)
     fields('');click(2160);at_sizes();click(2166);done('required')
     assert u.IsWindowEnabled(control(2165)), 'Rejected confirmation left mode disabled'
@@ -351,16 +396,7 @@ try:
     click(2100);click(2161);done('signed out');assert text(control(2100))=='Sign in'
     signedout=w.RECT();u.GetWindowRect(root,c.byref(signedout))
     assert (signedout.right-signedout.left,signedout.bottom-signedout.top)==(round(560*scale),round(560*scale)), 'Logout did not restore entrance dimensions'
-    click(2176);click(2173);country('GB','+44')
-    fields('+14155552671','','');click(2161);done('Text message sent')
-    assert visible(control(2121)) and visible(control(2160)), 'Successful SMS request did not reveal code entry'
-    entrance_sizes()
-    phone_login=mailbox('phone_login')
-    # A changed national number cannot reuse the challenge requested for another number.
-    country('US','+1');fields('4155552672',phone_login,'');click(2160);done('Request a code for this phone number')
-    # Correcting the number reuses its outstanding challenge; do not violate the
-    # production resend throttle merely to exercise national-number normalization.
-    fields('4155552671',phone_login,'');click(2160);done('signed in')
+    fields('ui@example.com','secure ui password');click(2160);done('signed in')
     assert text(control(2100))=='Profile'
     click(2101);select_mode(2);fits();password_visibility(0,1,2);fields('wrong password','changed password','changed password');click(2160);done('incorrect')
     fields('secure ui password','changed password','changed password');click(2160);done('Password updated')

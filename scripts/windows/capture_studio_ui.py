@@ -72,10 +72,10 @@ try:
     # PrintWindow draws legacy non-client fallback on some Windows versions;
     # requested DWM colors are recorded separately, not inferred from this bitmap.
     directory=Path(sys.argv[2]);directory.mkdir(parents=True,exist_ok=True)
-    for name,control,subpage in [("account",129,None),("account-register",129,2170),("account-recovery",129,2171),("account-recovery-code",129,2175),("account-more",129,2176),("account-sms",129,2173),("account-sms-mfa",129,2174),("calls",117,None),("account-profile",129,2100),("account-delete",129,2100),("account-security",129,2101),("account-password",129,2101),("account-devices",129,2102),("account-service",129,2103),("meetings",126,None),("assistant",127,11),("assistant-history",127,12),("assistant-history-delete",127,12),("assistant-settings",127,13)]:
+    for name,control,subpage in [("account",129,None),("account-register",129,2170),("account-recovery",129,2171),("account-recovery-code",129,2175),("account-more",129,2176),("account-sms",129,2173),("account-sms-code",129,2161),("calls",117,None),("account-profile",129,2100),("account-delete",129,2100),("account-security",129,2101),("account-password",129,2101),("account-devices",129,2102),("account-service",129,2103),("meetings",126,None),("assistant",127,11),("assistant-history",127,12),("assistant-history-delete",127,12),("assistant-settings",127,13)]:
         if name=="calls":
             account=u.FindWindowExW(root,None,"LumaAccountPage",None)
-            u.SendMessageW(account,0x111,2172,0)
+            u.SendMessageW(account,0x111,2173,0)
             auth_fixture.login(root)
             requested_size()
         u.SendMessageW(root,0x111,control,0);time.sleep(.5)
@@ -84,7 +84,16 @@ try:
             while panel and not (u.GetWindowLongW(panel,-16)&0x10000000):panel=u.FindWindowExW(root,panel,"LumaSessionAi",None)
             assert panel and u.GetDlgItem(panel,subpage),"AI subpage not present in this build"
             if name in ('account-recovery','account-more'):u.SendMessageW(panel,0x111,2172,0)
+            if name=='account-sms-code':
+                # The isolated fixture returns the same response for an unlinked number.
+                # Capture the real progressive code stage, without fabricating an MFA prompt.
+                phone=c.create_unicode_buffer('+14155552670')
+                u.SendMessageW(u.GetDlgItem(panel,2120),0xC,0,c.cast(phone,c.c_void_p).value)
             u.SendMessageW(panel,0x111,subpage,0);time.sleep(.2)
+            if name=='account-sms-code':
+                deadline=time.monotonic()+10
+                while not u.GetWindowLongW(u.GetDlgItem(panel,2121),-16)&0x10000000 and time.monotonic()<deadline:time.sleep(.05)
+                assert u.GetWindowLongW(u.GetDlgItem(panel,2121),-16)&0x10000000,'SMS code stage missing'
             if name == 'assistant-history-delete':
                 u.SendMessageW(panel, 0x111, 36, 0);time.sleep(.1)
             if name == 'account-delete':

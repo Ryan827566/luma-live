@@ -211,6 +211,14 @@ int main() {
     const auto phoneLoginCode=ExtractAfter(
         phoneCodeRequest.message,"SMS login code="," challenge=");
     assert(!phoneLoginChallenge.empty()&&!phoneLoginCode.empty());
+    const auto needsMfa=alicePhone->LoginWithPhoneCode(
+        phoneLoginChallenge,phoneLoginCode,"alice-phone","Alice Phone","");
+    assert(!needsMfa.success&&needsMfa.code=="mfa_required");
+    assert(!alicePhone->IsAuthenticated()&&alicePhone->Session().token.empty());
+    const auto badMfa=alicePhone->LoginWithPhoneCode(
+        phoneLoginChallenge,phoneLoginCode,"alice-phone","Alice Phone","not-a-valid-mfa-code");
+    assert(!badMfa.success&&badMfa.code=="invalid_mfa_code");
+    assert(!alicePhone->IsAuthenticated());
     assert(alicePhone->LoginWithPhoneCode(
         phoneLoginChallenge,phoneLoginCode,
         "alice-phone","Alice Phone",recovery_code).success);
@@ -226,7 +234,26 @@ int main() {
             totp_secret,
             std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count())).success==false);
+    // Advance the injected test clock beyond the real per-number resend throttle.
+    clock_offset=61;
+    const auto retryRequest=alicePhone->RequestPhoneLoginCode(phone);
+    assert(retryRequest.success);
+    const auto retryChallenge=ExtractAfter(retryRequest.message,"challenge="," expires=");
+    const auto retryCode=ExtractAfter(retryRequest.message,"SMS login code="," challenge=");
+    // A missing factor does not spend the attempt budget; wrong supplied factors do.
+    for(int attempt=0;attempt<6;++attempt){
+        const auto prompt=alicePhone->LoginWithPhoneCode(retryChallenge,retryCode,"retry","Retry","");
+        assert(!prompt.success&&prompt.code=="mfa_required");
+    }
+    for(int attempt=0;attempt<5;++attempt){
+        const auto rejected=alicePhone->LoginWithPhoneCode(retryChallenge,retryCode,"retry","Retry","invalid-mfa");
+        assert(!rejected.success&&rejected.code=="invalid_mfa_code");
+    }
+    const auto exhausted=alicePhone->LoginWithPhoneCode(retryChallenge,retryCode,"retry","Retry",recovery_code_2);
+    assert(!exhausted.success&&exhausted.code=="invalid_token");
+    assert(!alicePhone->IsAuthenticated());
     alicePhone->Stop();
+    clock_offset=0;
 
     assert(!alice->Login(
         "alice.test","correct horse","alice-pc","Alice PC").success);

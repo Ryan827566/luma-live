@@ -1,4 +1,10 @@
-# Latest checkpoint: real local account path passed (2026-10-17)
+# Latest checkpoint: one-click local startup and corrected SMS flow (2026-10-18)
+
+Root `Start-LumaLive.cmd` now starts/checks this project's PostgreSQL/TLS account deployment and opens the correct production client with isolated local connection settings. `启动说明.md` explains registration and email/password login. The latest actual EXE passed all27 unified checks/675 layout states, plus real PostgreSQL/TLS registration and email/password login into the workspace, logout and client restart/re-login. Three launcher checks cover inherited-environment isolation and startup failure reporting.
+
+SMS entrance clutter is removed, number edits and failed resends preserve the correct challenge state, and progressive SMS MFA no longer invalidates the SMS code before the user can supply the second factor. Real email/SMS delivery is still disabled pending provider configuration; it is not needed for ordinary registration/email-password login. See login-acceptance.md for the exact binary hash and reports. Backup/recovery, certificate renewal and physical UI acceptance remain next deployment work; video/meeting/global-AI completion and broadcasting priority are unchanged.
+
+# Earlier checkpoint: real local account path passed (2026-10-17)
 
 Production TLS account service is now running at127.0.0.1:9100 against the real PostgreSQL instance15432/luma_auth. The actual GUI passed registration, persisted verifier/salt, login/workspace identity, logout, service restart/re-login and deletion of the generated test account. See local-account-deployment.md and output/local-account-verification.json. This supersedes earlier statements that no backend was running. Session tokens remain in memory; restart requires sign-in.
 

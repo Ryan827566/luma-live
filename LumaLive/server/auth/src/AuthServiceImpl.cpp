@@ -1614,6 +1614,11 @@ private:
             const std::string mfa_code=p.fields.size()==5?p.fields[4]:"";
             bool recovery_used=false;
             if(it->second.mfa_enabled){
+                // Reveal the second factor only after a valid SMS code. Asking
+                // for it is not a failed attempt and must not consume that code.
+                if(mfa_code.empty()){
+                    bad("mfa_required","MFA code required");return;
+                }
                 bool mfa_ok=false;
                 if(!mfa_code.empty()&&!it->second.mfa_recovery_hash.empty()){
                     recovery_used=recovery_hash_matches_any(it->second.mfa_recovery_hash,mfa_code);
@@ -1626,9 +1631,11 @@ private:
                     }catch(...){mfa_ok=false;}
                 }
                 if(!mfa_ok){
-                    phone_challenges_.erase(challenge_it);
+                    if(challenge.attempts_remaining>0)--challenge.attempts_remaining;
+                    if(challenge.attempts_remaining==0)phone_challenges_.erase(challenge_it);
+                    else challenge_it->second=challenge;
                     AppendAudit(user_id,"phone_login_failure","invalid MFA code");
-                    bad("invalid_credentials","invalid MFA code");return;
+                    bad("invalid_mfa_code","invalid MFA code");return;
                 }
             }
 

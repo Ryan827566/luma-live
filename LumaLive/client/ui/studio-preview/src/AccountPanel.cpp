@@ -74,7 +74,8 @@ const wchar_t* SuccessLabel(Action action) {
     case Action::Register:return UiLabel(L"账户创建成功，请使用新账户登录。",L"Your account is ready. Sign in to continue.");
     case Action::RequestReset:return UiLabel(L"如账户存在，请查收重置邮件。",L"If the account exists, check your email for a reset code.");
     case Action::RequestEmail:return UiLabel(L"验证邮件已发送，请输入邮件中的验证码。",L"Verification email sent. Enter the code from your email.");
-    case Action::RequestPhone:case Action::PhoneCode:return UiLabel(L"短信已发送，请输入收到的验证码。",L"Text message sent. Enter the code you receive.");
+    case Action::RequestPhone:return UiLabel(L"短信已发送，请输入收到的验证码。",L"Text message sent. Enter the code you receive.");
+    case Action::PhoneCode:return UiLabel(L"如该手机号已绑定账户，请查收登录验证码。",L"If this phone number is linked to an account, check for a sign-in code.");
     case Action::Logout:return UiLabel(L"已退出登录。",L"You are signed out.");
     case Action::Delete:return UiLabel(L"账户已删除。",L"Your account has been deleted.");
     case Action::Password:case Action::Reset:return UiLabel(L"密码已更新，请重新登录。",L"Password updated. Sign in again.");
@@ -106,7 +107,7 @@ std::wstring EventText(const contracts::auth::SecurityEvent& event){
 }
 struct Snapshot {
     Action action{};Result result;bool connected{},authenticated{};std::wstring settingsError;
-    std::string connectedHost;std::uint16_t connectedPort{};
+    std::string connectedHost,requestedPhone;std::uint16_t connectedPort{};
     std::int64_t expires_at_epoch_seconds{};
     contracts::auth::UserProfile profile;contracts::auth::SecuritySummary security;
     std::vector<contracts::auth::DeviceSession> sessions;
@@ -195,8 +196,10 @@ struct AccountPanel::Impl {
             if(section==0){Field(0,UiLabel(L"用户名或邮箱",L"Username or email"));Field(1,UiLabel(L"密码",L"Password"),L"",true);Buttons(Action::Login,UiLabel(L"登录",L"Sign in"));}
             else{Field(0,UiLabel(L"手机号",L"Phone number"));ShowWindow(country,SW_SHOW);if(smsCode)Field(1,UiLabel(L"短信验证码",L"Text message code"));Buttons(smsCode?Action::PhoneLogin:Action::None,UiLabel(L"登录",L"Sign in"),Action::PhoneCode,smsCode?UiLabel(L"重新发送",L"Resend code"):UiLabel(L"获取验证码",L"Send code"));}
             if(showMfa)Field(2,UiLabel(L"双重验证码或恢复码",L"Two-step or recovery code"));
-            for(int i:{0,1,6})ShowWindow(links[i],SW_SHOW);
-            ShowWindow(links[3],showMethods?SW_SHOW:SW_HIDE);ShowWindow(links[4],showMethods&&!showMfa?SW_SHOW:SW_HIDE);
+            if(section==0){
+                for(int i:{0,1,6})ShowWindow(links[i],SW_SHOW);
+                ShowWindow(links[3],showMethods?SW_SHOW:SW_HIDE);ShowWindow(links[4],showMethods&&!showMfa?SW_SHOW:SW_HIDE);
+            }else ShowWindow(links[3],SW_SHOW);
             SetWindowTextW(links[3],section==0?UiLabel(L"短信登录",L"Text message sign-in"):UiLabel(L"密码登录",L"Password sign-in"));break;
         case Page::Register:
             Field(0,UiLabel(L"用户名",L"Username"));Field(1,UiLabel(L"邮箱",L"Email"));Field(3,UiLabel(L"密码",L"Password"),L"",true);Field(4,UiLabel(L"确认密码",L"Confirm password"),L"",true);Buttons(Action::Register,UiLabel(L"注册",L"Register"));ShowWindow(links[2],SW_SHOW);break;
@@ -245,7 +248,7 @@ struct AccountPanel::Impl {
             formWidth=std::min(320,std::max(1,width-48));formX=(width-formWidth)/2;
             const int pitch=60;
             const bool phone=page==Page::Login&&section==1;
-            const int footer=page==Page::Login?(showMethods?100:68):(page==Page::Recovery&&!resetCode?68:36);
+            const int footer=page==Page::Login?(phone?36:(showMethods?100:68)):(page==Page::Recovery&&!resetCode?68:36);
             int noticeHeight=24;
             if(!statusText.empty()){
                 auto dc=GetDC(status);auto old=SelectObject(dc,body);RECT measured{0,0,S(formWidth),0};
@@ -276,6 +279,7 @@ struct AccountPanel::Impl {
             Move(links[2],formX,linkY,formWidth,28);Move(links[5],formX,linkY+32,formWidth,28);
             Move(links[6],formX,linkY+32,formWidth,28);
             Move(links[3],formX,linkY+64,half,28);Move(links[4],formX+half+8,linkY+64,half,28);
+            if(phone)Move(links[3],formX,linkY,formWidth,28);
             if(page==Page::Recovery&&!resetCode){Move(links[5],formX,linkY,formWidth,28);Move(links[2],formX,linkY+32,formWidth,28);}
             InvalidateRect(window,nullptr,TRUE);return;
         }
@@ -321,6 +325,20 @@ struct AccountPanel::Impl {
         SetWindowTextW(status,statusText.c_str());InvalidateRect(status,nullptr,TRUE);
     }
     void Notice(const wchar_t* text,bool failure=false){statusText=text;error=failure;SetWindowTextW(status,statusText.c_str());ShowWindow(status,statusText.empty()?SW_HIDE:SW_SHOW);if(!state.authenticated)Layout();InvalidateRect(status,nullptr,TRUE);}
+    std::string LoginPhoneNumber()const{
+        const auto selected=SendMessageW(country,CB_GETCURSEL,0,0);
+        const auto number=NormalizePhoneNumber(Text(fields[0]),selected>=0&&size_t(selected)<regions.size()?regions[selected].prefix:L"");
+        return UiUtf8(number.c_str());
+    }
+    void ResetSmsCode(){
+        smsCode=false;showMfa=false;phoneChallenge.clear();phoneNumber.clear();
+        for(int i:{1,2}){SetWindowTextW(fields[i],L"");secrets[i]=false;ShowWindow(fields[i],SW_HIDE);ShowWindow(labels[i],SW_HIDE);}
+        fieldCount=1;Buttons(Action::None,UiLabel(L"登录",L"Sign in"),Action::PhoneCode,UiLabel(L"获取验证码",L"Send code"));
+        Notice(L"");
+    }
+    void PhoneEdited(){
+        if(!busy&&!state.authenticated&&page==Page::Login&&section==1&&smsCode&&LoginPhoneNumber()!=phoneNumber)ResetSmsCode();
+    }
     void Entrance(Page next){page=next;section=0;showMfa=false;showMethods=false;resetCode=false;smsCode=false;phoneChallenge.clear();Notice(L"");Configure();SetFocus(fields[0]);}
     bool CancelPending(){if(pending==Action::None){if(!state.authenticated&&!busy&&page!=Page::Login){Entrance(Page::Login);return true;}return false;}pending=Action::None;pendingDevice.clear();ShowWindow(confirm,SW_HIDE);ShowWindow(cancel,SW_HIDE);Notice(UiLabel(L"已取消。",L"Cancelled."));Enable();SetFocus(thirdAction==Action::Delete?third:secondary);return true;}
     bool Required(int i){if(Text(fields[i]).empty()){Notice(UiLabel(L"请填写必填信息。",L"Complete the required fields."),true);SetFocus(fields[i]);return false;}return true;}
@@ -346,10 +364,9 @@ struct AccountPanel::Impl {
             values[2]=values[0];
         }
         if(action==Action::PhoneCode||action==Action::PhoneLogin){
-            const auto selected=SendMessageW(country,CB_GETCURSEL,0,0);
-            const auto number=NormalizePhoneNumber(Text(fields[0]),selected>=0&&size_t(selected)<regions.size()?regions[selected].prefix:L"");
+            const auto number=LoginPhoneNumber();
             if(number.empty()){Notice(UiLabel(L"请选择国家区号并输入有效的手机号。",L"Choose a calling code and enter a valid phone number."),true);SetFocus(fields[0]);return;}
-            values[0]=UiUtf8(number.c_str());
+            values[0]=number;
         }
         if((action==Action::Register&&values[3]!=values[4])||(action==Action::Reset&&values[2]!=values[3])||(action==Action::Password&&values[1]!=values[2])){Notice(UiLabel(L"两次输入的密码不一致。",L"The passwords do not match."),true);return;}
         if(action==Action::Connect){
@@ -361,14 +378,15 @@ struct AccountPanel::Impl {
         const auto challengeNumber=action==Action::PhoneLogin?phoneNumber:verifyNumber;
         if((action==Action::PhoneLogin||action==Action::VerifyPhone)&&(challenge.empty()||values[0]!=challengeNumber||!required({0,1}))){Notice(UiLabel(L"请为当前手机号重新获取验证码，再输入收到的代码。",L"Request a code for this phone number, then enter the code you receive."),true);return;}
         const std::string device=action==Action::Revoke?pendingDevice:std::string{};pendingDevice.clear();
-        if(action==Action::PhoneCode){phoneNumber=values[0];phoneChallenge.clear();}if(action==Action::RequestPhone){verifyNumber=values[0];verifyChallenge.clear();}
+        // A rejected resend must leave the previous, still-valid login code usable.
+        if(action==Action::RequestPhone){verifyNumber=values[0];verifyChallenge.clear();}
         busy=true;Notice(UiLabel(L"正在处理，请稍候…",L"Working. Please wait…"));Enable();
         // Keep a masked password while a second-factor prompt is being resolved.
         // Configure clears every field on page changes, sign-in success and sign-out.
         for(int i=0;i<6;++i)if(secrets[i]&&action!=Action::Login)SetWindowTextW(fields[i],L"");
         auto shared=worker;const auto address=action==Action::Connect?values[0]:host;const auto servicePort=action==Action::Connect?static_cast<std::uint16_t>(std::stoul(values[1])):port;
         try{std::thread([shared,action,address,servicePort,values=std::move(values),challenge,device]()mutable{
-            Snapshot out;out.action=action;auto& s=*shared->service;
+            Snapshot out;out.action=action;if(action==Action::PhoneCode)out.requestedPhone=values[0];auto& s=*shared->service;
             try{
                 Result result{true,{}};
                 if(action!=Action::Logout&&(action==Action::Connect||!s.IsRunning()))result=s.Connect(address,servicePort);
@@ -447,15 +465,26 @@ struct AccountPanel::Impl {
             if(action==Action::Connect&&!state.settingsError.empty())Notice((std::wstring(SuccessLabel(action))+L" "+state.settingsError).c_str(),true);
             else Notice(SuccessLabel(action));
             if(action==Action::Events)RefreshDetail();
-            if(action==Action::PhoneCode){phoneChallenge=Part(message,"challenge="," expires=");smsCode=true;if(!(GetWindowLongPtrW(fields[1],GWL_STYLE)&WS_VISIBLE))Field(1,UiLabel(L"短信验证码",L"Text message code"));Buttons(Action::PhoneLogin,UiLabel(L"登录",L"Sign in"),Action::PhoneCode,UiLabel(L"重新发送",L"Resend code"));Layout();SetFocus(fields[1]);}
+            if(action==Action::PhoneCode){
+                phoneChallenge=Part(message,"challenge="," expires=");phoneNumber=state.requestedPhone;smsCode=true;
+                if(!(GetWindowLongPtrW(fields[1],GWL_STYLE)&WS_VISIBLE))Field(1,UiLabel(L"短信验证码",L"Text message code"));
+                else SetWindowTextW(fields[1],L"");
+                if(showMfa){showMfa=false;--fieldCount;SetWindowTextW(fields[2],L"");ShowWindow(fields[2],SW_HIDE);ShowWindow(labels[2],SW_HIDE);}
+                Buttons(Action::PhoneLogin,UiLabel(L"登录",L"Sign in"),Action::PhoneCode,UiLabel(L"重新发送",L"Resend code"));Layout();SetFocus(fields[1]);
+            }
             if(action==Action::RequestPhone)verifyChallenge=Part(message,"challenge="," expires=");
             if(action==Action::RequestReset&&!resetCode){resetCode=true;Configure();Notice(SuccessLabel(action));SetFocus(fields[1]);}
             if(action==Action::EnableMfa){Configure();std::wstring text=UiLabel(L"身份验证器密钥\r\n",L"Authenticator key\r\n")+Wide(Part(message,"TOTP secret=","; otpauth="))+L"\r\n\r\n"+UiLabel(L"恢复码（妥善保存）\r\n",L"Recovery codes (keep safe)\r\n")+Wide(Part(message,"recovery codes=","; TOTP secret="));SetWindowTextW(detail,text.c_str());UpdateTranscriptScrollbar(detail);if(IsWindowVisible(window))SetFocus(detail);}
         }else {
+            if(action==Action::PhoneLogin&&(state.result.code=="invalid_token"||state.result.code=="verification_expired")){
+                ResetSmsCode();SetFocus(fields[0]);
+            }
             if(page==Page::Login&&!showMfa&&(state.result.code=="mfa_required"||message.find("MFA")!=std::string::npos)){
                 showMfa=true;Field(2,UiLabel(L"双重验证码或恢复码",L"Two-step or recovery code"));ShowWindow(links[4],SW_HIDE);Layout();SetFocus(fields[2]);
             }
-            if(action==Action::Register&&state.result.code=="already_exists")Notice(UiLabel(L"用户名或邮箱已被注册，可返回登录或找回密码。",L"That username or email is registered. Sign in or reset your password."),true);
+            if(action==Action::PhoneLogin&&(state.result.code=="mfa_required"||message.find("MFA")!=std::string::npos))Notice(ErrorLabel("mfa_required"),true);
+            else if(action==Action::PhoneLogin&&state.result.code=="invalid_credentials")Notice(UiLabel(L"短信验证码不正确，请检查后重试。",L"The text message code is incorrect. Check it and try again."),true);
+            else if(action==Action::Register&&state.result.code=="already_exists")Notice(UiLabel(L"用户名或邮箱已被注册，可返回登录或找回密码。",L"That username or email is registered. Sign in or reset your password."),true);
             else Notice(ErrorLabel(state.result.code.empty()?message:state.result.code),true);
         }
         if(!message.empty())SecureZeroMemory(message.data(),message.size());Enable();InvalidateRect(window,nullptr,FALSE);
@@ -505,12 +534,13 @@ struct AccountPanel::Impl {
         case WM_SIZE:Layout();return 0;
         case WM_TIMER:Poll();return 0;
         case WM_COMMAND:{const int id=LOWORD(w);
+            if((id==FieldBase&&HIWORD(w)==EN_CHANGE)||(id==Country&&HIWORD(w)==CBN_SELCHANGE)){PhoneEdited();return 0;}
             if(id>=RegisterLink&&id<=MoreLink&&HIWORD(w)==BN_CLICKED&&!busy&&!state.authenticated){
                 if(!(GetWindowLongPtrW(links[id-RegisterLink],GWL_STYLE)&WS_VISIBLE))return 0;
                 if(id==RegisterLink)Entrance(Page::Register);
                 if(id==RecoveryLink)Entrance(Page::Recovery);
                 if(id==BackLink)Entrance(Page::Login);
-                if(id==MethodLink){section=section==0?1:0;showMfa=false;smsCode=false;phoneChallenge.clear();Notice(L"");Configure();SetFocus(fields[0]);}
+                if(id==MethodLink){section=section==0?1:0;showMethods=false;showMfa=false;smsCode=false;phoneChallenge.clear();phoneNumber.clear();Notice(L"");Configure();SetFocus(fields[0]);}
                 if(id==MfaLink&&!showMfa){showMfa=true;Field(2,UiLabel(L"双重验证码或恢复码",L"Two-step or recovery code"));ShowWindow(links[4],SW_HIDE);Layout();SetFocus(fields[2]);}
                 if(id==ResetCodeLink){resetCode=true;Notice(L"");Configure();SetFocus(fields[1]);}
                 if(id==MoreLink){showMethods=!showMethods;ShowWindow(links[3],showMethods?SW_SHOW:SW_HIDE);ShowWindow(links[4],showMethods&&!showMfa?SW_SHOW:SW_HIDE);Layout();}

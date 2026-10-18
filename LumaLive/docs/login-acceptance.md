@@ -1,5 +1,17 @@
 # Account page and authentication acceptance
 
+## 2026-10-18: local launcher, email login and focused SMS flow
+
+Double-click the repository-root `Start-LumaLive.cmd` to start/check PostgreSQL and the TLS account service and open the actual production client. It uses a project-local endpoint file and removes inherited test/TLS overrides from the child process. Service preparation/readiness errors and immediate nonzero client exits keep the command window open with an error. Root `启动说明.md` documents registration and **email + password** login; real email/SMS delivery still requires provider configuration.
+
+SMS sign-in now shows only calling code/phone number, Send code and Password sign-in. A successful request reveals the SMS code and sign-in/resend actions. Register, password recovery, more-options and manual MFA links are absent from this flow. Editing to a different normalized phone number clears the old code and returns to the first step; equivalent formatting retains it. A rejected resend preserves the outstanding challenge. Request acknowledgements use conditional wording because the protocol intentionally hides unknown phone numbers and provider rejection.
+
+MFA appears only after the server requests it for a valid SMS code. Missing MFA no longer consumes the SMS challenge; wrong supplied factors use the existing shared five-attempt budget, and a correct recovery code is still one-use. Native regression advances the injected test clock for the second SMS request, preserving production resend throttling.
+
+Verification on actual `output/next/Release/luma_studio.exe`, SHA256 `5577a41e560fcafbead23d012fac6057ba41b3bdf338aac0df7740587b00a610`: all **27** unified checks passed, including **675** native entrance/layout states and GUI SMS/IME-Enter/number-edit/throttled-resend/MFA flows. Three launcher checks passed for environment isolation, fail-closed readiness and immediate client failure. Real PostgreSQL + TLS GUI acceptance separately passed registration, email/password sign-in and workspace identity, logout, client restart/email re-login, and deletion of only the generated test account (`output/local-account-email-verification.json`). The account service remains running. Current UI captures: `output/ui-sms-20261018/zh-CN` (isolated UI fixtures, not proof of real SMS delivery). Actual supplier delivery, physical IME/Narrator/multimonitor and successful resend after a real 60-second interval remain outside this run.
+
+Earlier sections below are dated history; use this checkpoint and `local-account-deployment.md` for current startup instructions and deployment boundaries.
+
 ## Delivery scope (2026-10-13)
 
 Development now takes place on `main`, at the user's request. The complete video/AI branch and account-registration branch were merged, preserving both histories. The original local index and changed files were backed up before reconciling the working copy to main.
