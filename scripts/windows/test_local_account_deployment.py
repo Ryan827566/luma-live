@@ -1,4 +1,4 @@
-"""Opt-in real local deployment acceptance; restarts the managed account service.
+"""Opt-in real local deployment acceptance, with optional service restart.
 
 Creates one uniquely named test account through the actual GUI, verifies database
 persistence and deletes that account through the GUI. Never uses a memory fixture.
@@ -17,13 +17,15 @@ import time
 from workspace_auth_fixture import u,wait
 import manage_account_service as service
 import bootstrap_local_postgres as pg
+from start_local_lumalive import client_environment
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--allow-service-restart',action='store_true')
+    mode=parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--allow-service-restart',action='store_true')
+    mode.add_argument('--keep-service-running',action='store_true',help='Verify registration and email login without restarting the service')
     args=parser.parse_args()
-    if not args.allow_service_restart:parser.error('This acceptance requires --allow-service-restart')
     binary=service.BIN/'luma_studio.exe'
     username='deploy.'+secrets.token_hex(6)
     password=secrets.token_urlsafe(24)
@@ -40,19 +42,18 @@ def main():
         return pg.query(sql,pg.read_credentials()['app_password'],user=pg.APPLICATION,database=pg.DATABASE)
     service.start()
     evidence={'client_sha256':hashlib.sha256(binary.read_bytes()).hexdigest(),'transport':'TLS',
-              'storage':'PostgreSQL','checks':[]}
+              'storage':'PostgreSQL','service_restarted':args.allow_service_restart,'checks':[]}
     with tempfile.TemporaryDirectory(prefix='luma-production-ui-') as temporary:
         profile=Path(temporary)
-        config=profile/'account.conf';config.write_text(f'LumaLiveAccountConnection 1\nhost=127.0.0.1\nport={service.PORT}\n')
-        env={k.upper():v for k,v in os.environ.items() if not k.upper().startswith('LUMALIVE_AUTH_')}
-        env.update(LUMALIVE_AUTH_ENV='production',LUMALIVE_UI_LANGUAGE='en-US',LOCALAPPDATA=str(profile),LUMALIVE_ACCOUNT_SETTINGS_PATH=str(config))
+        env=client_environment()
+        env.update(LUMALIVE_UI_LANGUAGE='en-US',LOCALAPPDATA=str(profile))
         # No explicit CA/library override: validate the same adjacent package used
         # when the user double-clicks the production executable.
-        for phase in ('register','restart-login'):
-            if phase=='restart-login':
-                service.stop();service.start()
+        for phase in ('register','relogin'):
+            if phase=='relogin':
+                if args.allow_service_restart:service.stop();service.start()
                 assert query(f"SELECT count(*) FROM luma_auth_users WHERE username='{username}';")=='1'
-                evidence['checks'].append('account retained after real service restart')
+                evidence['checks'].append('account retained after '+('real service restart' if args.allow_service_restart else 'client restart'))
             start=subprocess.STARTUPINFO();start.dwFlags=subprocess.STARTF_USESHOWWINDOW;start.wShowWindow=0
             process=subprocess.Popen([str(binary)],env=env,startupinfo=start)
             root=None
@@ -81,12 +82,12 @@ def main():
                     assert query(f"SELECT count(*) FROM luma_auth_users WHERE username='{username}' AND length(password_verifier)>0 AND length(password_salt)>0;")=='1'
                     evidence['checks'].append('GUI registration saved verifier and salt to PostgreSQL')
                     click(2172)
-                put(control(2120),username);put(control(2121),password);click(2160);complete('signed in')
+                put(control(2120),email);put(control(2121),password);click(2160);complete('signed in')
                 wait(lambda:u.GetWindowLongW(u.GetDlgItem(root,117),-16)&0x10000000,'Authenticated workspace remained locked')
                 assert text(u.GetDlgItem(root,129))==username
-                evidence['checks'].append(phase+': GUI login unlocked workspace and displayed account identity')
+                evidence['checks'].append(phase+': GUI email/password login unlocked workspace and displayed account identity')
                 u.SendMessageW(root,0x111,129,0)
-                if phase=='restart-login':
+                if phase=='relogin':
                     click(2162);click(2166);complete('account has been deleted')
                     assert query(f"SELECT count(*) FROM luma_auth_users WHERE username='{username}';")=='0'
                     evidence['checks'].append('GUI deletion removed only the generated test account')
@@ -100,7 +101,8 @@ def main():
                 except subprocess.TimeoutExpired:process.terminate();process.wait();raise
     evidence['service_left_running']=service.ready()
     assert evidence['service_left_running']
-    (pg.ROOT/'output/local-account-verification.json').write_text(json.dumps(evidence,indent=2),encoding='utf-8')
+    report='local-account-verification.json' if args.allow_service_restart else 'local-account-email-verification.json'
+    (pg.ROOT/'output'/report).write_text(json.dumps(evidence,indent=2),encoding='utf-8')
     print(json.dumps(evidence,indent=2))
 
 

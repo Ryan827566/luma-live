@@ -1,5 +1,11 @@
 # 本机账户服务部署与测试
 
+2026-10-18：日常使用请双击项目根目录 `Start-LumaLive.cmd`。脚本启动/检查数据库、TLS 账户服务、证书与运行库，确认就绪后打开 `output/next/Release/luma_studio.exe`。`--server-only` 只启动服务。启动失败会保留错误窗口。参见根目录 `启动说明.md`。
+
+启动器用项目内 `output/services/account/local-client.conf` 固定连接本机服务，并为本次客户端进程清理继承的测试模式和 TLS 覆盖项；不覆盖其他部署的用户连接设置。注册后用邮箱和密码登录即可进入主界面，无须先验证邮箱。真实邮件验证码/短信服务仍未配置，不能把邮箱密码登录等同于真实邮件投递。
+
+`scripts/windows/test_local_account_deployment.py --keep-service-running` 可验证真实 GUI 注册、邮箱密码登录解锁工作区、退出、客户端重开后邮箱登录、删除本次测试账户，不重启服务。报告 `output/local-account-email-verification.json`。原 `--allow-service-restart` 保留真实服务重启验收。
+
 2026-10-17：正式程序已在这台 Windows 电脑上完成真实注册、登录及重启后登录验收。该部署仅供本机使用，不是公网部署。
 
 | 项目 | 当前实际配置 |
