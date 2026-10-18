@@ -1,5 +1,43 @@
 # 本机账户服务部署与测试
 
+## 账户在线备份与隔离恢复演练（2026-10-18）
+
+账户服务运行时，双击根目录 `Backup-LumaLive.cmd`。无需关闭客户端或退出登录。
+脚本在固定的本机受管集群中导出账户表、安全活动表及其表结构/索引，使用当前 Windows 用户 DPAPI 加密，
+再从该密文恢复到独立、随机命名的临时数据库。恢复角色没有生产库写入权限。
+只有行数、逐行内容摘要和表结构摘要全部与导出时同一个只读快照一致，且临时库/角色清理成功后，
+备份目录才从 `.partial` 原子发布为成功备份。备份期间正常账户写入不会混入旧快照。
+
+成功目录在 `output/services/account-backups/<备份 ID>`，仅当前用户/SYSTEM 可访问，包含：
+
+- `accounts.dump.dpapi`：加密的 PostgreSQL 自定义格式归档；包含密码验证材料及 MFA 密钥等敏感账户字段。
+- `manifest.json`：来源集群、格式、校验和、快照摘要；不含密码、连接串或账户明细。
+- `verification.json`：恢复验证时间、一致性结果与临时资源清理结果。
+
+也可以在项目根目录执行：
+
+```powershell
+C:/Python314/python.exe -B scripts/windows/manage_account_backup.py create
+C:/Python314/python.exe -B scripts/windows/manage_account_backup.py verify --backup-id <完整备份ID>
+```
+
+`verify` 会重新解密、恢复及校验已有备份。它只接受本项目的备份 ID，不能指定生产库为恢复目标；
+不替换现有库、不停止服务、不终止现有连接。归档损坏或来源身份不符时，在创建恢复库前失败。
+备份/验证任务互斥；等待锁和 SQL 执行均有期限。若临时库有额外连接或身份变化，清理会失败并报告名称，
+不会强制删除。失败的 `.partial` 目录不算已验证备份，正常异常路径会删除临时明文文件。
+
+本轮已对真实本机账户数据完成加密备份和隔离恢复验证；独立 fixture 还验证了快照期间并发 UPDATE、
+DPAPI 往返、表结构/数据摘要及临时资源清理，报告 `output/account-backup-integration.json`。
+11 项失败边界单测覆盖损坏归档、跨部署/路径拒绝、恢复失败、清理失败、未验证备份不发布及加密大小边界。
+
+**范围边界：** 当前仅覆盖 `luma_auth_users` 和 `luma_auth_security_events` 两张表及其结构，明文归档上限 256 MiB。
+不备份进程内会话/验证码、TLS 私钥、投递配置或 PostgreSQL 管理凭据，也不做定时备份/自动保留清理。
+DPAPI 与当前 Windows 用户保护上下文绑定，校验器还限定原集群身份；不能凭此文件单独恢复到新电脑/新用户。
+本机同盘副本不防磁盘损坏。断电后的临时明文残留清理、异机灾难恢复、正式库切换/回滚、自动备份保留策略
+仍待交付，不应把这次隔离恢复演练描述为完整灾难恢复验收。
+
+## 日常启动
+
 2026-10-18：日常使用请双击项目根目录 `Start-LumaLive.cmd`。脚本启动/检查数据库、TLS 账户服务、证书与运行库，确认就绪后打开 `output/next/Release/luma_studio.exe`。`--server-only` 只启动服务。启动失败会保留错误窗口。参见根目录 `启动说明.md`。
 
 启动器用项目内 `output/services/account/local-client.conf` 固定连接本机服务，并为本次客户端进程清理继承的测试模式和 TLS 覆盖项；不覆盖其他部署的用户连接设置。注册后用邮箱和密码登录即可进入主界面，无须先验证邮箱。真实邮件验证码/短信服务仍未配置，不能把邮箱密码登录等同于真实邮件投递。
@@ -43,7 +81,7 @@ C:/Python314/python.exe scripts/windows/manage_account_service.py restart
 
 `start` 检查数据库、证书、客户端信任文件和 OpenSSL 库，并可重复执行。后台管理程序通过独有事件通知自己创建的服务停止，Job 对象防止管理程序退出后遗留子进程；不根据保存的 PID 杀进程。重启会使现有会话失效。
 
-本机证书初次生成/检查使用已安装 Git 中的 OpenSSL 命令行工具，运行时使用已校验 PostgreSQL 包中的 OpenSSL 3 DLL。服务器证书有效期一年，启动前检查至少剩余一天；自动证书轮换、无人登录的 Windows 服务安装、备份恢复演练仍未交付。
+本机证书初次生成/检查使用已安装 Git 中的 OpenSSL 命令行工具，运行时使用已校验 PostgreSQL 包中的 OpenSSL 3 DLL。服务器证书有效期一年，启动前检查至少剩余一天；自动证书轮换、无人登录的 Windows 服务安装和完整灾难恢复仍未交付。账户在线备份与隔离恢复演练见本文开头。
 
 日志：`output/services/account/{service,supervisor}.log`。不要分享 `credentials.dpapi`、`providers.dpapi` 或 TLS 私钥。停止服务不会删除数据库。
 

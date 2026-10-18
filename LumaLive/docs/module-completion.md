@@ -1,4 +1,10 @@
-# Latest checkpoint: one-click local startup and corrected SMS flow (2026-10-18)
+# Latest checkpoint: encrypted account backup and isolated restore (2026-10-18)
+
+Root `Backup-LumaLive.cmd` now creates an online current-user DPAPI backup of the two account tables and their schema. Publication requires an actual restore from the encrypted archive into a separate temporary database/role and matching counts, content hashes and schema hashes from the same exported snapshot. Production registration/login sessions continue; no service lifecycle or client setting is changed.
+
+Real local account backup/restore passed. Eleven failure-boundary tests and a PostgreSQL fixture drill with concurrent UPDATE passed; `output/account-backup-integration.json` records the snapshot isolation result. Cleanup failures identify remaining temporary resources without force-dropping databases. This is a same-user/same-cluster restore drill, not complete disaster recovery: cross-machine restore, live replacement/rollback, automated retention, crash cleanup, deployment-secret backup and certificate renewal remain open. The actual client binary and its prior acceptance are unchanged. See local-account-deployment.md for commands and boundaries.
+
+# Earlier checkpoint: one-click local startup and corrected SMS flow (2026-10-18)
 
 Root `Start-LumaLive.cmd` now starts/checks this project's PostgreSQL/TLS account deployment and opens the correct production client with isolated local connection settings. `启动说明.md` explains registration and email/password login. The latest actual EXE passed all27 unified checks/675 layout states, plus real PostgreSQL/TLS registration and email/password login into the workspace, logout and client restart/re-login. Three launcher checks cover inherited-environment isolation and startup failure reporting.
 

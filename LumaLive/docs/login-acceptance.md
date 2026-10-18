@@ -1,5 +1,9 @@
 # Account page and authentication acceptance
 
+## 2026-10-18: online backup acceptance boundary
+
+The two persisted account tables now have current-user encrypted online backups and isolated restore verification using the same exported snapshot. Real deployment data/schema equality and a separate concurrent-update fixture passed, alongside 11 failure-boundary checks. No client/server binary was rebuilt and no production service was restarted for this work; the GUI acceptance below remains the latest actual-EXE evidence. Complete disaster recovery, certificate renewal and real delivery-provider acceptance remain separate gates. See local-account-deployment.md for the backup scope and reports.
+
 ## 2026-10-18: local launcher, email login and focused SMS flow
 
 Double-click the repository-root `Start-LumaLive.cmd` to start/check PostgreSQL and the TLS account service and open the actual production client. It uses a project-local endpoint file and removes inherited test/TLS overrides from the child process. Service preparation/readiness errors and immediate nonzero client exits keep the command window open with an error. Root `启动说明.md` documents registration and **email + password** login; real email/SMS delivery still requires provider configuration.
