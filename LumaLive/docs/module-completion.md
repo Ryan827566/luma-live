@@ -1,4 +1,10 @@
-# Latest checkpoint: encrypted account backup and isolated restore (2026-10-18)
+# Latest checkpoint: TLS diagnostics and renewal candidates (2026-10-18)
+
+`scripts/windows/manage_account_certificates.py status` now checks CA/leaf expiry, disk certificate chain/IP/server purpose/key pairing, adjacent client trust and the served leaf under a three-second TLS/protocol deadline. The real deployment is healthy; `output/account-certificate-status.json` records the check.
+
+`stage` and `inspect` prepare/revalidate a private, same-CA renewal candidate with a new RSA3072 key and independent serial, without writing active certificate/trust/serial files or restarting services. Thirteen isolated OpenSSL/TLS tests passed, including expired old leaf, failed issuance, stale/tampered candidates, wrong key/IP/purpose, source fingerprint checks and probe timeouts; see `output/account-certificate-tests.json`. Production renewal was not staged or activated. Activation/rollback, CA rotation and unattended renewal remain open, along with the existing disaster-recovery, provider, physical UI and product capability gates. The actual EXE and its earlier acceptance remain unchanged.
+
+# Earlier checkpoint: encrypted account backup and isolated restore (2026-10-18)
 
 Root `Backup-LumaLive.cmd` now creates an online current-user DPAPI backup of the two account tables and their schema. Publication requires an actual restore from the encrypted archive into a separate temporary database/role and matching counts, content hashes and schema hashes from the same exported snapshot. Production registration/login sessions continue; no service lifecycle or client setting is changed.
 

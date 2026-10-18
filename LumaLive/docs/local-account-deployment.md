@@ -1,5 +1,44 @@
 # 本机账户服务部署与测试
 
+## TLS 到期检查与续期候选（2026-10-18）
+
+运行以下只读检查，不会启动/停止服务、改证书或修改 Windows 信任库：
+
+```powershell
+C:/Python314/python.exe -B scripts/windows/manage_account_certificates.py status
+```
+
+检查分别报告 CA、磁盘服务器证书、客户端相邻 CA 的有效期和 SHA256；验证证书链、服务器用途、
+`127.0.0.1`、服务器私钥配对，以及实际在线 TLS 证书是否与磁盘一致。在线探测使用客户端 CA，
+连接、握手及完整协议响应共用三秒总期限。默认提前 30 天提示，可指定 `--warning-days 60`。
+退出码：0 正常、1 临近到期、2 检查失败；`issues` 和 `warnings` 给出对应原因，不会自动修复或重启。
+
+本轮真实部署检查正常，报告 `output/account-certificate-status.json`。当前服务器证书到期时间为
+**2027-10-17 06:53:58（北京时间）**，当前 CA 到期时间为 **2031-10-16 06:53:57（北京时间）**；
+这两个时间仅对应本次检查的证书，以之后运行 `status` 的结果为准。
+
+需要准备续期时，可先生成一个独立候选：
+
+```powershell
+C:/Python314/python.exe -B scripts/windows/manage_account_certificates.py stage --days 365
+C:/Python314/python.exe -B scripts/windows/manage_account_certificates.py inspect --candidate-id <候选ID>
+```
+
+候选在 `output/services/account-certificate-staging/<候选ID>`，目录只允许当前用户/SYSTEM。
+它使用新的 RSA3072 私钥、现有 CA 签名和独立随机序列号；不会改动当前 CA 序列文件、服务器证书或客户端 CA。
+候选有效期为 1–365 天且必须处于 CA 有效期内。旧服务器证书过期或服务离线不妨碍生成合法候选。
+签名、证书链/IP/用途、密钥配对、有效期和来源指纹都通过检查后，目录才从 `.partial` 发布；
+`inspect` 会重新核验，拒绝被改动、已过期或因当前证书/客户端 CA 变化而过时的候选。
+候选内含私钥，不应分享；失败的 `.partial` 目录不属于已验证候选。
+
+**尚未激活：** 这两个命令只生成和检查候选，报告明确标记 `activated=false`。本轮只在隔离测试 CA 下验证续期，
+没有签发或替换真实部署证书。原子切换、重启后验证、失败回滚、CA 轮换和自动续期调度仍待实现；
+不能把候选生成视为完整证书续期交付。
+
+13 项隔离测试覆盖分片响应、总期限、错误密钥/IP/用途、来源或客户端 CA 不一致、CA 寿命不足、
+旧证书过期后生成候选、签名失败不发布、候选被改动/过时、只读检查和 OpenSSL 超时诊断。
+报告 `output/account-certificate-tests.json`。生成工具使用项目内最小 `account-openssl.cnf`，避免继承外部 OpenSSL 配置。
+
 ## 账户在线备份与隔离恢复演练（2026-10-18）
 
 账户服务运行时，双击根目录 `Backup-LumaLive.cmd`。无需关闭客户端或退出登录。

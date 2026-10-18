@@ -1,0 +1,8 @@
+# Minimal request configuration; callers supply the subject and certificate extensions.
+# Keep external machine/user OpenSSL configuration out of local certificate tooling.
+[req]
+distinguished_name = subject
+prompt = no
+
+[subject]
+CN = LumaLive Local Account

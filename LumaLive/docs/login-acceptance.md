@@ -1,5 +1,9 @@
 # Account page and authentication acceptance
 
+## 2026-10-18: TLS diagnostics and candidate boundary
+
+Read-only real-deployment TLS diagnostics passed: disk/served leaf and adjacent client CA match, with valid chain/IP/server purpose/key pairing. Thirteen isolated certificate tests passed for renewal candidate creation and failure handling. No production certificate was staged/activated, no service was restarted and no EXE was rebuilt. These results establish diagnostics and candidate preparation, not renewal activation/rollback or fresh GUI acceptance. See local-account-deployment.md and `output/account-certificate-{status,tests}.json`.
+
 ## 2026-10-18: online backup acceptance boundary
 
 The two persisted account tables now have current-user encrypted online backups and isolated restore verification using the same exported snapshot. Real deployment data/schema equality and a separate concurrent-update fixture passed, alongside 11 failure-boundary checks. No client/server binary was rebuilt and no production service was restarted for this work; the GUI acceptance below remains the latest actual-EXE evidence. Complete disaster recovery, certificate renewal and real delivery-provider acceptance remain separate gates. See local-account-deployment.md for the backup scope and reports.
