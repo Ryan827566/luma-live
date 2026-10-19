@@ -1,5 +1,11 @@
 # Account page and authentication acceptance
 
+## 2026-10-20: service shutdown acknowledgement boundary
+
+Fourteen isolated service-control tests passed after replacing state-file-based stop completion with Windows ownership release and port-vacancy checks. Fixtures run the actual Python supervisor/Windows Job with the in-memory account executable, including accepted connections held open during stop or closed beforehand; remaining cases exercise startup delays, missing metadata, owner abandonment, timeouts and foreign listeners. See `output/account-service-control-tests.json` and local-account-deployment.md.
+
+No production service stop/restart, certificate change, GUI rerun or client rebuild was performed for this slice. The actual-client acceptance below remains the GUI evidence. Certificate activation/rollback and concurrent deployment-operation serialization are still open.
+
 ## 2026-10-19: successful resend after the real cooldown
 
 Actual client SHA256 `5577a41e560fcafbead23d012fac6057ba41b3bdf338aac0df7740587b00a610` passed the optional real-time resend acceptance. The test waits at least 61 seconds after consuming the initial fixture delivery, with no clock injection. In this run the measured interval was 61.001 seconds. Resend from an outstanding MFA prompt preserved the phone, cleared the SMS code, cleared/hidden MFA, and generated a new private fixture delivery. The old code failed against the new challenge; the new code required a fresh second factor and then unlocked the workspace. The full account UI workflow and cleanup also passed.

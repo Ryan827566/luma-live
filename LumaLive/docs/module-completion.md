@@ -1,4 +1,12 @@
-# Latest checkpoint: real-time SMS resend UI acceptance (2026-10-19)
+# Latest checkpoint: owned account shutdown acknowledgement (2026-10-20)
+
+`manage_account_service.py stop` now waits for the supervisor's Windows ownership mutex to be released or abandoned and for the account port to become vacant. A missing/stale diagnostic state file no longer determines completion. Stop requests tolerate the short startup window before the control event exists, share one bounded deadline, and fail closed on permission errors or an occupied port without an owned supervisor. No unrelated process is killed.
+
+Fourteen isolated Windows tests passed, including a real supervisor/Job controlling the in-memory account executable, early/missing state, delayed/missing events, an abandoned owner, timeout recovery, port-release delay and a foreign plaintext listener. Actual accepted connections were tested both held open during stop and closed before stop. A pinned handle keeps ownership-release assertions meaningful after the actor exits. Report: `output/account-service-control-tests.json`. Production service lifecycle, certificates and the actual client binary were not changed during acceptance.
+
+This is a prerequisite for certificate activation, not an activation implementation. Shared serialization of preparation/start/stop, recoverable certificate switching, restart verification and rollback still need implementation and isolated failure tests before production acceptance.
+
+# Earlier checkpoint: real-time SMS resend UI acceptance (2026-10-19)
 
 The actual client passed the opt-in `test_account_ui.py --real-sms-resend` path against a separate in-memory account fixture. After 61.001 real seconds, resend produced a fresh fixture delivery, preserved the phone number, cleared the SMS/MFA inputs and hid MFA. The old code was rejected on the new challenge; the new code requested MFA again and then unlocked the workspace with an unused recovery code. The complete account UI flow and fixture cleanup passed; see `output/account-ui-sms-resend.json` for timing and binary hashes.
 

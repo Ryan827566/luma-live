@@ -6,6 +6,7 @@ The background supervisor owns only the child process it started.
 import argparse
 import ctypes as c
 from ctypes import wintypes as w
+import errno
 import hashlib
 import getpass
 from urllib.parse import urlsplit
@@ -33,6 +34,8 @@ NAME='Local\\LumaLive.Account.'+hashlib.sha256(str(BASE.resolve()).lower().encod
 kernel=c.WinDLL('kernel32',use_last_error=True)
 for name,args,result in [
  ('CreateMutexW',[c.c_void_p,w.BOOL,w.LPCWSTR],w.HANDLE),
+ ('OpenMutexW',[w.DWORD,w.BOOL,w.LPCWSTR],w.HANDLE),
+ ('ReleaseMutex',[w.HANDLE],w.BOOL),
  ('CreateEventW',[c.c_void_p,w.BOOL,w.BOOL,w.LPCWSTR],w.HANDLE),
  ('OpenEventW',[w.DWORD,w.BOOL,w.LPCWSTR],w.HANDLE),
  ('SetEvent',[w.HANDLE],w.BOOL),('CloseHandle',[w.HANDLE],w.BOOL),
@@ -161,7 +164,9 @@ def run_supervisor():
         if mutex:kernel.CloseHandle(mutex)
         raise RuntimeError('An account supervisor already owns this deployment')
     event=kernel.CreateEventW(None,True,False,NAME+'.stop')
-    if not event:kernel.CloseHandle(mutex);raise RuntimeError('Unable to create service control event')
+    if not event:
+        kernel.ReleaseMutex(mutex);kernel.CloseHandle(mutex)
+        raise RuntimeError('Unable to create service control event')
     process=None;job=None
     try:
         with (BASE/'service.log').open('ab',buffering=0) as log:
@@ -175,12 +180,18 @@ def run_supervisor():
                 except subprocess.TimeoutExpired:kernel.CloseHandle(job);job=None;process.wait(timeout=10)
             if process.returncode:raise RuntimeError('Account server stopped with an error; see private service.log')
     finally:
-        if job:kernel.CloseHandle(job)
-        kernel.CloseHandle(event);kernel.CloseHandle(mutex)
-        if STATE.exists():
-            try:
-                if json.loads(STATE.read_text())['supervisor_pid']==os.getpid():STATE.unlink()
-            except (OSError,ValueError,KeyError):pass
+        try:
+            if job:kernel.CloseHandle(job)
+            if process is not None:process.wait(timeout=10)
+            if STATE.exists():
+                try:
+                    if json.loads(STATE.read_text())['supervisor_pid']==os.getpid():STATE.unlink()
+                except (OSError,ValueError,KeyError):pass
+        finally:
+            # Closing a mutex handle alone does not release ownership while
+            # another controller still has it open. Publish stopped last.
+            kernel.CloseHandle(event)
+            kernel.ReleaseMutex(mutex);kernel.CloseHandle(mutex)
 
 
 def start():
@@ -197,17 +208,54 @@ def start():
     raise RuntimeError('Account service did not become ready within25 seconds')
 
 
-def stop():
-    event=kernel.OpenEventW(2,False,NAME+'.stop')
-    if not event:
-        if ready():raise RuntimeError('Service is reachable but is not owned by this supervisor')
+def port_occupied():
+    """Check vacancy independently of the listener's TLS trust or protocol."""
+    with socket.socket() as probe:
+        probe.setsockopt(socket.SOL_SOCKET,socket.SO_EXCLUSIVEADDRUSE,1)
+        try:probe.bind(('127.0.0.1',PORT))
+        except OSError as error:
+            if error.errno in (errno.EACCES,errno.EADDRINUSE) or getattr(error,'winerror',None) in (10013,10048):
+                return True
+            raise
+    return False
+
+
+def stop(timeout=20):
+    until=time.monotonic()+timeout
+    # The state file is diagnostic metadata, not a process-lifetime signal.
+    owner=kernel.OpenMutexW(0x100001,False,NAME+'.owner')
+    if not owner:
+        if c.get_last_error()!=2:raise RuntimeError('Unable to inspect account supervisor ownership')
+        if port_occupied():raise RuntimeError('Account port is occupied without an owned supervisor; no process was stopped')
         return
+    acquired=False
+    requested=False
     try:
-        if not kernel.SetEvent(event):raise RuntimeError('Unable to request service shutdown')
-    finally:kernel.CloseHandle(event)
-    until=time.monotonic()+20
-    while STATE.exists() and time.monotonic()<until:time.sleep(.1)
-    if STATE.exists():raise RuntimeError('Service shutdown is pending; no unrelated process was killed')
+        while True:
+            result=kernel.WaitForSingleObject(owner,0)
+            if result in (0,0x80):  # Signalled or abandoned: this thread owns it now.
+                acquired=True
+                break
+            if result!=258:raise RuntimeError('Unable to wait for account supervisor shutdown')
+            if not requested:
+                event=kernel.OpenEventW(2,False,NAME+'.stop')
+                if event:
+                    try:
+                        if not kernel.SetEvent(event):raise RuntimeError('Unable to request service shutdown')
+                        requested=True
+                    finally:kernel.CloseHandle(event)
+                elif c.get_last_error()!=2:
+                    raise RuntimeError('Unable to open account supervisor shutdown event')
+            if time.monotonic()>=until:
+                raise RuntimeError('Service shutdown is pending; no unrelated process was killed')
+            time.sleep(min(.05,max(0,until-time.monotonic())))
+        while port_occupied():
+            if time.monotonic()>=until:
+                raise RuntimeError('Supervisor exited but the account port remains occupied; no unrelated process was killed')
+            time.sleep(min(.05,max(0,until-time.monotonic())))
+    finally:
+        if acquired:kernel.ReleaseMutex(owner)
+        kernel.CloseHandle(owner)
 
 
 def configure_client():
