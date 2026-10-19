@@ -1,4 +1,10 @@
-# Latest checkpoint: TLS diagnostics and renewal candidates (2026-10-18)
+# Latest checkpoint: real-time SMS resend UI acceptance (2026-10-19)
+
+The actual client passed the opt-in `test_account_ui.py --real-sms-resend` path against a separate in-memory account fixture. After 61.001 real seconds, resend produced a fresh fixture delivery, preserved the phone number, cleared the SMS/MFA inputs and hid MFA. The old code was rejected on the new challenge; the new code requested MFA again and then unlocked the workspace with an unused recovery code. The complete account UI flow and fixture cleanup passed; see `output/account-ui-sms-resend.json` for timing and binary hashes.
+
+This closes the real-60-second resend UI gap for the existing client, without changing production code, rebuilding binaries or restarting the production service. It does not establish external SMS delivery or physical IME/Narrator/multimonitor acceptance. Certificate activation/rollback and the remaining deployment/product gates below stay open.
+
+# Earlier checkpoint: TLS diagnostics and renewal candidates (2026-10-18)
 
 `scripts/windows/manage_account_certificates.py status` now checks CA/leaf expiry, disk certificate chain/IP/server purpose/key pairing, adjacent client trust and the served leaf under a three-second TLS/protocol deadline. The real deployment is healthy; `output/account-certificate-status.json` records the check.
 

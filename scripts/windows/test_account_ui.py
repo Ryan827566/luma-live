@@ -1,11 +1,14 @@
 """Actual workspace account UI against the test-only in-memory auth server."""
 import ctypes as c
 from ctypes import wintypes as w
+import argparse
+from datetime import datetime, timezone
+import hashlib
+import json
 import os
 from pathlib import Path
 import socket
 import subprocess
-import sys
 import time
 import tempfile
 
@@ -56,7 +59,24 @@ def text(h):
 def put(h,value):
     buf=c.create_unicode_buffer(value);u.SendMessageW(h,0xC,0,c.cast(buf,c.c_void_p).value)
 
-binary=Path(sys.argv[1]).resolve()
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('binary', type=Path)
+parser.add_argument('--real-sms-resend', action='store_true',
+                    help='Wait at least 61 real seconds and verify successful SMS resend after an MFA challenge')
+args=parser.parse_args()
+binary=args.binary.resolve()
+resend_report=Path(__file__).resolve().parents[2]/'output/account-ui-sms-resend.json'
+resend_evidence={}
+def save_resend_report():
+    resend_report.parent.mkdir(parents=True,exist_ok=True)
+    resend_report.write_text(json.dumps(resend_evidence,indent=2)+'\n',encoding='utf-8')
+if args.real_sms_resend:
+    resend_evidence={'status':'running','started_utc':datetime.now(timezone.utc).isoformat(),
+                     'client_sha256':hashlib.sha256(binary.read_bytes()).hexdigest(),
+                     'fixture_sha256':hashlib.sha256((binary.parent/'luma_account_ui_fixture.exe').read_bytes()).hexdigest(),
+                     'scope':'Actual client with isolated in-memory server and private delivery mailbox; no external SMS delivery',
+                     'auth_env':'test','tls_ca_file':'','production_service_restarted':False,'checks':[]}
+    save_resend_report()
 with socket.socket() as reservation:
     reservation.bind(('127.0.0.1',0));port=reservation.getsockname()[1]
 server=subprocess.Popen([str(binary.parent/'luma_account_ui_fixture.exe'),str(port)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
@@ -76,6 +96,7 @@ env['LUMALIVE_ACCOUNT_SETTINGS_PATH']=str(settings_path)
 startup=subprocess.STARTUPINFO();startup.dwFlags=subprocess.STARTF_USESHOWWINDOW;startup.wShowWindow=0
 process=subprocess.Popen([str(binary),'--account'],env=env,startupinfo=startup)
 root=None
+ui_passed=False
 try:
     def find():
         found=[]
@@ -364,6 +385,7 @@ try:
     u.PostMessageW(control(2120),0x100,0x0D,0)
     wait(lambda:'linked to an account' in text(control(2163)));done('linked to an account');sms_state(code=True,notice=True)
     phone_login=mailbox('phone_login')
+    phone_login_received_at=time.monotonic()
     # Explicit international input ignores the selector; equivalent national input preserves its challenge.
     country('US','+1');put(control(2120),'4155552671');sms_state(code=True,notice=True)
     put(control(2121),phone_login);click(2161);done('Too many attempts')
@@ -377,8 +399,42 @@ try:
     put(control(2122),'not-a-recovery-code');click(2160);done('authenticator or recovery code')
     assert text(control(2121))==phone_login,'Incorrect MFA discarded the text message code'
     sms_state(code=True,mfa=True,notice=True)
+    if args.real_sms_resend:
+        # Start after receiving the original delivery, so the lower bound also
+        # holds for server issuance. Do not advance/inject the server's clock.
+        print('Waiting for the real SMS resend cooldown (61 seconds after delivery receipt)',flush=True)
+        while True:
+            remaining=61-(time.monotonic()-phone_login_received_at)
+            if remaining<=0:break
+            assert process.poll() is None and server.poll() is None,'SMS fixture exited during cooldown'
+            time.sleep(min(.25,remaining))
+        assert text(control(2121))==phone_login and text(control(2122))=='not-a-recovery-code', 'Cooldown changed the pending inputs'
+        preserved_phone=text(control(2120))
+        resend_evidence['elapsed_before_resend_seconds']=time.monotonic()-phone_login_received_at
+        click(2161);done('linked to an account');sms_state(code=True,notice=True)
+        assert text(control(2120))==preserved_phone,'Successful resend changed the phone number'
+        assert text(control(2121))=='' and text(control(2122))=='','Successful resend retained SMS/MFA input'
+        # Mailbox reads consume their message. A second reply proves a new
+        # delivery even if the two independent random OTP values happen to match.
+        resent_login=mailbox('phone_login')
+        resend_evidence['checks'].extend(['real_cooldown_elapsed','new_fixture_delivery',
+                                         'phone_preserved','sms_input_cleared','mfa_input_cleared_and_hidden'])
+        if resent_login!=phone_login:
+            put(control(2121),phone_login);click(2160);done('text message code is incorrect')
+            sms_state(code=True,notice=True)
+            resend_evidence['old_code_on_new_challenge']='rejected'
+        else:
+            resend_evidence['old_code_on_new_challenge']='not_distinguishable_random_code_collision'
+        phone_login=resent_login
+        put(control(2121),phone_login);u.PostMessageW(control(2121),0x100,0x0D,0)
+        wait(lambda:visible(control(2122)));done('authenticator or recovery code');sms_state(code=True,mfa=True,notice=True)
+        assert text(control(2121))==phone_login and text(control(2122))=='','New MFA challenge retained stale input'
+        resend_evidence['checks'].append('new_code_requires_fresh_mfa')
+        save_resend_report()
     put(control(2122),recovery_codes[2]);u.PostMessageW(control(2122),0x100,0x0D,0)
     wait(lambda:'signed in' in text(control(2163)));done('signed in')
+    if args.real_sms_resend:
+        resend_evidence['checks'].append('new_code_and_mfa_unlock_workspace')
     click(2101);select_mode(3)
     fields('');click(2160);at_sizes();click(2166);done('required')
     assert u.IsWindowEnabled(control(2165)), 'Rejected confirmation left mode disabled'
@@ -449,9 +505,19 @@ try:
     print('PASS: account UI, authenticated page/confirmation layouts at compact and desktop-limited wide sizes',
           (min(round(1440*scale),u.GetSystemMetrics(59)),min(round(900*scale),u.GetSystemMetrics(60))),
           'minimal signed-out entrance, progressive MFA/recovery, hidden command rejection, form results, short/long detail scrolling, delivery failure, email/phone verification, SMS sign-in, password change, cross-client recovery, deletion, keyboard and preconfigured endpoint persistence')
+    ui_passed=True
 finally:
-    if root:u.PostMessageW(root,0x10,0,0)
-    try:process.wait(timeout=10)
-    except subprocess.TimeoutExpired:process.terminate();process.wait();raise
-    server.communicate('\n',timeout=10)
-    settings_dir.cleanup()
+    cleanup_complete=False
+    try:
+        if root:u.PostMessageW(root,0x10,0,0)
+        try:process.wait(timeout=10)
+        except subprocess.TimeoutExpired:process.terminate();process.wait();raise
+        server.communicate('\n',timeout=10)
+        settings_dir.cleanup()
+        cleanup_complete=True
+    finally:
+        if args.real_sms_resend:
+            resend_evidence['status']='passed' if ui_passed and cleanup_complete else 'failed'
+            resend_evidence['fixture_cleanup_complete']=cleanup_complete
+            resend_evidence['finished_utc']=datetime.now(timezone.utc).isoformat()
+            save_resend_report()

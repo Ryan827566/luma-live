@@ -1,5 +1,17 @@
 # Account page and authentication acceptance
 
+## 2026-10-19: successful resend after the real cooldown
+
+Actual client SHA256 `5577a41e560fcafbead23d012fac6057ba41b3bdf338aac0df7740587b00a610` passed the optional real-time resend acceptance. The test waits at least 61 seconds after consuming the initial fixture delivery, with no clock injection. In this run the measured interval was 61.001 seconds. Resend from an outstanding MFA prompt preserved the phone, cleared the SMS code, cleared/hidden MFA, and generated a new private fixture delivery. The old code failed against the new challenge; the new code required a fresh second factor and then unlocked the workspace. The full account UI workflow and cleanup also passed.
+
+```powershell
+C:/Python314/python.exe -B scripts/windows/test_account_ui.py output/next/Release/luma_studio.exe --real-sms-resend
+```
+
+The separate `output/account-ui-sms-resend.json` records timing, client/fixture hashes and assertions without codes or recovery secrets. Only `status=passed` with `fixture_cleanup_complete=true` is complete evidence; a `running` report can indicate an interrupted or failed startup. The consumed mailbox makes new delivery independently observable. If random OTP values coincide, the report explicitly marks old/new-code discrimination unavailable instead of failing a valid collision. This run had distinct codes and recorded rejection.
+
+The default invocation retains its fast path and separately passed after the opt-in run. Both modes use an isolated in-memory server with `AUTH_ENV=test` and empty client CA, and affect only their own client processes. A final SHA256 comparison confirmed the actual EXE was unchanged, and the production service remained ready. No production service restart, certificate activation or EXE rebuild is required. This supersedes the October18 real-60-second resend exclusion below; real supplier delivery and physical input/accessibility acceptance remain open.
+
 ## 2026-10-18: TLS diagnostics and candidate boundary
 
 Read-only real-deployment TLS diagnostics passed: disk/served leaf and adjacent client CA match, with valid chain/IP/server purpose/key pairing. Thirteen isolated certificate tests passed for renewal candidate creation and failure handling. No production certificate was staged/activated, no service was restarted and no EXE was rebuilt. These results establish diagnostics and candidate preparation, not renewal activation/rollback or fresh GUI acceptance. See local-account-deployment.md and `output/account-certificate-{status,tests}.json`.
