@@ -1,5 +1,13 @@
 # Account page and authentication acceptance
 
+## 2026-10-20: deployment serialization and startup ownership boundary
+
+Account preparation/start/stop/restart and delivery-configuration publication now share a Windows command mutex. Startup uses a gated worker in an owned Job, confirms its supervisor identity/readiness, and cleans the entire owned subtree on startup failure before unlocking. Provider token input does not hold the mutex; saving merges with the latest other-channel configuration.
+
+Fourteen isolated operation tests, fourteen service-control regressions and three launcher tests passed. The new cases use random Windows control objects, dynamic ports and the in-memory account executable, including startup cancellation during the server-to-Job assignment window and a ready service surviving its startup caller's exit. Reports: `output/account-operation-tests.json` and `output/account-service-control-tests.json`. Final read-only review by one helper found no blocking issues.
+
+This is deployment-control work. No production restart, certificate activation, GUI rerun or client rebuild was performed. Read-only production status remains ready and actual EXE SHA256 remains `5577a41e560fcafbead23d012fac6057ba41b3bdf338aac0df7740587b00a610`. The actual GUI evidence below is unchanged; certificate switching, rollback and recovery still need isolated acceptance and later authorized production acceptance.
+
 ## 2026-10-20: service shutdown acknowledgement boundary
 
 Fourteen isolated service-control tests passed after replacing state-file-based stop completion with Windows ownership release and port-vacancy checks. Fixtures run the actual Python supervisor/Windows Job with the in-memory account executable, including accepted connections held open during stop or closed beforehand; remaining cases exercise startup delays, missing metadata, owner abandonment, timeouts and foreign listeners. See `output/account-service-control-tests.json` and local-account-deployment.md.

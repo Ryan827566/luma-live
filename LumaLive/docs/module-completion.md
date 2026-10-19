@@ -1,4 +1,14 @@
-# Latest checkpoint: owned account shutdown acknowledgement (2026-10-20)
+# Latest checkpoint: serialized deployment operations and owned startup (2026-10-20)
+
+Preparation, start, stop, the complete stop/start restart sequence and delivery-configuration publication now share one bounded Windows operation mutex. Nested calls use native mutex recursion; stop includes lock acquisition in its existing total deadline. Provider prompts happen before locking, then publication re-reads and merges the latest configuration so another channel's update is preserved.
+
+Startup places the worker in a temporary Windows Job before issuing its stdin launch permit. The worker verifies actual membership of that named Job before spawning a server. Readiness must match the launched supervisor's diagnostic PID before handing off the startup Job; timeout or handoff failure terminates the owned subtree and waits for its active process count to reach zero before releasing the operation lock. Direct `run` is rejected; callers use `start`. The server's separate supervisor-owned Job remains responsible after successful startup.
+
+Fourteen isolated operation tests passed, including native cross-process exclusion, recursion/abandonment, prompt-time provider updates, forged worker rejection, failures before the permit and during server Job assignment, failed handoff and successful caller-exit survival. The fourteen service-control regressions and three launcher tests also passed; one independent helper completed the final read-only review without blocking findings. Reports: `output/account-operation-tests.json` and `output/account-service-control-tests.json`.
+
+This supplies command serialization for future certificate transactions. Recoverable certificate activation, restart verification, rollback and CA rotation remain open. Production lifecycle, certificates and the actual client binary were not changed; the already-running supervisor retains its previously loaded code until an authorized restart.
+
+# Earlier checkpoint: owned account shutdown acknowledgement (2026-10-20)
 
 `manage_account_service.py stop` now waits for the supervisor's Windows ownership mutex to be released or abandoned and for the account port to become vacant. A missing/stale diagnostic state file no longer determines completion. Stop requests tolerate the short startup window before the control event exists, share one bounded deadline, and fail closed on permission errors or an occupied port without an owned supervisor. No unrelated process is killed.
 

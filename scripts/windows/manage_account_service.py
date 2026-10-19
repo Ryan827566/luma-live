@@ -4,6 +4,7 @@ Does not install a system CA, expose a network port, or print credentials.
 The background supervisor owns only the child process it started.
 """
 import argparse
+from contextlib import contextmanager
 import ctypes as c
 from ctypes import wintypes as w
 import errno
@@ -11,6 +12,7 @@ import hashlib
 import getpass
 from urllib.parse import urlsplit
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -20,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 import bootstrap_local_postgres as pg
 
 ROOT=pg.ROOT
@@ -41,9 +44,33 @@ for name,args,result in [
  ('SetEvent',[w.HANDLE],w.BOOL),('CloseHandle',[w.HANDLE],w.BOOL),
  ('WaitForSingleObject',[w.HANDLE,w.DWORD],w.DWORD),
  ('CreateJobObjectW',[c.c_void_p,w.LPCWSTR],w.HANDLE),
+ ('OpenJobObjectW',[w.DWORD,w.BOOL,w.LPCWSTR],w.HANDLE),
+ ('GetCurrentProcess',[],w.HANDLE),
+ ('IsProcessInJob',[w.HANDLE,w.HANDLE,c.POINTER(w.BOOL)],w.BOOL),
+ ('TerminateJobObject',[w.HANDLE,w.UINT],w.BOOL),
+ ('QueryInformationJobObject',[w.HANDLE,c.c_int,c.c_void_p,w.DWORD,c.c_void_p],w.BOOL),
  ('SetInformationJobObject',[w.HANDLE,c.c_int,c.c_void_p,w.DWORD],w.BOOL),
  ('AssignProcessToJobObject',[w.HANDLE,w.HANDLE],w.BOOL)]:
  fn=getattr(kernel,name);fn.argtypes=args;fn.restype=result
+
+
+@contextmanager
+def operation_lock(timeout=30):
+    """Serialize deployment commands; Windows mutex recursion supports transactions."""
+    if not math.isfinite(timeout) or not 0<=timeout<=300:
+        raise ValueError('Operation lock timeout must be between 0 and 300 seconds')
+    mutex=kernel.CreateMutexW(None,False,NAME+'.operation')
+    if not mutex:raise RuntimeError('Unable to create account operation lock')
+    acquired=False
+    try:
+        result=kernel.WaitForSingleObject(mutex,math.ceil(timeout*1000))
+        if result==258:raise RuntimeError('Another account deployment operation is still running')
+        if result not in (0,0x80):raise RuntimeError('Unable to acquire account operation lock')
+        acquired=True
+        yield
+    finally:
+        if acquired:kernel.ReleaseMutex(mutex)
+        kernel.CloseHandle(mutex)
 
 
 def private_directory():
@@ -55,6 +82,10 @@ def private_directory():
 
 
 def prepare():
+    with operation_lock():_prepare()
+
+
+def _prepare():
     private_directory()
     if not SERVER.is_file():raise RuntimeError('Build luma_auth_server first')
     pg.run([sys.executable,ROOT/'scripts/windows/bootstrap_local_postgres.py','--start'],timeout=90)
@@ -142,7 +173,7 @@ def status():
         'windows_service_installed':False}
 
 
-def child_job(process):
+def set_job_kill_on_close(job, enabled):
     class Basic(c.Structure):
         _fields_=[('process_time',c.c_longlong),('job_time',c.c_longlong),('flags',w.DWORD),
             ('minimum',c.c_size_t),('maximum',c.c_size_t),('active',w.DWORD),
@@ -150,12 +181,62 @@ def child_job(process):
     class Extended(c.Structure):
         _fields_=[('basic',Basic),('io',c.c_ulonglong*6),('process_memory',c.c_size_t),
             ('job_memory',c.c_size_t),('peak_process',c.c_size_t),('peak_job',c.c_size_t)]
-    job=kernel.CreateJobObjectW(None,None);limits=Extended();limits.basic.flags=0x2000
-    if not job or not kernel.SetInformationJobObject(job,9,c.byref(limits),c.sizeof(limits)) or not kernel.AssignProcessToJobObject(job,w.HANDLE(int(process._handle))):
+    limits=Extended();limits.basic.flags=0x2000 if enabled else 0
+    if not kernel.SetInformationJobObject(job,9,c.byref(limits),c.sizeof(limits)):
+        raise RuntimeError('Unable to configure account process ownership')
+
+
+def child_job(process, name=None):
+    job=kernel.CreateJobObjectW(None,name)
+    try:
+        if not job or (name and c.get_last_error()==183):raise RuntimeError('Account process ownership collision')
+        set_job_kill_on_close(job,True)
+        if not kernel.AssignProcessToJobObject(job,w.HANDLE(int(process._handle))):
+            raise RuntimeError('Unable to assign account process ownership')
+    except BaseException:
         if job:kernel.CloseHandle(job)
         process.terminate();process.wait(timeout=10)
-        raise RuntimeError('Unable to own the account service process')
+        raise
     return job
+
+
+def terminate_startup(job, process, timeout=10):
+    # Keep the job queryable until every descendant has exited. Waiting for
+    # just the worker would leave its server's asynchronous termination unproven.
+    class Accounting(c.Structure):
+        _fields_=[('times',c.c_longlong*4),('faults',w.DWORD),('total',w.DWORD),
+                  ('active',w.DWORD),('terminated',w.DWORD)]
+    if not kernel.TerminateJobObject(job,1):raise RuntimeError('Unable to cancel owned account startup')
+    until=time.monotonic()+timeout
+    while True:
+        value=Accounting()
+        if not kernel.QueryInformationJobObject(job,1,c.byref(value),c.sizeof(value),None):
+            raise RuntimeError('Unable to confirm owned startup cleanup')
+        if value.active==0:
+            process.wait(timeout=max(.01,until-time.monotonic()))
+            return
+        if time.monotonic()>=until:raise RuntimeError('Owned account startup cleanup is still pending')
+        time.sleep(.02)
+
+
+LAUNCH_PERMIT=b'LumaLive owned launch 1\n'
+
+
+def run_worker(job_name):
+    prefix=NAME+'.launch.'
+    suffix=job_name[len(prefix):] if job_name and job_name.startswith(prefix) else ''
+    if len(suffix)!=32 or any(x not in '0123456789abcdef' for x in suffix):
+        raise RuntimeError('Internal account worker requires its launch job; use start')
+    if sys.stdin.isatty() or sys.stdin.buffer.readline(64)!=LAUNCH_PERMIT:
+        raise RuntimeError('Internal account worker was not released by its controller')
+    job=kernel.OpenJobObjectW(4,False,job_name)
+    if not job:raise RuntimeError('Internal account launch job is unavailable')
+    try:
+        member=w.BOOL()
+        if not kernel.IsProcessInJob(kernel.GetCurrentProcess(),job,c.byref(member)) or not member.value:
+            raise RuntimeError('Internal account worker is outside its launch job')
+    finally:kernel.CloseHandle(job)
+    run_supervisor()
 
 
 def run_supervisor():
@@ -195,17 +276,52 @@ def run_supervisor():
 
 
 def start():
+    with operation_lock():_start()
+
+
+def supervisor_command(job_name):
+    return [sys.executable,'-B',str(Path(__file__).resolve()),'_run-owned','--launch-job',job_name]
+
+
+def _start(timeout=25):
     prepare()
     if ready():return
-    with (BASE/'supervisor.log').open('ab',buffering=0) as log:
-        process=subprocess.Popen([sys.executable,str(Path(__file__).resolve()),'run'],cwd=ROOT,
-            stdin=subprocess.DEVNULL,stdout=log,stderr=log,creationflags=subprocess.CREATE_NO_WINDOW)
-    until=time.monotonic()+25
-    while time.monotonic()<until:
-        if ready():return
-        if process.poll() is not None:raise RuntimeError('Account supervisor could not start; inspect private logs')
-        time.sleep(.2)
-    raise RuntimeError('Account service did not become ready within25 seconds')
+    process=None;job=None;handed_off=False
+    job_name=NAME+'.launch.'+uuid.uuid4().hex
+    try:
+        with (BASE/'supervisor.log').open('ab',buffering=0) as log:
+            process=subprocess.Popen(supervisor_command(job_name),cwd=ROOT,
+                stdin=subprocess.PIPE,stdout=log,stderr=log,creationflags=subprocess.CREATE_NO_WINDOW)
+        # The worker cannot start a server until it is inside this temporary
+        # subtree job. Its supervisor retains its separate server job afterward.
+        job=child_job(process,job_name)
+        process.stdin.write(LAUNCH_PERMIT);process.stdin.close()
+        until=time.monotonic()+timeout
+        while time.monotonic()<until:
+            if process.poll() is not None:raise RuntimeError('Account supervisor could not start; inspect private logs')
+            try:owned=json.loads(STATE.read_text())['supervisor_pid']==process.pid
+            except (OSError,ValueError,KeyError,TypeError):owned=False
+            if owned and ready() and process.poll() is None:
+                set_job_kill_on_close(job,False)
+                handed_off=True
+                return
+            time.sleep(.05)
+        raise RuntimeError('Account service did not become ready before the startup deadline')
+    finally:
+        try:
+            if job and not handed_off:terminate_startup(job,process)
+            elif process is not None and not job and process.poll() is None:
+                # No permit was issued, so this worker cannot own a server yet.
+                process.terminate();process.wait(timeout=10)
+        finally:
+            if job:kernel.CloseHandle(job)
+            if process is not None and process.stdin is not None:process.stdin.close()
+
+
+def restart():
+    with operation_lock():
+        stop()
+        start()
 
 
 def port_occupied():
@@ -222,6 +338,10 @@ def port_occupied():
 
 def stop(timeout=20):
     until=time.monotonic()+timeout
+    with operation_lock(timeout):_stop(until)
+
+
+def _stop(until):
     # The state file is diagnostic metadata, not a process-lifetime signal.
     owner=kernel.OpenMutexW(0x100001,False,NAME+'.owner')
     if not owner:
@@ -270,8 +390,6 @@ def configure_client():
 
 
 def configure_provider(channel,mode,url):
-    private_directory()
-    config=json.loads(pg.dpapi(PROVIDERS.read_bytes(),decrypt=True)) if PROVIDERS.exists() else {'email':{'mode':'disabled'},'sms':{'mode':'disabled'}}
     value={'mode':mode}
     if mode=='webhook':
         parsed=urlsplit(url or '')
@@ -280,8 +398,13 @@ def configure_provider(channel,mode,url):
         token=getpass.getpass('Gateway bearer token (hidden): ')
         if not token or len(token)>4096 or any(ord(x)<33 or ord(x)>126 for x in token):raise RuntimeError('Invalid gateway token')
         value.update(url=url,token=token)
-    config[channel]=value
-    temporary=PROVIDERS.with_suffix('.new');temporary.write_bytes(pg.dpapi(json.dumps(config).encode()));os.replace(temporary,PROVIDERS)
+    # Do not hold the deployment lock while waiting for human input. Merge with
+    # the latest configuration only after acquiring it, preserving the other channel.
+    with operation_lock():
+        private_directory()
+        config=json.loads(pg.dpapi(PROVIDERS.read_bytes(),decrypt=True)) if PROVIDERS.exists() else {'email':{'mode':'disabled'},'sms':{'mode':'disabled'}}
+        config[channel]=value
+        temporary=PROVIDERS.with_suffix('.new');temporary.write_bytes(pg.dpapi(json.dumps(config).encode()));os.replace(temporary,PROVIDERS)
     print('Delivery configuration saved with DPAPI. Restart the account service to apply it.')
 
 
@@ -299,7 +422,8 @@ def install_startup():
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=['status','start','stop','restart','run','configure-client','configure-provider','install-startup'])
+    parser.add_argument('action',choices=['status','start','stop','restart','run','_run-owned','configure-client','configure-provider','install-startup'])
+    parser.add_argument('--launch-job',help=argparse.SUPPRESS)
     parser.add_argument("--channel",choices=["email","sms"])
     parser.add_argument("--mode",choices=["disabled","webhook"])
     parser.add_argument("--url")
@@ -308,8 +432,9 @@ def main():
         if not args.channel or not args.mode:parser.error('--channel and --mode are required')
         configure_provider(args.channel,args.mode,args.url);return
     if args.action=='install-startup':install_startup();return
-    if args.action=='restart':stop();start()
-    if args.action=='run':run_supervisor();return
+    if args.action=='restart':restart()
+    if args.action=='run':raise RuntimeError('Direct supervisor launch is unsupported; use start')
+    if args.action=='_run-owned':run_worker(args.launch_job);return
     if args.action=='start':start()
     if args.action=='stop':stop()
     if args.action=='configure-client':configure_client()
