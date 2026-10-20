@@ -1,5 +1,13 @@
 # Account page and authentication acceptance
 
+## 2026-10-20: certificate transaction isolation acceptance
+
+Same-CA leaf activation and rollback now retain a private write-ahead journal, serialize with deployment commands and verify the certificate actually served after owned startup. An interrupted transaction blocks ordinary preparation/start/restart until explicit recovery restores the saved old pair. Activation and recovery require `--allow-service-restart`; they invalidate active sessions and are not routine client checks.
+
+Nineteen isolated native TLS/Windows lifecycle tests passed with fixture cleanup complete, including five process-exit fault boundaries and terminal-record failures. The thirteen certificate, fourteen operation, fourteen shutdown and three launcher regressions also passed. One helper reviewed the final code without blocking findings. See `output/account-certificate-transaction-tests.json` and local-account-deployment.md for the exact scope and limitations.
+
+No production activation/recovery/restart, GUI rerun or binary rebuild occurred. Read-only production TLS remained healthy with no pending recovery, and actual EXE SHA256 remained `5577a41e560fcafbead23d012fac6057ba41b3bdf338aac0df7740587b00a610`. The user's open client was left untouched. This is isolated deployment acceptance; production renewal, expired-old emergency repair, CA rotation and physical UI/provider acceptance remain open.
+
 ## 2026-10-20: deployment serialization and startup ownership boundary
 
 Account preparation/start/stop/restart and delivery-configuration publication now share a Windows command mutex. Startup uses a gated worker in an owned Job, confirms its supervisor identity/readiness, and cleans the entire owned subtree on startup failure before unlocking. Provider token input does not hold the mutex; saving merges with the latest other-channel configuration.

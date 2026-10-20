@@ -1,4 +1,12 @@
-# Latest checkpoint: serialized deployment operations and owned startup (2026-10-20)
+# Latest checkpoint: recoverable same-CA certificate activation (2026-10-20)
+
+Planned leaf renewal now has an operation-locked transaction: private old/new snapshots, a write-ahead pending record, acknowledged owned shutdown, pair replacement, owned startup and verification of the certificate actually served over TLS. Pending transactions block ordinary preparation/start/restart and require explicit recovery to the old pair. A failed activation attempts verified rollback; interruption or failure before the terminal-record rename retains the pending record. That atomic rename commits the outcome. Failed rename acknowledgement triggers verification; if the terminal record exists but confirmation fails, the command reports an uncertain outcome and requests inspection rather than claiming recovery is pending.
+
+Nineteen isolated transaction tests passed, including five real process-exit boundaries, a mixed certificate/key pair, startup/probe failures, corrupt journals, external trust changes, an expired unused candidate and terminal-record failures. Fixture cleanup completed. The thirteen existing certificate tests, fourteen operation tests, fourteen shutdown tests and three launcher checks also passed for this change. One independent helper completed final read-only review without blocking findings. Reports: `output/account-certificate-transaction-tests.json`, `output/account-certificate-tests.json`, `output/account-operation-tests.json` and `output/account-service-control-tests.json`.
+
+This completes implementation and isolated acceptance for planned same-CA renewal from a running owned service; both leaves must initially have more than one day of validity. Production activation remains unaccepted and was not performed. Expired-old emergency repair, CA rotation, unattended renewal, transaction retention, hardware/power-loss recovery and full disaster recovery remain separate work. No production lifecycle, certificate or actual client binary was changed; read-only production TLS is healthy, no recovery is pending, and the client SHA256 remains `5577a41e560fcafbead23d012fac6057ba41b3bdf338aac0df7740587b00a610`. Existing GUI acceptance is unchanged.
+
+# Earlier checkpoint: serialized deployment operations and owned startup (2026-10-20)
 
 Preparation, start, stop, the complete stop/start restart sequence and delivery-configuration publication now share one bounded Windows operation mutex. Nested calls use native mutex recursion; stop includes lock acquisition in its existing total deadline. Provider prompts happen before locking, then publication re-reads and merges the latest configuration so another channel's update is preserved.
 

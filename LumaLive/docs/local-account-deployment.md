@@ -1,5 +1,47 @@
 # 本机账户服务部署与测试
 
+## 同一 CA 下的证书激活与可恢复回滚（2026-10-20）
+
+已实现计划内叶证书续期事务，并完成隔离验收。只允许从正在运行、所有权明确、在线证书与磁盘一致的账户服务开始；
+旧证书和候选证书开始时都必须还剩一天以上有效期。正式证书尚未激活，本轮没有重启正式服务或操作用户已打开的客户端。
+
+激活与恢复共用部署操作锁。执行前保存旧/新证书和私钥、公有 CA、内容哈希及部署绑定，并发布 `pending.json`，随后才停止所属服务。
+停止确认所有权释放和端口空闲后，逐个原子替换证书/私钥，再以现有 Windows Job 启动机制启动，验证实际在线 TLS 指纹及完整协议响应。
+事务文件采用同目录临时文件、内容刷新和 Windows write-through 重命名；提交点是把 pending 记录重命名为事务目录内的终态记录。
+重命名后返回异常时，只有再次核对终态记录、清单、活动文件、信任和在线指纹，才接受已提交或已恢复的结果。
+
+任意 pending 状态都表示恢复旧证书，包括新服务已就绪但尚未提交的中断。普通 `prepare/start/restart` 在副作用之前拒绝执行；
+`status` 明确报告待恢复。终态记录提交前的自动回滚失败会保留 pending，允许修复原因后重试恢复；
+若回滚记录已提交而后续核验失败，则报告结果无法确认，要求检查事务记录和 TLS 状态，不误称仍有 pending。
+恢复会接受旧/新文件混合状态，但拒绝覆盖两者以外的文件或变化的 CA/客户端信任。
+旧证书必须仍有效；未使用的新候选已过期不会阻碍恢复有效旧证书。恢复过程中不复制或重置数据库、供应商配置或管理密钥。
+
+以下为维护窗口命令说明，**本轮未在正式部署执行**。两条命令都会中断会话，必须在用户结束使用后安排；缺少显式参数会被拒绝：
+
+```powershell
+C:/Python314/python.exe -B scripts/windows/manage_account_certificates.py activate --candidate-id <已检查的候选ID> --allow-service-restart
+C:/Python314/python.exe -B scripts/windows/manage_account_certificates.py recover --allow-service-restart
+```
+
+无 pending 时 `recover` 返回无需恢复，不会重启服务。事务保存在
+`output/services/account/certificate-transactions/<事务ID>`，继承当前 Windows 用户和 SYSTEM 的私有目录权限；
+终态为 `committed.json` 或 `rolled-back.json`。旧/新私钥快照仍保留，不自动清理，不能上传这些目录。
+
+19 项隔离测试全部通过，报告 `output/account-certificate-transaction-tests.json` 的 `passed=true`、`fixture_cleanup_complete=true`。
+使用实际内存账户 TLS fixture、随机 Windows 控制对象和动态端口，显式 `AUTH_ENV=test`、空 CA 环境；
+五个真实进程退出点覆盖发布 intent、停止完成、半对文件替换、新服务就绪和回滚半对替换，随后均能恢复旧证书并确认在线服务。
+其余覆盖启动/探测失败、日志与快照损坏、外部信任变化、过期未用候选、终态记录写入及返回异常。
+13 项既有证书检查、14 项操作锁检查、14 项停止回归和 3 项启动器检查也通过。一名协作者完成最终只读审查，无阻断项。
+
+首轮事务测试的功能断言通过，但清理因 supervisor 日志句柄尚未关闭而失败；测试现已等待自己持有的进程句柄退出，最终完整运行通过。
+自动审批拒绝删除首轮遗留目录 `output/services/certificate-transaction-tests-cxw02b04`，理由仅为 `blocked by policy`，该目录原样保留，不再尝试删除。
+此前同样被拒绝的 `output/services/certificate-tests-66db2gm3` 也继续保留。这些遗留目录不属于最终通过轮次的清理结果。
+
+正式只读检查：服务就绪、TLS healthy、无 pending，实际客户端 SHA256 保持
+`5577a41e560fcafbead23d012fac6057ba41b3bdf338aac0df7740587b00a610`。
+当前验收仅覆盖同用户/同机、旧证书尚有效的计划续期和进程退出恢复。
+正式维护窗口激活、旧证书已过期时的应急修复、CA 轮换、无人值守续期、事务保留策略、真实断电/磁盘损坏恢复和完整灾备仍未验收。
+
 ## 部署操作互斥与启动失败回收（2026-10-20）
 
 准备、启动、停止、完整重启及投递配置发布共用一个 Windows 操作互斥量，避免同时写配置或交错启动/停止。

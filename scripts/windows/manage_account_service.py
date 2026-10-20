@@ -82,7 +82,14 @@ def private_directory():
 
 
 def prepare():
-    with operation_lock():_prepare()
+    with operation_lock():
+        require_no_certificate_transaction()
+        _prepare()
+
+
+def require_no_certificate_transaction():
+    if (BASE/'certificate-transactions/pending.json').exists():
+        raise RuntimeError('Certificate recovery is pending; use manage_account_certificates.py recover --allow-service-restart')
 
 
 def _prepare():
@@ -168,6 +175,7 @@ def ready():
 
 def status():
     return {'ready':ready(),'address':'127.0.0.1','port':PORT,'transport':'TLS',
+        'certificate_recovery_pending':(BASE/'certificate-transactions/pending.json').exists(),
         'database':pg.DATABASE,'database_port':pg.PORT,'server':str(SERVER),
         'log':str(BASE/'service.log'),'delivery':'See protected configuration; disabled until explicitly configured',
         'windows_service_installed':False}
@@ -283,8 +291,10 @@ def supervisor_command(job_name):
     return [sys.executable,'-B',str(Path(__file__).resolve()),'_run-owned','--launch-job',job_name]
 
 
-def _start(timeout=25):
-    prepare()
+def _start(timeout=25, *, prepare_service=True):
+    # Only the certificate transaction controller skips preparation, while it
+    # holds operation_lock and has validated its journal and complete TLS pair.
+    if prepare_service:prepare()
     if ready():return
     process=None;job=None;handed_off=False
     job_name=NAME+'.launch.'+uuid.uuid4().hex
@@ -320,6 +330,7 @@ def _start(timeout=25):
 
 def restart():
     with operation_lock():
+        require_no_certificate_transaction()
         stop()
         start()
 

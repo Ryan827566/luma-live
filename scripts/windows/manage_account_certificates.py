@@ -1,7 +1,7 @@
-"""Inspect local account TLS and stage renewed certificates without activating them.
+"""Inspect, stage, or explicitly activate/recover local account TLS certificates.
 
-No service lifecycle commands, database access, global trust changes or live-file
-replacement. Candidate private keys remain in the project's private directory.
+Status/stage/inspect do not change live files or service lifecycle. Activation
+and recovery require --allow-service-restart and retain private rollback files.
 """
 import argparse
 from datetime import datetime, timezone
@@ -71,8 +71,8 @@ def describe(record, now, warning_days):
             'days_remaining': int((record['not_after'] - now) // DAY)}
 
 
-def validate_pair(ca, cert, key):
-    result = run_ssl(['verify', '-no-CApath', '-no-CAstore', '-CAfile', ca,
+def validate_pair(ca, cert, key, *, check_time=True):
+    result = run_ssl(['verify', *([] if check_time else ['-no_check_time']), '-no-CApath', '-no-CAstore', '-CAfile', ca,
                       '-purpose', 'sslserver', '-verify_ip', '127.0.0.1', cert], check=False)
     if result.returncode:
         raise RuntimeError('Certificate chain, server purpose, validity or loopback IP verification failed')
@@ -111,6 +111,9 @@ def status(warning_days=30):
     now = time.time()
     report = {'checked_at': datetime.fromtimestamp(now, timezone.utc).isoformat(),
               'warning_days': warning_days, 'issues': [], 'warnings': []}
+    report['recovery_required'] = (CERTS.parent / 'certificate-transactions/pending.json').exists()
+    if report['recovery_required']:
+        report['issues'].append('certificate_recovery_pending')
     records = {}
     for label, path in [('ca', CERTS / 'ca.pem'), ('server', CERTS / 'server.pem'), ('client_ca', CLIENT_CA)]:
         try:
@@ -222,8 +225,19 @@ def main():
     renew.add_argument('--days', type=int, default=365)
     inspect = sub.add_parser('inspect')
     inspect.add_argument('--candidate-id', required=True)
+    activate = sub.add_parser('activate')
+    activate.add_argument('--candidate-id', required=True)
+    activate.add_argument('--allow-service-restart', action='store_true')
+    recover = sub.add_parser('recover')
+    recover.add_argument('--allow-service-restart', action='store_true')
     args = parser.parse_args()
-    if args.action == 'status':
+    if args.action in ('activate', 'recover'):
+        if not args.allow_service_restart:
+            parser.error('This operation invalidates active sessions; --allow-service-restart is required')
+        import account_certificate_transaction as transaction
+        report = transaction.activate(args.candidate_id) if args.action == 'activate' else transaction.recover()
+        code = 0
+    elif args.action == 'status':
         if not 1 <= args.warning_days <= 365:
             parser.error('--warning-days must be between 1 and 365')
         report = status(args.warning_days)
