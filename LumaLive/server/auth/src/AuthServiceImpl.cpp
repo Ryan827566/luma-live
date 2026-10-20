@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cctype>
 #include <iomanip>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -258,6 +259,11 @@ struct ClientState{
     std::string remote_address{"unknown"};
 };
 
+struct ClientThread{
+    std::thread thread;
+    std::atomic<bool> done{false};
+};
+
 struct SessionRecord{
     std::string session_id;
     std::string user_id;
@@ -350,7 +356,7 @@ public:
 
         int yes=1;
         setsockopt(s,SOL_SOCKET,SO_REUSEADDR,reinterpret_cast<const char*>(&yes),sizeof(yes));
-        if(::bind(s,reinterpret_cast<sockaddr*>(&a),sizeof(a))!=0||::listen(s,32)!=0){
+        if(::bind(s,reinterpret_cast<sockaddr*>(&a),sizeof(a))!=0||::listen(s,32)!=0||!SetNonBlocking(s)){
             close_socket(s);
             auth_store_->Close();
             return Result::Failure(ErrorCode::Internal,"unable to bind auth port");
@@ -391,7 +397,7 @@ public:
             }
         }
 
-        for(auto& t:client_threads_)if(t.joinable())t.join();
+        for(auto& worker:client_threads_)if(worker.thread.joinable())worker.thread.join();
         client_threads_.clear();
 
         {
@@ -602,8 +608,20 @@ private:
         return host;
     }
 
+    void ReapClients(){
+        // AcceptLoop owns this list until Stop joins it. Never join while
+        // holding clients_mutex_: ClientLoop needs that lock to finish.
+        for(auto it=client_threads_.begin();it!=client_threads_.end();){
+            if(it->done.load(std::memory_order_acquire)){
+                it->thread.join();
+                it=client_threads_.erase(it);
+            }else ++it;
+        }
+    }
+
     void AcceptLoop(){
         while(running_){
+            ReapClients();
             sockaddr_in a{};
 #ifdef _WIN32
             int n=sizeof(a);
@@ -612,6 +630,9 @@ private:
 #endif
             Socket listen=listen_socket_.load();
             if(listen==kInvalidSocket)break;
+            // Wake even without another connection so the last completed batch
+            // releases its thread handles and list nodes while the server idles.
+            if(WaitReady(listen,false,IoClock::now()+std::chrono::milliseconds(100))<=0)continue;
 
             Socket s=::accept(listen,reinterpret_cast<sockaddr*>(&a),&n);
             if(s==kInvalidSocket){
@@ -620,14 +641,33 @@ private:
             }
             if(!SetNonBlocking(s)){close_socket(s);continue;}
 
-            ClientState state{};
-            state.socket=s;
-            state.remote_address=RemoteAddress(a);
-            {
+            try{
+                ClientState state{};
+                state.socket=s;
+                state.remote_address=RemoteAddress(a);
+                {
+                    std::lock_guard lock(clients_mutex_);
+                    clients_.emplace(s,std::make_shared<ClientState>(std::move(state)));
+                }
+                // Allocate the stable node before starting its thread. Erase
+                // only after join; socket values can be reused by later peers.
+                client_threads_.emplace_back();
+                auto& worker=client_threads_.back();
+                try{
+                    worker.thread=std::thread([this,s,&worker]{
+                        ClientLoop(s);
+                        worker.done.store(true,std::memory_order_release);
+                    });
+                }catch(...){
+                    client_threads_.pop_back();
+                    throw;
+                }
+            }catch(...){
+                // No worker owns s when allocation or thread creation fails.
                 std::lock_guard lock(clients_mutex_);
-                clients_.emplace(s,std::make_shared<ClientState>(std::move(state)));
+                clients_.erase(s);
+                close_socket(s);
             }
-            client_threads_.emplace_back(&AuthServiceImpl::ClientLoop,this,s);
         }
     }
 
@@ -2094,7 +2134,7 @@ private:
     std::atomic<Socket> listen_socket_{kInvalidSocket};
     std::uint16_t port_{0};
     std::thread accept_thread_;
-    std::vector<std::thread> client_threads_;
+    std::list<ClientThread> client_threads_;
     mutable std::mutex lifecycle_mutex_,clients_mutex_,store_mutex_,session_mutex_,rate_mutex_,audit_mutex_;
     std::unique_ptr<IAuthStore> auth_store_;
 #ifdef _WIN32

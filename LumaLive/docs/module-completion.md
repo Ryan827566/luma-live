@@ -1,4 +1,14 @@
-# Latest checkpoint: concurrent TLS authentication with stalled peers (2026-10-21)
+# Latest checkpoint: completed account worker reclamation (2026-10-21)
+
+An isolated connection-churn measurement reproduced one retained Windows handle per completed connection in the previous native fixture: after 32 warm-up connections, five batches of 128 TLS Ping connections increased handles from 131 to 771 while live threads stayed at six. The server kept each joinable thread object until Stop.
+
+`AuthServiceImpl` now keeps stable worker nodes with atomic completion flags. The accept thread joins and removes completed workers, including during idle periods through a nonblocking listener and 100-ms readiness polling. Stop joins the accept thread before taking over the remaining workers; it never joins while holding the client-map lock. This bounds retention of completed workers, not the number of simultaneous active connections.
+
+The isolated replacement fixture passed the same five batches: handles returned to 105 at every checkpoint (zero growth), live threads stayed at six, and the persistent TLS control connection remained responsive. Concurrent connection churn overlapped Stop, which finished in 0.674 seconds with both an idle TLS peer and an incomplete handshake open. Native exit, peer closure, port vacancy, zero Job processes and directory cleanup passed. Reports: `output/account-connection-churn-baseline.json` (expected retained behavior, not a healthy resource bound) and `output/account-connection-churn.json` (bounded behavior). Private memory is recorded only as an observation; this is not a long soak or proof of all-memory stability.
+
+The isolated Release build and both native account unit/integration regressions passed; one helper reviewed the final code without blocking findings. The existing stalled-peer concurrency suite was not rerun. Production service/client binaries were not rebuilt or restarted, so **the deployed server still uses the earlier implementation**. Read-only status remains ready with no pending transaction, and the actual client hash is unchanged. Deployment requires a later authorized maintenance window. Active-connection limits, sustained-load/soak acceptance, production renewal, physical UI/provider acceptance and the other product gates remain open.
+
+# Earlier checkpoint: concurrent TLS authentication with stalled peers (2026-10-21)
 
 `scripts/windows/test_account_reliability.py` adds one bounded concurrency acceptance case using the existing in-memory native TLS fixture and Python wire clients. Three ten-second waves each run four distinct authenticated accounts alongside two silent TCP handshakes and two incomplete TLS application frames. The first run completed 115 worker cycles plus a final authenticated health cycle; every worker completed four whole cycles while all four stalled peers were still open in each wave, and continued after their timeouts. The twelve stalled peers closed in 5.003–5.055 seconds.
 

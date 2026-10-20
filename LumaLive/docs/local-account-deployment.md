@@ -1,5 +1,48 @@
 # 本机账户服务部署与测试
 
+## 已完成连接的线程句柄回收（2026-10-21）
+
+先用旧内存 fixture 量化：32 次预热后，五批各 128 次 TLS 连接只交换 Ping/Pong 并关闭，
+句柄数从 131 依次升至 259、387、515、643、771，活动线程始终为 6。
+每个已退出线程保留一个句柄的缺陷得到复现；全程保留一个 TLS 控制连接，避免只验证完全无活动客户端的情况。
+
+源码改为由接收线程独占稳定的 worker 链表，完成标记在客户端清理后发布，join 后删除节点。
+非阻塞监听配合 100 毫秒 readiness 轮询，使最后一批连接结束后无需新连接也能回收。
+Stop 先 join 接收线程，再接管剩余 worker；不持客户端锁等待线程，也不 detach。
+分配/创建线程失败会关闭尚未交给 worker 的 socket。本项处理已完成线程的保留，未添加活动连接数上限。
+
+独立构建与命令（不会构建正式服务器或实际客户端）：
+
+```powershell
+cmake -S LumaLive/client/ui/studio-preview -B build/auth-churn-20261021 -G "Visual Studio 17 2022" -A x64 -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=D:/workspace/luma-live/output/auth-churn-20261021
+cmake --build build/auth-churn-20261021 --config Release --target luma_auth_tls_fixture luma_auth_unit_tests luma_auth_integration_tests --parallel 2
+C:/Python314/python.exe -B scripts/windows/test_account_connection_churn.py
+```
+
+旧版本复现命令，`passed` 只表示符合预期的缺陷特征，不能作为资源稳定通过：
+
+```powershell
+C:/Python314/python.exe -B scripts/windows/test_account_connection_churn.py --fixture output/auth-tls-20261017/Release/luma_auth_tls_fixture.exe --expect retained --report output/account-connection-churn-baseline.json
+```
+
+修复后的实际 fixture SHA256：`7663dc9de029c88f55fa85766d3ff274a2f275388700a4f9e10def4e1523ddba`。
+五批共 640 次连接后，每批静默窗口的句柄均为 105、活动线程均为 6，句柄增量全部为零。
+默认回归门槛是每批相对预热基线增量不超过 ±8；每个窗口读取三次，必须稳定，期间不建立探测连接。
+私有内存和工作集只记录，不宣称全部内存无泄漏。持续 TLS 控制连接仍可 Ping。
+随后两个 worker 各完成至少四次连接循环后继续工作，同时请求 Stop，并保留一个 TLS 空闲连接与一个未完成握手。
+本次 Stop 用时 0.674 秒，完整测试 19.257 秒；正常退出、对端关闭、端口空闲、Job 活动进程为零及测试目录清理均通过。
+
+报告 `output/account-connection-churn.json` 必须同时有 `passed=true`、`resource_bound_satisfied=true`、
+`owned_job_empty=true`、`fixture_cleanup_complete=true` 才是本项完整证据。
+fixture 使用内存库、独立 CA/IP 验证、随机端口、显式 test/空 CA 环境及先入 Job 后许可的 actor；
+120 秒 actor 看门狗之外，控制器准备与清理另有时限。仅清理本轮验证过绝对路径的私有测试目录。
+两项原生账户单元/集成回归均通过（集成环境清除了继承的 LUMALIVE 配置，使用内存库），一名协作者审查无阻断项。
+未重复已完成的阻塞连接并发验收。
+
+**正式部署尚未使用本次源码修复**：本轮没有重编或重启正式服务器，没有改证书或操作用户已打开的客户端。
+只读检查仍 ready、无 pending，实际客户端 SHA256 不变。正式更新需之后明确授权的维护窗口。
+长期 soak、容量及活动连接上限、PostgreSQL 并发、真实投递、正式续期和完整灾备仍需分别完成。
+
 ## 阻塞连接下的并发认证验收（2026-10-21）
 
 ```powershell

@@ -1,5 +1,11 @@
 # Account page and authentication acceptance
 
+## 2026-10-21: connection-churn resource acceptance
+
+The old isolated TLS fixture retained exactly 640 additional handles after five batches of 128 completed Ping connections, despite stable live-thread counts. After completed-worker reclamation was added, the new isolated fixture returned to 105 handles and six live threads at every checkpoint, preserving a persistent TLS control connection. Concurrent churn during Stop passed in 0.674 seconds; peer closure, port vacancy, empty owned Job and fixture cleanup also passed. The baseline report's `passed=true` means the expected defect was reproduced; only the fixed report has `resource_bound_satisfied=true`.
+
+Reports: `output/account-connection-churn-baseline.json` and `output/account-connection-churn.json`. Two native account unit/integration regression executables passed after the source change; one helper reviewed without blockers. This measures completed-worker handle retention, not general memory stability, production capacity, PostgreSQL load or new GUI acceptance. Only the isolated fixture was rebuilt. The running production server still has the earlier implementation; the actual client and its prior GUI evidence are unchanged. Deployment awaits an authorized maintenance window.
+
 ## 2026-10-21: bounded concurrent TLS authentication
 
 One isolated concurrency case passed using the existing native in-memory TLS server and four Python wire clients: three ten-second waves, each overlapping normal login/validate/profile/logout cycles with two stalled handshakes and two incomplete TLS frames. There were 115 completed worker cycles plus one final authenticated health cycle. Every worker completed four full cycles before any stalled peer closed in every wave, then continued after all four closed. Identity/session isolation and rejection after logout were checked in every cycle.
