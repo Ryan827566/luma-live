@@ -1,5 +1,35 @@
 # 本机账户服务部署与测试
 
+## 阻塞连接下的并发认证验收（2026-10-21）
+
+```powershell
+C:/Python314/python.exe -B scripts/windows/test_account_reliability.py
+```
+
+测试使用已有的 `output/auth-tls-20261017/Release/luma_auth_tls_fixture.exe`，它固定使用内存存储；Python 客户端通过真实 TLS 和账户协议交互。
+显式使用 `AUTH_ENV=test`、空客户端 CA 环境、独立临时证书、随机回环端口和私有目录，不读取或写入正式账户数据。
+Python TLS 客户端仍验证测试 CA 与 `127.0.0.1`，并按服务器给出的 600000 次 PBKDF2 挑战生成登录证明。
+
+共三轮，每轮十秒：四个不同账户持续连接、登录、验证会话、读取资料、登出并确认旧 token 被拒绝，
+同时保留两个未完成 TLS 握手的 TCP 连接和两个只发送部分报文的 TLS 连接。
+检查每次响应身份属于对应 worker、会话凭据不重复；每个 worker 必须在四个阻塞连接全部仍存在时完成至少一次完整循环，
+并在全部阻塞连接超时后继续完成循环。阻塞连接分别计时，不能以串行读取掩盖超时。
+
+首轮通过：115 次 worker 循环及一次最终认证；每轮每个 worker 都有 4 次完整循环与全部四个阻塞连接重叠，
+12 个阻塞连接在 5.003–5.055 秒内关闭，整次运行 36.887 秒。
+真实 fixture SHA256 为 `0abb484baa2d9028a6c87049341af43da18acd2ad03274e7f7c2ab07aa8b59a3`。
+报告 `output/account-reliability-tests.json` 不记录密码、token、验证码或私钥。
+
+控制器先把测试 actor 放入随机命名的 Windows Job，再发启动许可；全部后代均受本轮 Job 管理。
+120 秒看门狗覆盖 actor 内的准备、测试与退出；报文有独立总时限和长度上限，工作线程退出前关闭所有登记连接。
+最终必须确认 native fixture 正常停止、端口可重新绑定、Job 活动进程为零，再清理经绝对路径校验的本轮目录。
+只有 `passed=true`、`owned_job_empty=true` 与 `fixture_cleanup_complete=true` 才算通过；`running` 不算验收。
+失败只保留阶段/异常类型，不能把底层异常或认证报文直接输出。
+
+本项是有界并发功能验收，不代表长期 soak、生产容量、PostgreSQL 并发或新 GUI 验收。
+当前服务器的已完成客户端线程对象直到 Stop 才统一 join，连接反复建立后的资源增长仍需单独量化和处理。
+正式服务只读检查仍就绪、无 pending，实际客户端 SHA256 不变；本轮没有重启正式服务、改证书或重编 EXE。
+
 ## 证书事务只读诊断（2026-10-20）
 
 现在可以读取错误提示涉及的事务记录，不必手工打开含私钥的事务目录：

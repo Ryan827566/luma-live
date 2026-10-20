@@ -1,4 +1,14 @@
-# Latest checkpoint: read-only certificate transaction diagnostics (2026-10-20)
+# Latest checkpoint: concurrent TLS authentication with stalled peers (2026-10-21)
+
+`scripts/windows/test_account_reliability.py` adds one bounded concurrency acceptance case using the existing in-memory native TLS fixture and Python wire clients. Three ten-second waves each run four distinct authenticated accounts alongside two silent TCP handshakes and two incomplete TLS application frames. The first run completed 115 worker cycles plus a final authenticated health cycle; every worker completed four whole cycles while all four stalled peers were still open in each wave, and continued after their timeouts. The twelve stalled peers closed in 5.003–5.055 seconds.
+
+Each cycle checks login/validation/profile identity, unique session credentials, logout and rejection of the logged-out token. The controller owns a gated exercise subtree in a random Windows Job with a 120-second watchdog. Final native shutdown, port vacancy, zero active Job processes and fixture-directory cleanup all passed; `output/account-reliability-tests.json` records the exact binary hash, timings and counts without credentials.
+
+One helper completed final read-only review without blocking findings. The watchdog bounds the actor; controller preparation and subsequent Job termination/directory cleanup have separate bounds and are included in the recorded total elapsed time.
+
+This is short concurrent functional evidence, not a capacity benchmark, long-duration resource-leak test, PostgreSQL concurrency acceptance or GUI rerun. The server retains completed client-thread objects until Stop, so connection-churn resource behavior remains a concrete reliability gap. No production code/binary, service lifecycle or certificate was changed. Production read-only status remains ready with no pending certificate transaction; the actual client hash is unchanged. Production renewal, CA rotation, physical UI/provider acceptance and the other product gates below remain open.
+
+# Earlier checkpoint: read-only certificate transaction diagnostics (2026-10-20)
 
 `manage_account_certificates.py transaction-status` now inspects the pending record, or a specific historical transaction with `--transaction-id`. It separates the recorded outcome, current disk pair/trust and file-level recovery eligibility. Mixed old/new pairs remain eligible for explicit recovery; changed trust, foreign/missing files and an expired old certificate are reported as blockers. Expired historical leaves or a later renewal do not invalidate a saved terminal outcome. No pending record does not imply that any previous activation succeeded.
 

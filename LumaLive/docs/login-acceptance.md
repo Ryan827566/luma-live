@@ -1,5 +1,11 @@
 # Account page and authentication acceptance
 
+## 2026-10-21: bounded concurrent TLS authentication
+
+One isolated concurrency case passed using the existing native in-memory TLS server and four Python wire clients: three ten-second waves, each overlapping normal login/validate/profile/logout cycles with two stalled handshakes and two incomplete TLS frames. There were 115 completed worker cycles plus one final authenticated health cycle. Every worker completed four full cycles before any stalled peer closed in every wave, then continued after all four closed. Identity/session isolation and rejection after logout were checked in every cycle.
+
+All twelve stalled peers closed in 5.003–5.055 seconds. Graceful native shutdown, port vacancy, zero active processes in the owned Windows Job and fixture cleanup passed. Report: `output/account-reliability-tests.json`; full run 36.887 seconds. This establishes bounded concurrent behavior only, not production capacity, long-duration resource stability, PostgreSQL load or new native-client/GUI acceptance. No production restart, certificate change or binary rebuild occurred; earlier actual-client acceptance remains unchanged.
+
 ## 2026-10-20: read-only transaction diagnostic acceptance
 
 Fourteen isolated transaction-inspection tests and thirteen certificate regressions passed. The new `transaction-status` command reports record integrity, current disk state and file-level recovery blockers without restarting services, changing files, reading launch secrets or making network requests. Historical terminal records remain distinct from current deployment health; see local-account-deployment.md for commands and exit codes.
