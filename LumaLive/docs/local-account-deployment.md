@@ -1,5 +1,37 @@
 # 本机账户服务部署与测试
 
+## 证书事务只读诊断（2026-10-20）
+
+现在可以读取错误提示涉及的事务记录，不必手工打开含私钥的事务目录：
+
+```powershell
+C:/Python314/python.exe -B scripts/windows/manage_account_certificates.py transaction-status
+C:/Python314/python.exe -B scripts/windows/manage_account_certificates.py transaction-status --transaction-id <32位事务ID>
+```
+
+默认只检查当前 pending；没有 pending 返回 `no_pending`，不推断历史操作成功。指定 ID 可检查 `committed` 或 `rolled_back` 历史记录。
+没有终态或 pending 的记录标为 `incomplete`；双重终态、同 ID 的 pending 与终态并存、清单/快照损坏等标为 `invalid`。
+报告中的 `current_live_pair` 单独区分 `old/new/mixed/external/unreadable`；
+后续续期改变了活动文件或历史证书已到期，不会把原来的有效终态记录误判为失败。
+
+对当前 pending，`recovery_assessment=files_eligible` 仅表示检查时的文件条件允许尝试现有恢复流程：
+旧证书及 CA 有效、快照链/用途/IP/密钥匹配、信任未变、活动文件各自属于旧/新快照。
+过期的未用候选不阻碍有效旧证书恢复；旧证书过期、文件丢失或外来文件、信任变化会报告具体阻断码。
+这不是恢复成功保证：诊断不读取运行配置/投递密钥，不连接账户服务，不检查所有权或运行时准备情况，也不自动恢复。
+只有在维护窗口内明确允许中断会话时，才执行下文实现的 `recover --allow-service-restart`。
+
+命令对部署锁使用零等待；占用时返回 `busy`，不读取事务文件，`pending=null` 表示尚未观察。
+锁访问失败与占用分别报告。JSON 读取实际限制为 128 KiB，证书解析共用十秒预算，错误只输出固定码而不回显文件内容或底层异常。
+退出码：0 为无 pending 或有效历史检查；1 为存在 pending 或部署操作忙；2 为损坏、恢复阻断或检查失败。
+历史查询遇到另一个当前 pending 会保留历史结果，同时提示检查当前事务。
+`state` 可保留超时前已读到的事务类别；必须结合 `issues`、`recovery_assessment` 和退出码判断核验是否完成，不能仅凭 `committed` 推断本次检查成功。
+
+14 项独立诊断测试通过，包括真实跨进程占锁/放弃锁、两种半对替换、旧/新/CA 期限、历史终态与后续文件变化、
+坏 JSON/形状/大小/ID/hash、快照损坏、冲突和缺失终态、异常信息脱敏及只读 CLI。
+每次诊断前后比较文件哈希，禁止调用生命周期、网络、运行配置和事务写入方法；测试目录清理完成。
+13 项既有证书回归也通过，一名协作者完成最终只读审查，无阻断项。报告：`output/account-certificate-inspection-tests.json`。
+本轮未重启正式服务、改正式证书或重编客户端，正式激活及其他未完成范围保持不变。
+
 ## 同一 CA 下的证书激活与可恢复回滚（2026-10-20）
 
 已实现计划内叶证书续期事务，并完成隔离验收。只允许从正在运行、所有权明确、在线证书与磁盘一致的账户服务开始；

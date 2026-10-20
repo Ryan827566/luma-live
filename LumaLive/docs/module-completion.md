@@ -1,4 +1,12 @@
-# Latest checkpoint: recoverable same-CA certificate activation (2026-10-20)
+# Latest checkpoint: read-only certificate transaction diagnostics (2026-10-20)
+
+`manage_account_certificates.py transaction-status` now inspects the pending record, or a specific historical transaction with `--transaction-id`. It separates the recorded outcome, current disk pair/trust and file-level recovery eligibility. Mixed old/new pairs remain eligible for explicit recovery; changed trust, foreign/missing files and an expired old certificate are reported as blockers. Expired historical leaves or a later renewal do not invalidate a saved terminal outcome. No pending record does not imply that any previous activation succeeded.
+
+Fourteen isolated diagnostic tests and thirteen certificate regressions passed. The diagnostic fixtures compare file hashes before/after every inspection and prohibit lifecycle, launch-environment, network and transaction mutation calls. Native cross-process lock contention returns busy immediately without reading files; abandonment is handled and ownership released. Corrupt/oversized records and exception details cannot expose private content. Report: `output/account-certificate-inspection-tests.json`.
+
+One helper completed final read-only review without blocking findings. This adds inspection only. It does not verify the running service, promise successful recovery, or change the production activation/CA rotation/disaster-recovery boundaries below.
+
+# Earlier checkpoint: recoverable same-CA certificate activation (2026-10-20)
 
 Planned leaf renewal now has an operation-locked transaction: private old/new snapshots, a write-ahead pending record, acknowledged owned shutdown, pair replacement, owned startup and verification of the certificate actually served over TLS. Pending transactions block ordinary preparation/start/restart and require explicit recovery to the old pair. A failed activation attempts verified rollback; interruption or failure before the terminal-record rename retains the pending record. That atomic rename commits the outcome. Failed rename acknowledgement triggers verification; if the terminal record exists but confirmation fails, the command reports an uncertain outcome and requests inspection rather than claiming recovery is pending.
 

@@ -1,5 +1,11 @@
 # Account page and authentication acceptance
 
+## 2026-10-20: read-only transaction diagnostic acceptance
+
+Fourteen isolated transaction-inspection tests and thirteen certificate regressions passed. The new `transaction-status` command reports record integrity, current disk state and file-level recovery blockers without restarting services, changing files, reading launch secrets or making network requests. Historical terminal records remain distinct from current deployment health; see local-account-deployment.md for commands and exit codes.
+
+No GUI rerun, production lifecycle/certificate change or binary rebuild was performed. This adds diagnostic evidence only; actual-client and planned-renewal acceptance remain the earlier checkpoints.
+
 ## 2026-10-20: certificate transaction isolation acceptance
 
 Same-CA leaf activation and rollback now retain a private write-ahead journal, serialize with deployment commands and verify the certificate actually served after owned startup. An interrupted transaction blocks ordinary preparation/start/restart until explicit recovery restores the saved old pair. Activation and recovery require `--allow-service-restart`; they invalidate active sessions and are not routine client checks.

@@ -1,7 +1,8 @@
 """Inspect, stage, or explicitly activate/recover local account TLS certificates.
 
-Status/stage/inspect do not change live files or service lifecycle. Activation
-and recovery require --allow-service-restart and retain private rollback files.
+Status/stage/inspect/transaction-status do not change live files or service
+lifecycle. Activation and recovery require --allow-service-restart and retain
+private rollback files.
 """
 import argparse
 from datetime import datetime, timezone
@@ -36,11 +37,11 @@ def openssl():
     raise RuntimeError('OpenSSL command-line tool is unavailable')
 
 
-def run_ssl(arguments, *, check=True):
+def run_ssl(arguments, *, check=True, timeout=15):
     env = {k: v for k, v in pg.environment().items()
            if not k.startswith(('OPENSSL_', 'LUMALIVE_', 'SSL_CERT_'))}
     env['OPENSSL_CONF'] = str(ROOT / 'scripts/windows/account-openssl.cnf')
-    return pg.run([openssl(), *arguments], env=env, timeout=15, check=check)
+    return pg.run([openssl(), *arguments], env=env, timeout=timeout, check=check)
 
 
 def pem_bytes(path):
@@ -52,10 +53,10 @@ def pem_bytes(path):
     return data
 
 
-def certificate(path):
+def certificate(path, *, timeout=15):
     data = pem_bytes(path)
     der = ssl.PEM_cert_to_DER_cert(data.decode('ascii'))
-    dates = dict(line.split('=', 1) for line in run_ssl(['x509', '-in', path, '-noout', '-dates']).stdout.splitlines())
+    dates = dict(line.split('=', 1) for line in run_ssl(['x509', '-in', path, '-noout', '-dates'], timeout=timeout).stdout.splitlines())
     return {'sha256': hashlib.sha256(der).hexdigest(),
             'not_before': ssl.cert_time_to_seconds(dates['notBefore']),
             'not_after': ssl.cert_time_to_seconds(dates['notAfter'])}
@@ -71,9 +72,9 @@ def describe(record, now, warning_days):
             'days_remaining': int((record['not_after'] - now) // DAY)}
 
 
-def validate_pair(ca, cert, key, *, check_time=True):
+def validate_pair(ca, cert, key, *, check_time=True, timeout=15):
     result = run_ssl(['verify', *([] if check_time else ['-no_check_time']), '-no-CApath', '-no-CAstore', '-CAfile', ca,
-                      '-purpose', 'sslserver', '-verify_ip', '127.0.0.1', cert], check=False)
+                      '-purpose', 'sslserver', '-verify_ip', '127.0.0.1', cert], check=False, timeout=timeout)
     if result.returncode:
         raise RuntimeError('Certificate chain, server purpose, validity or loopback IP verification failed')
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -225,13 +226,19 @@ def main():
     renew.add_argument('--days', type=int, default=365)
     inspect = sub.add_parser('inspect')
     inspect.add_argument('--candidate-id', required=True)
+    transaction_status = sub.add_parser('transaction-status')
+    transaction_status.add_argument('--transaction-id')
     activate = sub.add_parser('activate')
     activate.add_argument('--candidate-id', required=True)
     activate.add_argument('--allow-service-restart', action='store_true')
     recover = sub.add_parser('recover')
     recover.add_argument('--allow-service-restart', action='store_true')
     args = parser.parse_args()
-    if args.action in ('activate', 'recover'):
+    if args.action == 'transaction-status':
+        import account_certificate_inspection as inspection
+        report = inspection.inspect(args.transaction_id)
+        code = 2 if report['issues'] else 1 if report['pending'] or report['state'] == 'busy' else 0
+    elif args.action in ('activate', 'recover'):
         if not args.allow_service_restart:
             parser.error('This operation invalidates active sessions; --allow-service-restart is required')
         import account_certificate_transaction as transaction
