@@ -28,6 +28,8 @@ ROOT, ownership, tls = base.ROOT, base.ownership, base.tls
 require, save = base.require, base.save
 PERMIT = b'LumaLive isolated connection churn\n'
 BATCHES, PER_BATCH, WARMUP = 5, 128, 32
+SOAK_INTERVALS, SOAK_SECONDS, SOAK_WATCHDOG = 10, 30, 420
+SOAK_QUIET_WARMUP_SECONDS = 35
 kernel = ctypes.WinDLL('kernel32', use_last_error=True)
 
 
@@ -239,10 +241,13 @@ def exercise(args):
         with (directory / 'native.log').open('wb') as log:
             try:
                 process = subprocess.Popen([str(args.fixture),
-                                           'server' if args.scenario == 'churn' else 'reuse', str(endpoint)], cwd=ROOT,
+                                           'server' if args.scenario in ('churn', 'soak') else 'reuse', str(endpoint)], cwd=ROOT,
                                            env=env, stdin=subprocess.PIPE, stdout=log, stderr=log,
                                            creationflags=subprocess.CREATE_NO_WINDOW)
-                if args.scenario != 'churn':
+                if args.scenario == 'soak':
+                    phase = 'soak'
+                    soak(process, endpoint, context, connections, result, directory)
+                elif args.scenario != 'churn':
                     phase = args.scenario
                     reuse(process, endpoint, context, connections, result, directory / 'native.log',
                           session_restart=args.scenario == 'session-restart')
@@ -444,6 +449,140 @@ def churn(process, endpoint, context, connections, result, log, expected):
             pass
 
 
+def soak_interval(endpoint, context, users, seen, seen_lock, detail):
+    """Four paced workers, then no live workload threads or sockets at return."""
+    connections, stop = base.Connections(), threading.Event()
+    gate = threading.Barrier(5, timeout=5)
+    counts, first, last, errors = [0] * 4, [None] * 4, [None] * 4, []
+    started, until = None, None
+
+    def worker(index):
+        try:
+            gate.wait()
+            while not stop.is_set() and time.monotonic() < until:
+                cycle_started = time.monotonic()
+                client = base.Client(endpoint, context, connections)
+                try:
+                    if index < 2:
+                        base.authenticated_cycle(client, users[index], seen, seen_lock)
+                    else:
+                        base.expect(client.exchange(13), 14)
+                finally:
+                    client.close()
+                counts[index] += 1
+                if first[index] is None:
+                    first[index] = time.monotonic() - started
+                last[index] = cycle_started - started
+                stop.wait(.15 if index < 2 else .1)
+        except BaseException as error:
+            errors.append({'worker': index, 'error_type': type(error).__name__})
+            stop.set()
+
+    threads = [threading.Thread(target=worker, args=(i,), daemon=True) for i in range(4)]
+    try:
+        for thread in threads:
+            thread.start()
+        started = time.monotonic()
+        until = started + SOAK_SECONDS
+        gate.wait()
+        for thread in threads:
+            thread.join(max(0, until + 15 - time.monotonic()))
+        require(not any(t.is_alive() for t in threads), 'soak_workers_not_finished')
+        require(not errors, 'soak_worker_failure')
+        require(all(n >= 10 for n in counts[:2]) and all(n >= 30 for n in counts[2:]),
+                'soak_insufficient_cycles')
+        require(all(value is not None and value >= SOAK_SECONDS - 5 for value in last),
+                'soak_worker_stopped_early')
+        require(time.monotonic() >= until, 'soak_interval_too_short')
+    finally:
+        stop.set()
+        gate.abort()
+        connections.close_all()
+        deadline = time.monotonic() + 5
+        for thread in threads:
+            if thread.ident is not None:
+                thread.join(max(0, deadline - time.monotonic()))
+        detail.update(auth_cycles_per_worker=counts[:2], ping_cycles_per_worker=counts[2:],
+                      first_completed_seconds=[round(v, 3) if v is not None else None for v in first],
+                      last_started_seconds=[round(v, 3) if v is not None else None for v in last],
+                      worker_errors=errors,
+                      elapsed_seconds=round(time.monotonic() - started, 3) if started else None,
+                      workload_threads_joined=not any(t.is_alive() for t in threads))
+        require(detail['workload_threads_joined'], 'soak_worker_cleanup_incomplete')
+
+
+def soak(process, endpoint, context, connections, result, directory):
+    wait_marker(process, directory / 'native.log', f'READY {endpoint}')
+    control = base.Client(endpoint, context, connections)
+    users = [base.register(control, index) for index in range(2)]
+    seen, lock = set(), threading.Lock()
+
+    def audit_sessions():
+        # A rejected logged-out token alone cannot prove sessions_ was erased.
+        # Use the existing control connection, only after silent measurements.
+        for user in users:
+            current = live_login(control, user, seen)
+            assert_sessions(control, current, [current])
+            base.expect(control.exchange(9, current[0]), 10)
+            rejected = base.expect(control.exchange(11, current[0]), 12, 2)
+            require(rejected[0] == 'invalid_session', 'soak_audit_logout_failed')
+
+    for user in users:
+        base.authenticated_cycle(control, user, seen, lock)
+    audit_sessions()  # Warm up both authentication and session-list paths.
+    for _ in range(WARMUP):
+        client = base.Client(endpoint, context, connections)
+        try:
+            base.expect(client.exchange(13), 14)
+        finally:
+            client.close()
+    # Short runs can include initialization threads which exit during longer
+    # idle periods. Fix the pre-baseline quiet duration in advance; do not lower
+    # the baseline adaptively in response to a failed resource checkpoint.
+    result['quiet_warmup_samples'] = []
+    quiet_started = time.monotonic()
+    for offset in range(0, SOAK_QUIET_WARMUP_SECONDS + 1, 5):
+        time.sleep(max(0, quiet_started + offset - time.monotonic()))
+        reading = sample(process)
+        reading['elapsed_seconds'] = round(time.monotonic() - quiet_started, 3)
+        result['quiet_warmup_samples'].append(reading)
+    result['baseline'] = baseline = settled(process)
+    result['soak_intervals'] = []
+    workload_started = time.monotonic()
+    for index in range(SOAK_INTERVALS):
+        detail = {'interval': index + 1, 'planned_active_seconds': SOAK_SECONDS}
+        result['soak_intervals'].append(detail)
+        try:
+            soak_interval(endpoint, context, users, seen, lock, detail)
+            # All four workers have joined. No requests/new sockets until the
+            # three stable samples finish; the original control TLS stays open.
+            reading = settled(process)
+            reading['handle_delta'] = reading['handles'] - baseline['handles']
+            detail['silent_resources'] = reading
+            require(abs(reading['handle_delta']) <= 8, 'soak_handle_bound_exceeded')
+            require(reading['live_threads'] == baseline['live_threads'], 'soak_thread_bound_exceeded')
+            audit_sessions()
+            base.expect(control.exchange(13), 14)
+            detail.update(session_lists_current_only=True, accounts_audited=2,
+                          persistent_control_ping_passed=True, passed=True)
+        finally:
+            save(directory / 'result.json', result)  # Partial evidence stays failed.
+    result.update(workload_and_checkpoints_seconds=round(time.monotonic() - workload_started, 3),
+                  total_auth_cycles=sum(sum(d['auth_cycles_per_worker']) for d in result['soak_intervals']),
+                  total_ping_cycles=sum(sum(d['ping_cycles_per_worker']) for d in result['soak_intervals']),
+                  resource_bound_satisfied=True, soak_passed=True)
+    raw = connections.add(socket.create_connection(('127.0.0.1', endpoint), timeout=3))
+    time.sleep(.2)
+    require(sample(process)['live_threads'] >= baseline['live_threads'] + 1,
+            'soak_stop_handshake_not_accepted')
+    started = time.monotonic()
+    process.communicate(b'\n', timeout=5)
+    result['stop_seconds'] = round(time.monotonic() - started, 3)
+    require(process.returncode == 0 and result['stop_seconds'] < 2, 'soak_native_shutdown_failed')
+    closed_peers((control.peer, raw))
+    result['stop_with_open_peers_passed'] = True
+
+
 def main(args):
     started = time.monotonic()
     report = {'passed': False, 'status': 'running', 'fixture_cleanup_complete': False,
@@ -452,7 +591,7 @@ def main(args):
               'watchdog_seconds': 120, 'production_service_restarted': False,
               'scope': 'bounded isolated TLS Ping churn; memory observational, not a production soak'}
     report['scenario'] = args.scenario
-    if args.scenario != 'churn':
+    if args.scenario in ('reuse', 'session-restart'):
         for field in ('warmup_connections', 'batches_planned', 'connections_per_batch'):
             report.pop(field)
         report.update(scope='three Start/Stop cycles on one isolated TLS service instance',
@@ -460,6 +599,19 @@ def main(args):
         if args.scenario == 'session-restart':
             report.update(scope='two restart boundaries with live and disconnected sessions on one TLS service instance',
                           ping_connections_per_cycle=0)
+    elif args.scenario == 'soak':
+        for field in ('batches_planned', 'connections_per_batch'):
+            report.pop(field)
+        report.update(scope='five-minute isolated in-memory TLS workload with quiet checkpoints; memory observational',
+                      intervals_planned=SOAK_INTERVALS, active_seconds_per_interval=SOAK_SECONDS,
+                      planned_active_seconds=SOAK_INTERVALS * SOAK_SECONDS,
+                      auth_workers=2, ping_workers=2, minimum_auth_cycles_per_worker_per_interval=10,
+                      minimum_ping_cycles_per_worker_per_interval=30,
+                      auth_pause_seconds=.15, ping_pause_seconds=.1,
+                      handle_delta_tolerance=8, live_threads_must_equal_baseline=True,
+                      silent_samples_per_checkpoint=3, watchdog_seconds=SOAK_WATCHDOG,
+                      quiet_warmup_seconds=SOAK_QUIET_WARMUP_SECONDS,
+                      production_capacity_checked=False, memory_bound_checked=False)
     save(args.report, report)
     directory, process, job, empty = None, None, None, False
     try:
@@ -479,7 +631,7 @@ def main(args):
                     stdin=subprocess.PIPE, stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW)
                 job = ownership.child_job(process, job_name)
                 try:
-                    process.communicate(PERMIT, timeout=120)
+                    process.communicate(PERMIT, timeout=report['watchdog_seconds'])
                 except subprocess.TimeoutExpired:
                     report['watchdog_expired'] = True
                 finally:
@@ -518,7 +670,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--scenario', choices=('churn', 'reuse', 'session-restart'), default='churn')
+    parser.add_argument('--scenario', choices=('churn', 'reuse', 'session-restart', 'soak'), default='churn')
     parser.add_argument('--fixture', type=Path)
     parser.add_argument('--report', type=Path)
     parser.add_argument('--expect', choices=('bounded', 'retained'), default='bounded')
@@ -526,13 +678,14 @@ if __name__ == '__main__':
     parser.add_argument('--directory', help=argparse.SUPPRESS)
     parser.add_argument('--job', help=argparse.SUPPRESS)
     args = parser.parse_args()
-    require(args.scenario == 'churn' or args.expect == 'bounded', 'reuse_requires_bounded_mode')
+    require(args.scenario == 'churn' or args.expect == 'bounded', 'scenario_requires_bounded_mode')
     if args.fixture is None:
-        fixture_group = 'churn' if args.scenario == 'churn' else 'reuse'
+        fixture_group = 'churn' if args.scenario in ('churn', 'soak') else 'reuse'
         args.fixture = ROOT / f'output/auth-{fixture_group}-20261021/Release/luma_auth_tls_fixture.exe'
     if args.report is None:
         args.report = ROOT / {'churn': 'output/account-connection-churn.json',
                              'reuse': 'output/account-instance-reuse.json',
+                             'soak': 'output/account-auth-soak.json',
                              'session-restart': 'output/account-session-restart.json'}[args.scenario]
     args.fixture = args.fixture.resolve()
     require(args.fixture.is_relative_to(ROOT / 'output')

@@ -1,5 +1,43 @@
 # 本机账户服务部署与测试
 
+## 五分钟隔离 TLS 负载脚本：验收尚未完成（2026-10-21）
+
+```powershell
+C:/Python314/python.exe -B scripts/windows/test_account_connection_churn.py --scenario soak
+```
+
+复用 `output/auth-churn-20261021/Release/luma_auth_tls_fixture.exe`，SHA256 仍为
+`7663dc9de029c88f55fa85766d3ff274a2f275388700a4f9e10def4e1523ddba`。没有重编二进制。
+计划运行十段各 30 秒的负载，两名不同账户 worker 每次新建 TLS 连接，完成登录、身份/资料验证、登出和旧 token 拒绝；
+另两名 worker 反复建立 TLS Ping 连接。认证/Ping 循环分别暂停 0.15/0.1 秒，属于有限节奏的功能负载，不是吞吐量或容量基准。
+每段要求每名认证/Ping worker 至少完成 10/30 次循环，并在最后五秒仍启动了成功完成的循环。
+
+四名 worker 全部 join 后，保留原 TLS 控制连接，不发送请求或新建连接，读取三次稳定的资源样本。
+句柄相对基线必须在 ±8 内，活动线程必须精确回到基线。采样后才在原控制连接上依次登录两个账户，
+严格检查会话列表只包含检查时新建的当前会话，再登出；这避免仅凭旧 token 拒绝误判会话记录已删除。
+32 次 Ping 和认证路径预热后，固定静默 35 秒，每五秒记录一次，然后确定基线；不根据负载失败结果动态降低基线。
+actor 看门狗为 420 秒，原有场景仍为 120 秒；控制器准备、Job 终止及目录清理另有边界。内存仅记录观察值。
+
+**目前两次运行均失败，不能算完成五分钟验收。**
+
+- 首次运行完成一段负载，句柄保持 100，线程从预热基线 6 降至 4，触发精确比较失败；耗时 38.978 秒。
+  保留报告 `output/account-auth-soak-initial-thread-baseline.json`。
+- 加入固定静默预热后，观察到线程在约 30 秒从 6 降到 3。正式前八段均为 100 句柄、3 线程，会话审计通过。
+  第九段业务 worker 均完成并 join，但静默线程变成 5、句柄仍为 100，因此失败。
+  累计 736 次认证循环、4,269 次 Ping，耗时 331.851 秒；第十段及最终正常停机未获验收。
+  报告 `output/account-auth-soak.json`，另保留同内容的 `output/account-auth-soak-quiet-baseline.json`。
+
+两次均 `passed=false`、`native_shutdown_complete=false`，同时 `owned_job_empty=true`、`fixture_cleanup_complete=true`：
+失败清理成功不等于负载/正常停机验收成功。尚未识别变化线程的来源，不能认定 worker 泄漏，也不能宣称长期稳定。
+下一步在额度允许时补充隔离进程的只读线程来源诊断，再确定有证据支持的测量方法并完整重跑。
+现有门槛未放宽。将来只有完整十段通过、正常停机/端口空闲、Job 清零和目录清理均成功，才可记录为该范围通过。
+
+受入口分派改动影响的原 churn 回归已通过，另存 `output/account-connection-churn-soak-regression.json`：
+五批句柄增量全为零、活动线程均为 6，Stop 0.693 秒，总耗时 17.508 秒，Job/目录清理完成。
+一名协作者确认脚本可作为诊断验收代码保存，无新增阻断；这不改变 soak 尚未通过的结论。
+其余已完成测试未重跑。16:15 上海时间只读检查正式服务 ready、无 pending，实际客户端哈希不变。
+本轮只改 Python 测试和文档，未重启正式服务、修改正式证书或操作用户客户端；线程回收源码仍未部署。
+
 ## 未登出会话跨停机重启清理验收（2026-10-21）
 
 ```powershell

@@ -1,5 +1,13 @@
 # Account page and authentication acceptance
 
+## 2026-10-21: longer isolated TLS test remains incomplete
+
+The new `--scenario soak` controller plans ten 30-second paced authentication/Ping intervals with silent handle/thread checkpoints and per-account session-list audits. It uses the unchanged in-memory churn fixture, not the actual client. A fixed 35-second quiet warm-up precedes the baseline, and a 420-second actor watchdog bounds the run.
+
+Neither attempted soak passed. The initial exact-thread check failed on a six-to-four decline; after fixed warm-up, eight intervals passed at 100 handles and three threads, but interval nine measured five threads with the same handles. All workload workers had joined. The second attempt completed 736 full authentication cycles and 4,269 Ping cycles in 331.851 seconds before failure. Both owned Jobs and directories were cleaned; graceful native shutdown was not accepted. Preserve `output/account-auth-soak-initial-thread-baseline.json`, `output/account-auth-soak-quiet-baseline.json` and `output/account-auth-soak.json` as failed evidence. Thread-source diagnosis is still required; no leak, capacity or memory-stability conclusion follows.
+
+The affected original churn regression passed separately in `output/account-connection-churn-soak-regression.json` with all five handle deltas zero and complete cleanup. One helper reviewed the harness without blocking findings. No production lifecycle, certificate, binary or GUI interaction changed; read-only status at 16:15 Shanghai remained ready/no pending and the actual client hash was unchanged. Earlier GUI and restart acceptance remains the evidence for those separate scopes.
+
 ## 2026-10-21: sessions retained until Stop and cleared across restart
 
 The unchanged isolated reuse fixture passed two observed Stop/Start boundaries with sessions that never send Logout. Each running period establishes two sessions for one account, successfully rotates/validates their credentials, and disconnects one peer. After its server worker exits, the remaining peer still lists both session IDs. Following restart, the original account can log in and its list contains only the fresh session, with two and then four prior records absent. Old credentials are checked to remain unexpired, excluding natural expiry as the cause.
