@@ -1,5 +1,32 @@
 # 本机账户服务部署与测试
 
+## 未登出会话跨停机重启清理验收（2026-10-21）
+
+```powershell
+C:/Python314/python.exe -B scripts/windows/test_account_connection_churn.py --scenario session-restart
+```
+
+复用下述同对象三轮启停 fixture，二进制 SHA256 仍为 `e8086bc61f723df30c2d07e9ddc6b26e9ef8f35d35ea954e3cc1926420c3fd09`，本轮没有重编。
+每轮为同一账户建立两条会话，分别成功刷新 access/refresh 并验证身份，全程不发送 Logout。
+其中一条连接关闭后，先通过稳定线程计数确认其服务器 worker 已退出，再由另一条连接查询会话列表，必须仍包含两个 session ID。
+停机前再次验证保持连接的会话有效；Stop 后对端关闭、端口可独占绑定，才允许重启。
+
+下一轮先用累计旧凭据做负测，再以原账户重新登录。旧凭据的保存有效期必须仍超过当前时间 60 秒，
+新会话列表严格检查条数、每条七个字段、session ID 集合及 current 标志，只能包含本轮新 session。
+两次重启后分别确认此前 2 条及累计 4 条记录缺席。新连接拒绝旧 access/refresh 的 `invalid_session`
+只说明协议的连接绑定约束；停机清理的证据来自前后会话列表对照，不能将两者混为一谈。
+共三段运行、两次可观察的 Stop→Start 边界，最后一次 Stop 后没有再启动，不能宣称三次重启清理均已验证。
+
+首轮通过，报告 `output/account-session-restart.json`：总耗时 20.790 秒，Stop 为 1.022、1.030、1.021 秒；
+停止态句柄为 92、92、93，活动线程均为 4。必须有 `passed=true`、`active_session_restart_passed=true`、
+`restart_boundaries_verified=2`、`owned_job_empty=true`、`fixture_cleanup_complete=true` 才是本项完整证据。
+凭据只保留在测试内存中，报告仅含计数和结果。原 reuse 路径的受影响回归也通过，另存
+`output/account-instance-reuse-session-regression.json`，保留全部原报告；一名协作者最终只读审查无阻断。
+
+本轮只改 Python 验收控制器和文档，未重编任何 EXE、重启正式服务、修改证书或操作用户客户端。
+11:04 上海时间只读检查仍 ready、无 pending，实际客户端哈希不变。此次补齐有限轮次的活跃会话重启边界；
+长期负载、容量/活动连接上限、PostgreSQL 并发、实际 GUI 和正式部署仍须按各自范围继续验收。
+
 ## 同一账户服务对象重复启停验收（2026-10-21）
 
 原生 TLS fixture 新增 `reuse` 模式，只创建一次 AuthService 和内存库，在同一个端口连续执行三轮 Start/Stop。

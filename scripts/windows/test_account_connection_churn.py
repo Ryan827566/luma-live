@@ -8,6 +8,7 @@ import ctypes
 from ctypes import wintypes as w
 from datetime import datetime, timezone
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -238,12 +239,13 @@ def exercise(args):
         with (directory / 'native.log').open('wb') as log:
             try:
                 process = subprocess.Popen([str(args.fixture),
-                                           'reuse' if args.scenario == 'reuse' else 'server', str(endpoint)], cwd=ROOT,
+                                           'server' if args.scenario == 'churn' else 'reuse', str(endpoint)], cwd=ROOT,
                                            env=env, stdin=subprocess.PIPE, stdout=log, stderr=log,
                                            creationflags=subprocess.CREATE_NO_WINDOW)
-                if args.scenario == 'reuse':
-                    phase = 'instance_reuse'
-                    reuse(process, endpoint, context, connections, result, directory / 'native.log')
+                if args.scenario != 'churn':
+                    phase = args.scenario
+                    reuse(process, endpoint, context, connections, result, directory / 'native.log',
+                          session_restart=args.scenario == 'session-restart')
                 else:
                     churn(process, endpoint, context, connections, result, directory / 'native.log', args.expect)
                 result['native_shutdown_complete'] = True
@@ -285,8 +287,58 @@ def closed_peers(peers):
             pass
 
 
-def reuse(process, endpoint, context, connections, result, log):
+def remember_credentials(fields, seen, *, refreshed=False):
+    require(all(fields[:3]), 'empty_session_credentials')
+    for category, value in zip(('access', 'refresh', 'session')[:2 if refreshed else 3], fields):
+        digest = (category, hashlib.sha256(value.encode('ascii')).hexdigest())
+        require(digest not in seen, 'duplicate_session_credentials')
+        seen.add(digest)
+
+
+def live_login(client, user, seen):
+    challenge = base.expect(client.exchange(5, user['email'], user['device'], user['display']), 6, 4)
+    require(challenge[2] == '0' and len(challenge[1]) == 64, 'unexpected_login_challenge')
+    proof = hmac.new(base.verifier(user['password'], challenge),
+                     bytes.fromhex(challenge[1]), 'sha256').hexdigest()
+    fields = base.expect(client.exchange(7, proof, ''), 8, 11)
+    require(fields[3:9] == [user['device'], user['display'], user['id'],
+                            user['username'], user['email'], user['display']], 'login_identity_mismatch')
+    remember_credentials(fields, seen)
+    validate_live(client, fields)
+    return fields
+
+
+def validate_live(client, fields):
+    require(min(int(fields[9]), int(fields[10])) > time.time() + 60, 'session_near_expiry')
+    require(base.expect(client.exchange(11, fields[0]), 8, 11) == [fields[0], '', *fields[2:]],
+            'validated_identity_mismatch')
+    require(base.expect(client.exchange(15, fields[0]), 16, 6)[:4] == fields[5:9],
+            'profile_identity_mismatch')
+
+
+def refresh_live(client, fields, seen):
+    refreshed = base.expect(client.exchange(54, fields[0], fields[1]), 55, 11)
+    require(refreshed[2:9] == fields[2:9], 'refresh_identity_mismatch')
+    remember_credentials(refreshed, seen, refreshed=True)
+    validate_live(client, refreshed)
+    return refreshed
+
+
+def assert_sessions(client, current, expected):
+    fields = base.expect(client.exchange(39, current[0]), 40)
+    require(fields and fields[0] == str(len(expected)) and len(fields) == 1 + 7 * len(expected),
+            'session_list_count_mismatch')
+    rows = [fields[i:i + 7] for i in range(1, len(fields), 7)]
+    require({row[0] for row in rows} == {session[2] for session in expected},
+            'session_list_identity_mismatch')
+    require(all(row[6] == ('1' if row[0] == current[2] else '0') for row in rows),
+            'session_list_current_mismatch')
+
+
+def reuse(process, endpoint, context, connections, result, log, *, session_restart=False):
     user, seen, lock = None, set(), threading.Lock()
+    old_sessions = []  # Sensitive fields stay in memory and never enter the report.
+    ping_connections = 0 if session_restart else 64
     result['reuse_cycles'] = []
     for cycle in range(3):
         if cycle:
@@ -296,9 +348,34 @@ def reuse(process, endpoint, context, connections, result, log):
         client = base.Client(endpoint, context, connections)
         if user is None:
             user = base.register(client, 0)
-        # Same stored account, fresh and unique credentials after every restart.
-        base.authenticated_cycle(client, user, seen, lock)
-        for _ in range(64):
+        if session_restart:
+            # These negative wire checks alone only establish connection binding.
+            # The session-list comparison below independently checks server state.
+            for previous in old_sessions:
+                require(min(int(previous[9]), int(previous[10])) > time.time() + 60,
+                        'old_session_expired_before_restart_check')
+                for kind, values in ((11, previous[:1]), (54, previous[:2])):
+                    rejected = base.expect(client.exchange(kind, *values), 12, 2)
+                    require(rejected[0] == 'invalid_session', 'old_credentials_accepted_after_restart')
+            current = live_login(client, user, seen)
+            assert_sessions(client, current, [current])
+            other = base.Client(endpoint, context, connections)
+            detached = live_login(other, {**user, 'device': 'isolated-disconnected-peer'}, seen)
+            detached = refresh_live(other, detached, seen)
+            before_disconnect = settled(process)
+            other.close()  # No Logout; the session must remain in server memory.
+            after_disconnect = settled(process)
+            require(after_disconnect['live_threads'] < before_disconnect['live_threads'],
+                    'disconnected_worker_not_reaped')
+            assert_sessions(client, current, [current, detached])
+            current = refresh_live(client, current, seen)
+            assert_sessions(client, current, [current, detached])
+            old_count = len(old_sessions)
+            old_sessions.extend((current, detached))
+        else:
+            # Same stored account, fresh and unique credentials after every restart.
+            base.authenticated_cycle(client, user, seen, lock)
+        for _ in range(ping_connections):
             peer = base.Client(endpoint, context, connections)
             try:
                 base.expect(peer.exchange(13), 14)
@@ -310,6 +387,8 @@ def reuse(process, endpoint, context, connections, result, log):
         time.sleep(.1)
         require(sample(process)['live_threads'] >= running['live_threads'] + 1,
                 'reuse_handshake_not_accepted')
+        if session_restart:
+            validate_live(client, current)  # Still valid immediately before Stop, without Logout.
         started = time.monotonic()
         process.stdin.write(b'stop\n')
         process.stdin.flush()
@@ -326,12 +405,22 @@ def reuse(process, endpoint, context, connections, result, log):
             baseline = result['reuse_cycles'][0]['stopped']
             require(abs(stopped['handles'] - baseline['handles']) <= 8
                     and stopped['live_threads'] <= baseline['live_threads'], 'reuse_resources_accumulated')
-        result['reuse_cycles'].append({'cycle': cycle + 1, 'ping_connections': 64,
+        detail = {'cycle': cycle + 1, 'ping_connections': ping_connections,
             'fresh_authentication_passed': True, 'port_vacant': True,
-            'stop_seconds': round(elapsed, 3), 'running': running, 'stopped': stopped})
+            'stop_seconds': round(elapsed, 3), 'running': running, 'stopped': stopped}
+        if session_restart:
+            detail.update(live_sessions_before_stop=2, disconnected_session_retained=True,
+                          refresh_before_stop_passed=True, no_logout_sent=True,
+                          prior_sessions_absent_after_restart=old_count,
+                          old_access_rejections=old_count, old_refresh_rejections=old_count,
+                          current_session_only_after_login=True)
+        result['reuse_cycles'].append(detail)
     process.communicate(b'quit\n', timeout=5)
     require(process.returncode == 0, 'reuse_fixture_exit_failed')
     result['same_instance_reuse_passed'] = True
+    if session_restart:
+        result.update(active_session_restart_passed=True, restart_boundaries_verified=2,
+                      credential_rejection_scope='connection binding; session lists verify old records cleared')
 
 
 def churn(process, endpoint, context, connections, result, log, expected):
@@ -363,11 +452,14 @@ def main(args):
               'watchdog_seconds': 120, 'production_service_restarted': False,
               'scope': 'bounded isolated TLS Ping churn; memory observational, not a production soak'}
     report['scenario'] = args.scenario
-    if args.scenario == 'reuse':
+    if args.scenario != 'churn':
         for field in ('warmup_connections', 'batches_planned', 'connections_per_batch'):
             report.pop(field)
         report.update(scope='three Start/Stop cycles on one isolated TLS service instance',
                       reuse_cycles_planned=3, ping_connections_per_cycle=64)
+        if args.scenario == 'session-restart':
+            report.update(scope='two restart boundaries with live and disconnected sessions on one TLS service instance',
+                          ping_connections_per_cycle=0)
     save(args.report, report)
     directory, process, job, empty = None, None, None, False
     try:
@@ -426,7 +518,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--scenario', choices=('churn', 'reuse'), default='churn')
+    parser.add_argument('--scenario', choices=('churn', 'reuse', 'session-restart'), default='churn')
     parser.add_argument('--fixture', type=Path)
     parser.add_argument('--report', type=Path)
     parser.add_argument('--expect', choices=('bounded', 'retained'), default='bounded')
@@ -434,12 +526,14 @@ if __name__ == '__main__':
     parser.add_argument('--directory', help=argparse.SUPPRESS)
     parser.add_argument('--job', help=argparse.SUPPRESS)
     args = parser.parse_args()
-    require(args.scenario != 'reuse' or args.expect == 'bounded', 'reuse_requires_bounded_mode')
+    require(args.scenario == 'churn' or args.expect == 'bounded', 'reuse_requires_bounded_mode')
     if args.fixture is None:
-        args.fixture = ROOT / f'output/auth-{args.scenario}-20261021/Release/luma_auth_tls_fixture.exe'
+        fixture_group = 'churn' if args.scenario == 'churn' else 'reuse'
+        args.fixture = ROOT / f'output/auth-{fixture_group}-20261021/Release/luma_auth_tls_fixture.exe'
     if args.report is None:
-        args.report = ROOT / ('output/account-instance-reuse.json' if args.scenario == 'reuse'
-                              else 'output/account-connection-churn.json')
+        args.report = ROOT / {'churn': 'output/account-connection-churn.json',
+                             'reuse': 'output/account-instance-reuse.json',
+                             'session-restart': 'output/account-session-restart.json'}[args.scenario]
     args.fixture = args.fixture.resolve()
     require(args.fixture.is_relative_to(ROOT / 'output')
             and args.fixture.name == 'luma_auth_tls_fixture.exe', 'not_an_isolated_fixture')

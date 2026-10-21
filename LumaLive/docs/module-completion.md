@@ -1,4 +1,12 @@
-# Latest checkpoint: reuse of one account service instance (2026-10-21)
+# Latest checkpoint: live-session cleanup across service restart (2026-10-21)
+
+The new isolated `--scenario session-restart` acceptance uses the unchanged reuse fixture to check two Stop/Start boundaries on one AuthService object. In each of three running periods, two sessions for the same account log in and rotate their access/refresh credentials without Logout. After one TLS peer disconnects and its server worker is confirmed reaped, the other peer's session list must still contain both records. The remaining connected session is validated immediately before Stop.
+
+After each restart, the original account logs in again and its session list contains only the new session; all prior session IDs are absent while their saved access/refresh lifetimes are still valid. Old access and refresh requests on the new connection are also rejected. Those wire rejections alone establish connection binding, not cleanup; the before/after session-list comparison supplies the cleanup evidence. Across the two boundaries, two and then four prior session records were absent. The final Stop has no subsequent Start, so the report does not count it as a third observed restart boundary.
+
+The new case passed in 20.790 seconds, with Stop at 1.022/1.030/1.021 seconds, stopped handles 92/92/93 and four stopped live threads each time. Native exit, port vacancy, empty Job and fixture cleanup passed in `output/account-session-restart.json`. The affected original reuse path passed separately in `output/account-instance-reuse-session-regression.json`, preserving earlier reports. One helper completed final read-only review without blockers. Only the Python acceptance controller and documentation changed; no binary was rebuilt. Production read-only status at 11:04 Shanghai remained ready with no pending transaction and the client hash unchanged. This closes the bounded active-session restart gap, not sustained-load/capacity, PostgreSQL or GUI acceptance; worker-reaping deployment still requires an authorized maintenance window.
+
+# Earlier checkpoint: reuse of one account service instance (2026-10-21)
 
 The isolated native TLS fixture now supports three Start/Stop cycles on one AuthService object and the same in-memory store. Each cycle completes fresh authentication for the original account and 64 short TLS Ping connections, then stops with a persistent TLS connection and an accepted incomplete handshake open. Duplicate Start is rejected, repeated Stop succeeds, both peers close, and the port can be exclusively rebound before the next Start.
 

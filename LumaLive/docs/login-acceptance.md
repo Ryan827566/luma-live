@@ -1,5 +1,13 @@
 # Account page and authentication acceptance
 
+## 2026-10-21: sessions retained until Stop and cleared across restart
+
+The unchanged isolated reuse fixture passed two observed Stop/Start boundaries with sessions that never send Logout. Each running period establishes two sessions for one account, successfully rotates/validates their credentials, and disconnects one peer. After its server worker exits, the remaining peer still lists both session IDs. Following restart, the original account can log in and its list contains only the fresh session, with two and then four prior records absent. Old credentials are checked to remain unexpired, excluding natural expiry as the cause.
+
+Old access/refresh requests on the new connection return `invalid_session`; because the protocol binds credentials to the connection, these requests alone do not prove Stop cleanup. The session-list comparison is the separate state check. The three running periods yield two restart boundaries; the final Stop is followed only by shutdown/cleanup checks.
+
+Report `output/account-session-restart.json` passed in 20.790 seconds, with Stop at 1.022/1.030/1.021 seconds and complete native/port/Job/directory cleanup. The affected original reuse path also passed in `output/account-instance-reuse-session-regression.json`; one helper reviewed without blockers. No binary rebuild, production lifecycle/certificate change or GUI rerun occurred. This supersedes the still-live-session exclusion in the earlier reuse checkpoint only; production deployment, sustained load, PostgreSQL and actual-client evidence retain their existing boundaries.
+
 ## 2026-10-21: same-instance restart and fresh authentication
 
 Three isolated Start/Stop cycles passed on the same native AuthService object and in-memory account store. Each cycle authenticates the originally registered account with fresh unique session credentials, validates identity/profile, logs out and rejects the logged-out token, then completes 64 TLS Ping connections. Stop closes a persistent TLS peer and an accepted incomplete handshake; duplicate Start rejection, idempotent Stop, exclusive port rebind and fresh authentication after restarting are checked.
