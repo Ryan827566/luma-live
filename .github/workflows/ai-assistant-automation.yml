@@ -1,0 +1,21 @@
+name: AI Assistant Automation
+
+on:
+  push:
+    branches:
+      - codex/ai-assistant-automation
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S LumaLive/ai/ci -B build/ai-automation -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build/ai-automation --parallel
+      - name: Test
+        run: ctest --test-dir build/ai-automation --output-on-failure
