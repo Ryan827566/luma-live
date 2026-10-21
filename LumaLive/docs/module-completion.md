@@ -1,4 +1,12 @@
-# Latest checkpoint: completed account worker reclamation (2026-10-21)
+# Latest checkpoint: reuse of one account service instance (2026-10-21)
+
+The isolated native TLS fixture now supports three Start/Stop cycles on one AuthService object and the same in-memory store. Each cycle completes fresh authentication for the original account and 64 short TLS Ping connections, then stops with a persistent TLS connection and an accepted incomplete handshake open. Duplicate Start is rejected, repeated Stop succeeds, both peers close, and the port can be exclusively rebound before the next Start.
+
+The first acceptance run passed in 17.913 seconds. Stop took 0.860/0.763/0.872 seconds; stopped live threads returned to four each time and stopped handles were 98/98/99, within the eight-handle tolerance. The native process stays alive during these measurements. Native exit, zero Job processes and fixture cleanup passed. Report: `output/account-instance-reuse.json`; the shared harness's existing churn path also passed in `output/account-connection-churn-dispatch-regression.json` after extraction, without overwriting the original churn evidence.
+
+Only the fixture and its test controller changed; the separate `build/auth-reuse-20261021` / `output/auth-reuse-20261021/Release` build passed, and one helper completed final read-only review without blockers. Authentication logs out before Stop, so this does not establish invalidation of still-live sessions across restart. Three cycles are bounded reuse evidence, not a long soak, production capacity or PostgreSQL acceptance. No production binary, lifecycle, certificate or user-client interaction changed. Read-only production status at 10:56 Shanghai remained ready with no pending certificate transaction and the actual client hash unchanged. The worker-reaping source below remains undeployed. Active-session restart acceptance, sustained load, active-connection limits and the other product gates remain open.
+
+# Earlier checkpoint: completed account worker reclamation (2026-10-21)
 
 An isolated connection-churn measurement reproduced one retained Windows handle per completed connection in the previous native fixture: after 32 warm-up connections, five batches of 128 TLS Ping connections increased handles from 131 to 771 while live threads stayed at six. The server kept each joinable thread object until Stop.
 

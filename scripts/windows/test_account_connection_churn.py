@@ -237,29 +237,15 @@ def exercise(args):
         phase = 'native_startup'
         with (directory / 'native.log').open('wb') as log:
             try:
-                process = subprocess.Popen([str(args.fixture), 'server', str(endpoint)], cwd=ROOT,
+                process = subprocess.Popen([str(args.fixture),
+                                           'reuse' if args.scenario == 'reuse' else 'server', str(endpoint)], cwd=ROOT,
                                            env=env, stdin=subprocess.PIPE, stdout=log, stderr=log,
                                            creationflags=subprocess.CREATE_NO_WINDOW)
-                until = time.monotonic() + 10
-                while f'READY {endpoint}\n' not in (directory / 'native.log').read_text():
-                    require(process.poll() is None and time.monotonic() < until, 'native_not_ready')
-                    time.sleep(.05)
-                phase = 'connection_churn'
-                peers = workload(process, endpoint, context, connections, result, args.expect)
-                phase = 'native_shutdown'
-                if args.expect == 'bounded':
-                    stop_during_churn(process, endpoint, context, result)
+                if args.scenario == 'reuse':
+                    phase = 'instance_reuse'
+                    reuse(process, endpoint, context, connections, result, directory / 'native.log')
                 else:
-                    started = time.monotonic()
-                    process.communicate(b'\n', timeout=5)
-                    result['stop_seconds'] = round(time.monotonic() - started, 3)
-                    require(process.returncode == 0 and result['stop_seconds'] < 2, 'native_shutdown_failed')
-                for peer in peers:
-                    peer.settimeout(1)
-                    try:
-                        require(peer.recv(1) == b'', 'open_peer_not_closed_by_stop')
-                    except (ConnectionResetError, ConnectionAbortedError, ssl.SSLEOFError):
-                        pass
+                    churn(process, endpoint, context, connections, result, directory / 'native.log', args.expect)
                 result['native_shutdown_complete'] = True
             finally:
                 connections.close_all()
@@ -269,14 +255,104 @@ def exercise(args):
                     process.wait(timeout=5)
                     process.stdin.close()
         require('STOPPED\n' in (directory / 'native.log').read_text(), 'stop_ack_missing')
-        with socket.socket() as vacancy:
-            vacancy.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-            vacancy.bind(('127.0.0.1', endpoint))
+        vacant(endpoint)
         result.update(passed=True, port_vacant=True)
     except BaseException as error:
         result.update(failed_phase=phase, error_type=type(error).__name__)
     save(directory / 'result.json', result)
     return 0 if result['passed'] else 1
+
+
+def vacant(endpoint):
+    with socket.socket() as vacancy:
+        vacancy.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        vacancy.bind(('127.0.0.1', endpoint))
+
+
+def wait_marker(process, log, marker):
+    until = time.monotonic() + 10
+    while marker + '\n' not in log.read_text():
+        require(process.poll() is None and time.monotonic() < until, 'native_marker_timeout')
+        time.sleep(.02)
+
+
+def closed_peers(peers):
+    for peer in peers:
+        peer.settimeout(1)
+        try:
+            require(peer.recv(1) == b'', 'open_peer_not_closed_by_stop')
+        except (ConnectionResetError, ConnectionAbortedError, ssl.SSLEOFError):
+            pass
+
+
+def reuse(process, endpoint, context, connections, result, log):
+    user, seen, lock = None, set(), threading.Lock()
+    result['reuse_cycles'] = []
+    for cycle in range(3):
+        if cycle:
+            process.stdin.write(b'start\n')
+            process.stdin.flush()
+        wait_marker(process, log, f'READY {cycle} {endpoint}')
+        client = base.Client(endpoint, context, connections)
+        if user is None:
+            user = base.register(client, 0)
+        # Same stored account, fresh and unique credentials after every restart.
+        base.authenticated_cycle(client, user, seen, lock)
+        for _ in range(64):
+            peer = base.Client(endpoint, context, connections)
+            try:
+                base.expect(peer.exchange(13), 14)
+            finally:
+                peer.close()
+        running = settled(process)
+        base.expect(client.exchange(13), 14)
+        raw = connections.add(socket.create_connection(('127.0.0.1', endpoint), timeout=3))
+        time.sleep(.1)
+        require(sample(process)['live_threads'] >= running['live_threads'] + 1,
+                'reuse_handshake_not_accepted')
+        started = time.monotonic()
+        process.stdin.write(b'stop\n')
+        process.stdin.flush()
+        wait_marker(process, log, f'STOPPED {cycle}')
+        elapsed = time.monotonic() - started
+        require(elapsed < 2, 'reuse_stop_too_slow')
+        closed_peers((client.peer, raw))
+        connections.close_all()
+        vacant(endpoint)
+        stopped = settled(process)
+        require(stopped['live_threads'] <= running['live_threads'] - 2,
+                'reuse_threads_survived_stop')
+        if cycle:
+            baseline = result['reuse_cycles'][0]['stopped']
+            require(abs(stopped['handles'] - baseline['handles']) <= 8
+                    and stopped['live_threads'] <= baseline['live_threads'], 'reuse_resources_accumulated')
+        result['reuse_cycles'].append({'cycle': cycle + 1, 'ping_connections': 64,
+            'fresh_authentication_passed': True, 'port_vacant': True,
+            'stop_seconds': round(elapsed, 3), 'running': running, 'stopped': stopped})
+    process.communicate(b'quit\n', timeout=5)
+    require(process.returncode == 0, 'reuse_fixture_exit_failed')
+    result['same_instance_reuse_passed'] = True
+
+
+def churn(process, endpoint, context, connections, result, log, expected):
+    until = time.monotonic() + 10
+    while f'READY {endpoint}\n' not in log.read_text():
+        require(process.poll() is None and time.monotonic() < until, 'native_not_ready')
+        time.sleep(.05)
+    peers = workload(process, endpoint, context, connections, result, expected)
+    if expected == 'bounded':
+        stop_during_churn(process, endpoint, context, result)
+    else:
+        started = time.monotonic()
+        process.communicate(b'\n', timeout=5)
+        result['stop_seconds'] = round(time.monotonic() - started, 3)
+        require(process.returncode == 0 and result['stop_seconds'] < 2, 'native_shutdown_failed')
+    for peer in peers:
+        peer.settimeout(1)
+        try:
+            require(peer.recv(1) == b'', 'open_peer_not_closed_by_stop')
+        except (ConnectionResetError, ConnectionAbortedError, ssl.SSLEOFError):
+            pass
 
 
 def main(args):
@@ -286,6 +362,12 @@ def main(args):
               'warmup_connections': WARMUP, 'batches_planned': BATCHES, 'connections_per_batch': PER_BATCH,
               'watchdog_seconds': 120, 'production_service_restarted': False,
               'scope': 'bounded isolated TLS Ping churn; memory observational, not a production soak'}
+    report['scenario'] = args.scenario
+    if args.scenario == 'reuse':
+        for field in ('warmup_connections', 'batches_planned', 'connections_per_batch'):
+            report.pop(field)
+        report.update(scope='three Start/Stop cycles on one isolated TLS service instance',
+                      reuse_cycles_planned=3, ping_connections_per_cycle=64)
     save(args.report, report)
     directory, process, job, empty = None, None, None, False
     try:
@@ -301,7 +383,7 @@ def main(args):
             try:
                 process = subprocess.Popen([sys.executable, '-B', str(Path(__file__).resolve()),
                     '--exercise', '--directory', str(directory), '--job', job_name,
-                    '--fixture', str(args.fixture), '--expect', args.expect], cwd=ROOT,
+                    '--fixture', str(args.fixture), '--expect', args.expect, '--scenario', args.scenario], cwd=ROOT,
                     stdin=subprocess.PIPE, stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW)
                 job = ownership.child_job(process, job_name)
                 try:
@@ -344,13 +426,20 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--fixture', type=Path, default=ROOT / 'output/auth-churn-20261021/Release/luma_auth_tls_fixture.exe')
-    parser.add_argument('--report', type=Path, default=ROOT / 'output/account-connection-churn.json')
+    parser.add_argument('--scenario', choices=('churn', 'reuse'), default='churn')
+    parser.add_argument('--fixture', type=Path)
+    parser.add_argument('--report', type=Path)
     parser.add_argument('--expect', choices=('bounded', 'retained'), default='bounded')
     parser.add_argument('--exercise', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--directory', help=argparse.SUPPRESS)
     parser.add_argument('--job', help=argparse.SUPPRESS)
     args = parser.parse_args()
+    require(args.scenario != 'reuse' or args.expect == 'bounded', 'reuse_requires_bounded_mode')
+    if args.fixture is None:
+        args.fixture = ROOT / f'output/auth-{args.scenario}-20261021/Release/luma_auth_tls_fixture.exe'
+    if args.report is None:
+        args.report = ROOT / ('output/account-instance-reuse.json' if args.scenario == 'reuse'
+                              else 'output/account-connection-churn.json')
     args.fixture = args.fixture.resolve()
     require(args.fixture.is_relative_to(ROOT / 'output')
             and args.fixture.name == 'luma_auth_tls_fixture.exe', 'not_an_isolated_fixture')

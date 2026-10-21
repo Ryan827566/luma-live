@@ -28,6 +28,29 @@ int main(int argc,char** argv){
             Require(result.Message().find("TLS")!=std::string::npos,"production guard failed for an unrelated reason");
             std::cout<<"PASS production TLS guard\n";return 0;
         }
+        if(mode=="reuse"){
+            auto server=Server(); // Keep the same object and in-memory store throughout.
+            for(int cycle=0;cycle<3;++cycle){
+                if(cycle){
+                    std::string command;std::getline(std::cin,command);
+                    Require(command=="start","reuse start command missing");
+                }
+                Require(server->StartOnPort(port).IsOk(),"reused server start failed");
+                Require(!server->StartOnPort(port).IsOk(),"duplicate start accepted");
+                std::cout<<"READY "<<cycle<<' '<<server->Port()<<std::endl;
+                std::string command;std::getline(std::cin,command);
+                Require(command=="stop","reuse stop command missing");
+                const auto started=std::chrono::steady_clock::now();
+                Require(server->Stop().IsOk(),"reused server stop failed");
+                Require(std::chrono::steady_clock::now()-started<std::chrono::seconds(2),"reused server stop too slow");
+                Require(!server->IsRunning()&&server->Stop().IsOk(),"stop was not idempotent");
+                std::cout<<"STOPPED "<<cycle<<std::endl;
+            }
+            // Keep the process alive for final stopped-resource measurements.
+            std::string command;std::getline(std::cin,command);
+            Require(command=="quit","reuse quit command missing");
+            std::cout<<"STOPPED\n";return 0;
+        }
         if(mode=="server"){
             auto server=Server();const auto result=server->StartOnPort(port);
             if(!result.IsOk())throw std::runtime_error(result.Message());

@@ -1,5 +1,13 @@
 # Account page and authentication acceptance
 
+## 2026-10-21: same-instance restart and fresh authentication
+
+Three isolated Start/Stop cycles passed on the same native AuthService object and in-memory account store. Each cycle authenticates the originally registered account with fresh unique session credentials, validates identity/profile, logs out and rejects the logged-out token, then completes 64 TLS Ping connections. Stop closes a persistent TLS peer and an accepted incomplete handshake; duplicate Start rejection, idempotent Stop, exclusive port rebind and fresh authentication after restarting are checked.
+
+Stop took 0.860/0.763/0.872 seconds. Stopped live threads were four in every cycle; stopped handles were 98/98/99. The process remained alive during measurements, then exited normally; owned Job emptiness and fixture cleanup passed. Report: `output/account-instance-reuse.json` (17.913 seconds). The extracted harness's existing churn path also passed in `output/account-connection-churn-dispatch-regression.json`; one helper's final read-only review found no blockers.
+
+This adds bounded service-object reuse evidence, not actual-client/GUI, PostgreSQL, capacity or long-soak acceptance. Since each authentication cycle logs out before Stop, still-live session invalidation across restart is not covered. Only the isolated native fixture was rebuilt; production service/client binaries and the user's open client were untouched. Production remained ready with no pending transaction and the actual EXE hash unchanged; the earlier worker-reaping source is still awaiting authorized deployment.
+
 ## 2026-10-21: connection-churn resource acceptance
 
 The old isolated TLS fixture retained exactly 640 additional handles after five batches of 128 completed Ping connections, despite stable live-thread counts. After completed-worker reclamation was added, the new isolated fixture returned to 105 handles and six live threads at every checkpoint, preserving a persistent TLS control connection. Concurrent churn during Stop passed in 0.674 seconds; peer closure, port vacancy, empty owned Job and fixture cleanup also passed. The baseline report's `passed=true` means the expected defect was reproduced; only the fixed report has `resource_bound_satisfied=true`.

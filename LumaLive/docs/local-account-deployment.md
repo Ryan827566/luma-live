@@ -1,5 +1,37 @@
 # 本机账户服务部署与测试
 
+## 同一账户服务对象重复启停验收（2026-10-21）
+
+原生 TLS fixture 新增 `reuse` 模式，只创建一次 AuthService 和内存库，在同一个端口连续执行三轮 Start/Stop。
+每轮拒绝重复 Start、确认 Stop 幂等；原账户完成重新登录、会话及资料身份验证、登出和旧 token 拒绝，
+再完成 64 次短 TLS Ping 连接。停机时保留一个 TLS 控制连接和一个已接收但未完成握手的 TCP 连接。
+逐轮等待带轮次的 READY/STOPPED 标记，检查对端关闭及端口可独占绑定后，才允许下一次 Start。
+
+专用构建和验收命令：
+
+```powershell
+cmake -S LumaLive/client/ui/studio-preview -B build/auth-reuse-20261021 -G "Visual Studio 17 2022" -A x64 -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=D:/workspace/luma-live/output/auth-reuse-20261021
+cmake --build build/auth-reuse-20261021 --config Release --target luma_auth_tls_fixture --parallel 2
+C:/Python314/python.exe -B scripts/windows/test_account_connection_churn.py --scenario reuse
+```
+
+首次运行通过，完整耗时 17.913 秒；三次 Stop 分别为 0.860、0.763、0.872 秒。
+停止态活动线程均为 4，句柄数为 98、98、99；后两轮相对首轮不超过 ±8 的门槛。
+每个测量窗口读取三次稳定的句柄/线程计数，不发探测连接；原生进程仍存活，因此结果不依赖进程退出回收资源。
+私有内存和工作集只作观察。最后正常退出、端口空闲、Job 活动进程为零及私有目录清理均通过。
+测试使用独立 CA/IP 验证、随机端口、显式 test/空 CA 环境和已归属 Windows Job 的 actor。
+专用 fixture SHA256 为 `e8086bc61f723df30c2d07e9ddc6b26e9ef8f35d35ea954e3cc1926420c3fd09`。
+
+报告 `output/account-instance-reuse.json` 必须同时有 `passed=true`、`same_instance_reuse_passed=true`、
+`owned_job_empty=true`、`fixture_cleanup_complete=true` 才是本项完整证据。
+共用控制器拆分后的原 churn 路径也已回归通过，报告为 `output/account-connection-churn-dispatch-regression.json`，
+五批句柄增量均为零；保留原 baseline/fixed 报告。一名协作者完成最终只读审查，无阻断项。
+
+本次只改测试 fixture 和控制器，未改正式实现。认证循环在 Stop 前已经登出，
+所以本报告不证明仍登录的旧会话在 Stop 后失效，也不代表长期 soak、容量、PostgreSQL 或新 GUI 验收。
+10:56 上海时间只读检查仍 ready、无 pending，实际客户端 SHA256 不变；未重编/重启正式服务、改证书或操作用户客户端。
+下述线程回收修复仍未部署，正式部署仍需明确授权的维护窗口。长期负载、活动连接上限、正式续期和完整灾备等剩余工作独立验收。
+
 ## 已完成连接的线程句柄回收（2026-10-21）
 
 先用旧内存 fixture 量化：32 次预热后，五批各 128 次 TLS 连接只交换 Ping/Pong 并关闭，
