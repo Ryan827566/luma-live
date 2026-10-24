@@ -7,53 +7,145 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
+import uuid
 from datetime import datetime, timezone
 
 
-def main():
+
+def utc_now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def atomic_write(path, content):
+    """Publish complete bytes without truncating the last readable report."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        # Same-directory replacement stays on the same filesystem. Close before
+        # replace because Windows cannot rename an open NamedTemporaryFile.
+        with tempfile.NamedTemporaryFile(mode="wb", dir=path.parent,
+                                         prefix=path.name + ".", suffix=".tmp",
+                                         delete=False) as output:
+            temporary = Path(output.name)
+            output.write(content)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+class VerificationReport:
+    def __init__(self, root, build, binary):
+        self.root = root
+        self.path = root / "output/client-verification.json"
+        self.record = {
+            "run_id": uuid.uuid4().hex,
+            "pid": os.getpid(),
+            "started_utc": utc_now(),
+            "build_dir": str(build),
+            "binary_dir": str(binary),
+            "status": "running",
+            "checks": [],
+        }
+
+    def start(self):
+        # Preserve the previous evidence, including legacy or damaged reports.
+        # Never reuse an old passed status for a new invocation.
+        if self.path.exists():
+            archive = (self.path.parent / "client-verification-history" /
+                       (self.record["run_id"] + "-previous.json"))
+            atomic_write(archive, self.path.read_bytes())
+            self.record["previous_report"] = str(archive)
+        self.save()
+
+    def save(self):
+        # Serialize before opening anything, so serialization errors are safe too.
+        content = (json.dumps(self.record, indent=2) + "\n").encode("utf-8")
+        atomic_write(self.path, content)
+
+    def finish(self, status, error=None):
+        self.record["status"] = status
+        self.record["finished_utc"] = utc_now()
+        if error is not None:
+            self.record["error"] = str(error) or type(error).__name__
+        self.save()
+
+    def run(self, name, command, timeout, env):
+        # Run-specific logs keep archived reports' log references meaningful.
+        log_path = self.path.parent / f"verify-{self.record['run_id']}-{name}.log"
+        check = {"name": name, "status": "running", "started_utc": utc_now(),
+                 "exit_code": None, "log": str(log_path)}
+        self.record["checks"].append(check)
+        self.save()
+        try:
+            with log_path.open("w", encoding="utf-8") as log:
+                test_env = env.copy()
+                test_env["LUMALIVE_AUTH_ENV"] = "test"
+                test_env["LUMALIVE_AUTH_TLS_CA_FILE"] = ""
+                if name.startswith("auth-"):
+                    test_env.pop("LUMALIVE_AUTH_DATABASE_URL", None)
+                result = subprocess.run(command, cwd=self.root, env=test_env,
+                                        stdout=log, stderr=subprocess.STDOUT,
+                                        timeout=timeout)
+            check["exit_code"] = result.returncode
+            if result.returncode:
+                raise RuntimeError(f"{name} failed ({result.returncode}); see {log_path}")
+        except KeyboardInterrupt:
+            check["status"] = "interrupted"
+            check["error"] = "KeyboardInterrupt"
+            raise
+        except Exception as error:
+            check["status"] = "failed"
+            check["error"] = str(error) or type(error).__name__
+            raise
+        else:
+            check["status"] = "passed"
+        finally:
+            check["finished_utc"] = utc_now()
+            self.save()
+        print("PASS:", name, flush=True)
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build-dir", default="build/d-drive")
     parser.add_argument("--binary-dir", default="output/next/Release")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     root = Path(__file__).resolve().parents[2]
     build = (root / args.build_dir).resolve()
     binary = (root / args.binary_dir).resolve()
-    if os.name != "nt" or not (build / "CMakeCache.txt").is_file():
-        parser.error("Requires Windows and an already configured standalone CMake build.")
-    cache = {}
-    for line in (build / "CMakeCache.txt").read_text(encoding="utf-8").splitlines():
-        if line and not line.startswith(("#", "//")) and ":" in line and "=" in line:
-            key, value = line.split("=", 1)
-            cache[key.split(":", 1)[0]] = value
-    configured = cache.get("CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE")
-    if not configured or (build / configured).resolve() != binary:
-        parser.error("--binary-dir must match CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE in this build's cache.")
-    cmake = shutil.which("cmake") or str(Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "CMake/bin/cmake.exe")
-    env = {key.upper(): value for key, value in os.environ.items()}
-    temporary = root / "output/tmp"
-    temporary.mkdir(parents=True, exist_ok=True)
-    env["TEMP"] = env["TMP"] = str(temporary)
-    env["MSBUILDDISABLENODEREUSE"] = "1"
-    report = root / "output/client-verification.json"
-    record = {"started_utc": datetime.now(timezone.utc).isoformat(), "status": "running", "checks": []}
-    def save():
-        report.write_text(json.dumps(record, indent=2), encoding="utf-8")
-    def run(name, command, timeout):
-        log_path = root / ("output/verify-" + name + ".log")
-        with log_path.open("w", encoding="utf-8") as log:
-            test_env = env.copy()
-            test_env["LUMALIVE_AUTH_ENV"] = "test"
-            test_env["LUMALIVE_AUTH_TLS_CA_FILE"] = ""
-            if name.startswith("auth-"):
-                test_env.pop("LUMALIVE_AUTH_DATABASE_URL", None)
-            result = subprocess.run(command, cwd=root, env=test_env, stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
-        record["checks"].append({"name": name, "exit_code": result.returncode, "log": str(log_path)})
-        save()
-        if result.returncode:
-            raise RuntimeError(f"{name} failed ({result.returncode}); see {log_path}")
-        print("PASS:", name, flush=True)
-    save()
+    report = VerificationReport(root, build, binary)
+    record = report.record
     try:
+        # Publish this run before preflight; a failed preflight must not leave
+        # last week's successful verification looking like today's result.
+        report.start()
+    except Exception as error:
+        print(f"Cannot start verification report {report.path}: {error}; no checks ran.", file=sys.stderr)
+        return 1
+    status, error, exit_code = "failed", None, 1
+    try:
+        if os.name != "nt" or not (build / "CMakeCache.txt").is_file():
+            raise RuntimeError("Requires Windows and an already configured standalone CMake build.")
+        cache = {}
+        for line in (build / "CMakeCache.txt").read_text(encoding="utf-8").splitlines():
+            if line and not line.startswith(("#", "//")) and ":" in line and "=" in line:
+                key, value = line.split("=", 1)
+                cache[key.split(":", 1)[0]] = value
+        configured = cache.get("CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE")
+        if not configured or (build / configured).resolve() != binary:
+            raise RuntimeError("--binary-dir must match CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE in this build's cache.")
+        cmake = shutil.which("cmake") or str(Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "CMake/bin/cmake.exe")
+        env = {key.upper(): value for key, value in os.environ.items()}
+        temporary = root / "output/tmp"
+        temporary.mkdir(parents=True, exist_ok=True)
+        env["TEMP"] = env["TMP"] = str(temporary)
+        env["MSBUILDDISABLENODEREUSE"] = "1"
+        def run(name, command, timeout):
+            report.run(name, command, timeout, env)
         run("build", [cmake, "--build", str(build), "--config", "Release", "--target", "luma_client_verification", "--parallel", "1", "--", "/nr:false"], 1800)
         # The configured output must also be newer than the linked preview library.
         executable = binary / "luma_studio.exe"
@@ -87,15 +179,22 @@ def main():
         run("native-ai", [sys.executable, "LumaLive/server/ai-gateway/python/test_native_client.py", str(binary / "luma_session_ai_gateway_tests.exe")], 60)
         run("navigation", [sys.executable, "scripts/windows/test_studio_navigation.py", str(executable), str(binary / "luma_meeting_ui_fixture.exe")], 60)
         run("meeting-ui", [sys.executable, "scripts/windows/test_meeting_ui.py", str(binary)], 90)
-        record["status"] = "passed"
-    except Exception as error:
-        record["status"] = "failed"
-        record["error"] = str(error)
-        print(error, file=sys.stderr)
+        status, exit_code = "passed", 0
+    except KeyboardInterrupt as caught:
+        status, error, exit_code = "interrupted", caught, 130
+        print("Verification interrupted; completed checks remain in the report.", file=sys.stderr)
+    except Exception as caught:
+        error = caught
+        print(caught, file=sys.stderr)
     finally:
-        record["finished_utc"] = datetime.now(timezone.utc).isoformat()
-        save()
-    return 0 if record["status"] == "passed" else 1
+        try:
+            report.finish(status, error)
+        except Exception as save_error:
+            # Keep the last complete snapshot and make publication failure fatal.
+            # A hard process kill likewise leaves running, never a false passed.
+            print(f"Cannot finalize verification report {report.path}: {save_error}", file=sys.stderr)
+            exit_code = 1
+    return exit_code
 
 
 if __name__ == "__main__":
