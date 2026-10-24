@@ -1,0 +1,27 @@
+name: LumaLive AI Automation
+
+on:
+  push:
+    branches:
+      - codex/ai-platform
+    paths:
+      - 'LumaLive/ai/automation/**'
+      - '.github/workflows/ai-assistant-automation.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'LumaLive/ai/automation/**'
+      - '.github/workflows/ai-assistant-automation.yml'
+
+jobs:
+  automation-build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S LumaLive/ai/ci -B build/ai-automation -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build/ai-automation --parallel
+      - name: Test
+        run: ctest --test-dir build/ai-automation --output-on-failure
