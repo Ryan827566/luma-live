@@ -61,7 +61,7 @@ kernel.CloseHandle.argtypes = [w.HANDLE]
 kernel.CloseHandle.restype = w.BOOL
 
 
-def sample(process):
+def sample(process, *, diagnose=True):
     require(process.poll() is None, 'native_exited_before_measurement')
     handles, memory = w.DWORD(), Memory()
     memory.cb = ctypes.sizeof(memory)
@@ -71,20 +71,44 @@ def sample(process):
             'memory_count_failed')
     snapshot = kernel.CreateToolhelp32Snapshot(4, 0)  # TH32CS_SNAPTHREAD, read only.
     require(snapshot != ctypes.c_void_p(-1).value, 'thread_snapshot_failed')
-    threads, entry = 0, ThreadEntry()
+    thread_ids, entry = [], ThreadEntry()
     entry.dwSize = ctypes.sizeof(entry)
     try:
         available = kernel.Thread32First(snapshot, ctypes.byref(entry))
         while available:
             if entry.th32OwnerProcessID == process.pid:
-                threads += 1
+                thread_ids.append(int(entry.th32ThreadID))
             entry.dwSize = ctypes.sizeof(entry)
             available = kernel.Thread32Next(snapshot, ctypes.byref(entry))
-        require(ctypes.get_last_error() == 18 and threads >= 2, 'thread_enumeration_failed')
+        require(ctypes.get_last_error() == 18 and len(thread_ids) >= 2, 'thread_enumeration_failed')
     finally:
         kernel.CloseHandle(snapshot)
-    return {'handles': handles.value, 'live_threads': threads,
-            'private_bytes': memory.PrivateUsage, 'working_set_bytes': memory.WorkingSetSize}
+    sampled_at = time.monotonic()
+    reading = {'handles': handles.value, 'live_threads': len(thread_ids),
+               'private_bytes': memory.PrivateUsage, 'working_set_bytes': memory.WorkingSetSize}
+    if getattr(process, 'thread_diagnostics', False):
+        reading['thread_ids'] = thread_ids
+        reading['_sampled_at'] = sampled_at
+        if diagnose:
+            annotate_threads(process, reading)
+    return reading
+
+
+def annotate_threads(process, reading):
+    if not getattr(process, 'thread_diagnostics', False):
+        return
+    sampled_at = reading.pop('_sampled_at')
+    started = time.monotonic()
+    try:
+        from account_thread_diagnostics import thread_origins
+        reading['thread_origins'] = thread_origins(process.pid, reading['thread_ids'])
+    except Exception as error:
+        # Optional import/query failures must not change original gate results.
+        # Do not expose exception text, which can contain paths or addresses.
+        reading['thread_origins'] = {'complete': False, 'error_type': type(error).__name__}
+    reading['thread_origins'].update(
+        count_snapshot_age_ms=round((started - sampled_at) * 1000, 3),
+        query_elapsed_ms=round((time.monotonic() - started) * 1000, 3))
 
 
 def settled(process):
@@ -92,10 +116,13 @@ def settled(process):
     time.sleep(.5)
     readings = []
     for _ in range(3):
-        readings.append(sample(process))
+        readings.append(sample(process, diagnose=False))
         time.sleep(.1)
     require(len({(r['handles'], r['live_threads']) for r in readings}) == 1,
             'resource_counts_not_settled')
+    # Keep the three original count samples and delays together. Read origins
+    # afterwards using IDs from the final count snapshot, never a new count.
+    annotate_threads(process, readings[-1])
     return readings[-1]
 
 
@@ -244,6 +271,7 @@ def exercise(args):
                                            'server' if args.scenario in ('churn', 'soak') else 'reuse', str(endpoint)], cwd=ROOT,
                                            env=env, stdin=subprocess.PIPE, stdout=log, stderr=log,
                                            creationflags=subprocess.CREATE_NO_WINDOW)
+                process.thread_diagnostics = args.thread_diagnostics
                 if args.scenario == 'soak':
                     phase = 'soak'
                     soak(process, endpoint, context, connections, result, directory)
@@ -591,6 +619,7 @@ def main(args):
               'watchdog_seconds': 120, 'production_service_restarted': False,
               'scope': 'bounded isolated TLS Ping churn; memory observational, not a production soak'}
     report['scenario'] = args.scenario
+    report['thread_diagnostics_enabled'] = args.thread_diagnostics
     if args.scenario in ('reuse', 'session-restart'):
         for field in ('warmup_connections', 'batches_planned', 'connections_per_batch'):
             report.pop(field)
@@ -627,7 +656,8 @@ def main(args):
             try:
                 process = subprocess.Popen([sys.executable, '-B', str(Path(__file__).resolve()),
                     '--exercise', '--directory', str(directory), '--job', job_name,
-                    '--fixture', str(args.fixture), '--expect', args.expect, '--scenario', args.scenario], cwd=ROOT,
+                    '--fixture', str(args.fixture), '--expect', args.expect, '--scenario', args.scenario,
+                    *(['--thread-diagnostics'] if args.thread_diagnostics else [])], cwd=ROOT,
                     stdin=subprocess.PIPE, stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW)
                 job = ownership.child_job(process, job_name)
                 try:
@@ -671,6 +701,8 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--scenario', choices=('churn', 'reuse', 'session-restart', 'soak'), default='churn')
+    parser.add_argument('--thread-diagnostics', action='store_true',
+                        help='Read thread start modules and lifetimes; acceptance gates unchanged')
     parser.add_argument('--fixture', type=Path)
     parser.add_argument('--report', type=Path)
     parser.add_argument('--expect', choices=('bounded', 'retained'), default='bounded')
