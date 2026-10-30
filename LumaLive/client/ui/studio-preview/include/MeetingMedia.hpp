@@ -2,6 +2,7 @@
 #include "MeetingSession.hpp"
 #include "MeetingAudioMixer.hpp"
 #include "NativeWebRtcPeerConnection.hpp"
+#include "PreviewRtcConfig.hpp"
 #include <memory>
 #include <vector>
 namespace luma::client::ui::preview {
@@ -28,7 +29,11 @@ public:
 #endif
 
  Audio MixAudio(){return mixer_.Pull();}
- bool Start(const std::string& server,std::uint16_t port,const std::string& meeting,const std::string& self,bool create,Callbacks cb,const contracts::PeerConnectionConfig& config={}){
+ bool Start(const std::string& server,std::uint16_t port,const std::string& meeting,const std::string& self,bool create,Callbacks cb){
+  return Start(server,port,meeting,self,create,std::move(cb),LoadPreviewRtcConfig());
+ }
+ // Explicit empty config retains local-candidates-only behavior for callers.
+ bool Start(const std::string& server,std::uint16_t port,const std::string& meeting,const std::string& self,bool create,Callbacks cb,const contracts::PeerConnectionConfig& config){
   Leave();self_=self;callbacks_=std::move(cb);config_=config;error_.clear();return session_.Start(server,port,meeting,self,create);
  }
  bool SetVideo(const std::string& source){if(!session_.SetVideo(source))return false;videoEnabled_=source!="off";return true;}

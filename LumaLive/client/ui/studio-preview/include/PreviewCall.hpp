@@ -1,10 +1,10 @@
 #pragma once
 #include "NativeWebRtcPeerConnection.hpp"
+#include "PreviewRtcConfig.hpp"
 #include "TcpSignalingClient.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <cstdlib>
 #include <deque>
 #include <mutex>
 #include <vector>
@@ -189,19 +189,7 @@ public:
     }
     bool Start(const std::string& host, uint16_t port, const std::string& room,
                const std::string& peer, webrtc::WebRtcCallbacks cb) {
-        contracts::PeerConnectionConfig config;
-        // Preserve deployment configuration from the existing client. Tests can
-        // pass an explicit empty config to run with local candidates only.
-        const char* stun = std::getenv("LUMALIVE_STUN_SERVER");
-        config.stun_servers.push_back(stun && *stun ? stun : "stun:stun.l.google.com:19302");
-        const char* turn = std::getenv("LUMALIVE_TURN_URL");
-        const char* user = std::getenv("LUMALIVE_TURN_USERNAME");
-        const char* password = std::getenv("LUMALIVE_TURN_PASSWORD");
-        if (turn && *turn) {
-            config.turn_url = turn; config.turn_username = user ? user : "";
-            config.turn_password = password ? password : "";
-        }
-        return Start(host, port, room, peer, std::move(cb), config);
+        return Start(host, port, room, peer, std::move(cb), LoadPreviewRtcConfig());
     }
     bool Start(const std::string& host, uint16_t port, const std::string& room,
                const std::string& peer, webrtc::WebRtcCallbacks cb,

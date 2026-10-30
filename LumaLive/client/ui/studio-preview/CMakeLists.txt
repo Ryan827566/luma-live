@@ -52,6 +52,15 @@ target_link_libraries(luma_preview_call_tests PRIVATE luma_client_webrtc luma_cl
 add_test(NAME luma_preview_call_tests COMMAND luma_preview_call_tests)
 set_tests_properties(luma_preview_call_tests PROPERTIES TIMEOUT 60)
 
+# Real call/meeting controllers and signaling, with a test-only native RTC
+# implementation that records Initialize config without contacting ICE servers.
+add_executable(luma_preview_rtc_config_tests tests/PreviewRtcConfigTests.cpp)
+target_include_directories(luma_preview_rtc_config_tests PRIVATE
+  include ../../webrtc/include ../../media-pipeline/include)
+target_link_libraries(luma_preview_rtc_config_tests PRIVATE luma_client_signaling luma_signaling)
+add_test(NAME luma_preview_rtc_config_tests COMMAND luma_preview_rtc_config_tests)
+set_tests_properties(luma_preview_rtc_config_tests PROPERTIES TIMEOUT 30)
+
 add_executable(luma_file_playback_tests tests/FilePlaybackTests.cpp)
 target_compile_options(luma_file_playback_tests PRIVATE /utf-8)
 target_link_libraries(luma_file_playback_tests PRIVATE mfplay mfplat mfuuid ole32 user32)
