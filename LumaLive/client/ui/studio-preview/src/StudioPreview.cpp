@@ -363,6 +363,9 @@ class StudioWindow {
                 EnableWindow(Control(Monitor),FALSE);EnableWindow(Control(CameraList),!cameras_.devices.empty());EnableWindow(Control(MicList),!microphones_.devices.empty());
                 for(int id:{Host,Room,Identity})EnableWindow(Control(id),TRUE);
                 SetWindowTextW(Control(Join),UiLabel(L"加入房间",L"Join room"));
+                // Do not carry an edited participant ID into the next account.
+                const auto anonymousIdentity=L"studio-"+std::to_wstring(GetCurrentProcessId());
+                SetWindowTextW(Control(Identity),anonymousIdentity.c_str());
             }
             workspaceReady_=authenticated;accountView_=!authenticated;aiView_=false;meetingView_=false;meetingAiContext_=false;
             if(authenticated){const auto area=WorkArea();RECT bounds{};GetWindowRect(window_,&bounds);const int w=std::min(int(area.right-area.left),std::max(int(bounds.right-bounds.left),S(1200))),h=std::min(int(area.bottom-area.top),std::max(int(bounds.bottom-bounds.top),S(780)));SetWindowPos(window_,nullptr,area.left+(area.right-area.left-w)/2,area.top+(area.bottom-area.top-h)/2,w,h,SWP_NOZORDER|SWP_NOACTIVATE);}
