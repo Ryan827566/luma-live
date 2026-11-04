@@ -47,17 +47,19 @@ target_include_directories(luma_preview_media_tests PRIVATE include)
 target_link_libraries(luma_preview_media_tests PRIVATE luma_client_media_pipeline)
 add_test(NAME luma_preview_media_tests COMMAND luma_preview_media_tests)
 add_executable(luma_preview_call_tests tests/PreviewCallTests.cpp)
+target_compile_options(luma_preview_call_tests PRIVATE /utf-8)
 target_include_directories(luma_preview_call_tests PRIVATE include)
-target_link_libraries(luma_preview_call_tests PRIVATE luma_client_webrtc luma_client_signaling luma_client_media_pipeline luma_signaling ole32)
+target_link_libraries(luma_preview_call_tests PRIVATE luma_client_webrtc luma_client_signaling luma_client_media_pipeline luma_signaling ole32 crypt32 ws2_32)
 add_test(NAME luma_preview_call_tests COMMAND luma_preview_call_tests)
 set_tests_properties(luma_preview_call_tests PROPERTIES TIMEOUT 60)
 
 # Real call/meeting controllers and signaling, with a test-only native RTC
 # implementation that records Initialize config without contacting ICE servers.
 add_executable(luma_preview_rtc_config_tests tests/PreviewRtcConfigTests.cpp)
+target_compile_options(luma_preview_rtc_config_tests PRIVATE /utf-8)
 target_include_directories(luma_preview_rtc_config_tests PRIVATE
   include ../../webrtc/include ../../media-pipeline/include)
-target_link_libraries(luma_preview_rtc_config_tests PRIVATE luma_client_signaling luma_signaling)
+target_link_libraries(luma_preview_rtc_config_tests PRIVATE luma_client_signaling luma_signaling crypt32 ole32 ws2_32)
 add_test(NAME luma_preview_rtc_config_tests COMMAND luma_preview_rtc_config_tests)
 set_tests_properties(luma_preview_rtc_config_tests PROPERTIES TIMEOUT 30)
 
@@ -87,9 +89,10 @@ add_test(NAME luma_meeting_session_tests COMMAND luma_meeting_session_tests)
 set_tests_properties(luma_meeting_session_tests PROPERTIES TIMEOUT 20)
 
 add_executable(luma_meeting_media_tests tests/MeetingMediaTests.cpp)
+target_compile_options(luma_meeting_media_tests PRIVATE /utf-8)
 target_compile_definitions(luma_meeting_media_tests PRIVATE LUMA_MEETING_TEST_HOOKS)
 target_include_directories(luma_meeting_media_tests PRIVATE include)
-target_link_libraries(luma_meeting_media_tests PRIVATE luma_signaling luma_client_signaling luma_client_webrtc ole32)
+target_link_libraries(luma_meeting_media_tests PRIVATE luma_signaling luma_client_signaling luma_client_webrtc ole32 crypt32 ws2_32)
 add_test(NAME luma_meeting_media_tests COMMAND luma_meeting_media_tests)
 set_tests_properties(luma_meeting_media_tests PROPERTIES TIMEOUT 45)
 
@@ -223,4 +226,16 @@ if(LUMA_PREVIEW_STANDALONE)
     luma_ui_locale_tests luma_ui_accessibility_tests luma_transcript_view_tests
     luma_ai_provider_settings_tests luma_session_archive_tests luma_session_archive_search_tests
     luma_ai_service_health_tests luma_local_ai_service_tests)
+endif()
+
+# User-owned encrypted STUN/TURN defaults shared by new calls and meetings.
+add_executable(luma_preview_network_settings_tests tests/PreviewNetworkSettingsTests.cpp)
+target_include_directories(luma_preview_network_settings_tests PRIVATE include)
+target_compile_features(luma_preview_network_settings_tests PRIVATE cxx_std_20)
+target_compile_options(luma_preview_network_settings_tests PRIVATE /utf-8)
+target_link_libraries(luma_preview_network_settings_tests PRIVATE crypt32 ole32 ws2_32)
+add_test(NAME luma_preview_network_settings_tests COMMAND luma_preview_network_settings_tests)
+set_tests_properties(luma_preview_network_settings_tests PROPERTIES TIMEOUT 20)
+if(TARGET luma_client_verification)
+  add_dependencies(luma_client_verification luma_preview_network_settings_tests)
 endif()

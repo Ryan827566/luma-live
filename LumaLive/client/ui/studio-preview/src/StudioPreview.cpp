@@ -8,6 +8,7 @@
 #include "PreviewCall.hpp"
 #include "AiPanel.hpp"
 #include "AccountPanel.hpp"
+#include "NetworkSettingsDialog.hpp"
 #include "DeviceCaptureFactory.hpp"
 #include "ScreenCaptureService.hpp"
 #include <commctrl.h>
@@ -29,7 +30,7 @@ namespace luma::client::ui::preview {
 namespace {
 using Microsoft::WRL::ComPtr;
 constexpr COLORREF Bg=UiTheme::Background, Panel=UiTheme::Surface, Border=UiTheme::Border, Ink=UiTheme::Text, Muted=UiTheme::Muted, Mint=UiTheme::Accent;
-enum Id {Open=100,Camera,Microphone,Monitor,Volume,TestSound,Refresh,CameraList,MicList,Pause,Stop,FileMode,CameraMode,FullScreen,Join,Host,Room,RemoteMode,Identity,Peers,Dial,AcceptCall,RejectCall,EndCall,ShareScreen,Reconnect,Meeting,Ai,Advanced,Account};
+enum Id {Open=100,Camera,Microphone,Monitor,Volume,TestSound,Refresh,CameraList,MicList,Pause,Stop,FileMode,CameraMode,FullScreen,Join,Host,Room,RemoteMode,Identity,Peers,Dial,AcceptCall,RejectCall,EndCall,ShareScreen,Reconnect,Meeting,Ai,Advanced,Account,NetworkSettings};
 std::wstring Wide(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),nullptr,0);std::wstring out(n,L' ');MultiByteToWideChar(CP_UTF8,0,s.data(),static_cast<int>(s.size()),out.data(),n);return out;}
 std::wstring CallMessage(const std::string& value){return LocalizedCallMessage(value);}
 
@@ -77,6 +78,7 @@ class StudioWindow {
     bool connectionSettings_{false};
     bool aiView_{false},meetingView_{false},meetingAiContext_{false},accountView_{false};
     AccountPanel account_;
+    NetworkSettingsDialog networkSettings_;
     WindowChrome chrome_;
     bool customChrome_=false;
     bool workspaceReady_{false},uiReady_{false},devicesReady_{false};
@@ -182,7 +184,7 @@ class StudioWindow {
         ShowWindow(remoteSurface_,SW_SHOW);for(auto c:controls_)if(c)ShowWindow(c,SW_SHOW);ShowWindow(Control(RemoteMode),SW_SHOW);
         Place(RemoteMode,8,96,left_-16,38);Place(Meeting,8,138,left_-16,38);Place(Ai,8,180,left_-16,38);Place(Account,8,height_-72,left_-16,38);
         if(aiView_||meetingView_||accountView_){
-            for(int id=Open;id<=Account;++id)if(id!=RemoteMode&&id!=Meeting&&id!=Ai&&id!=Account)ShowWindow(Control(id),SW_HIDE);
+            for(int id=Open;id<=NetworkSettings;++id)if(id!=RemoteMode&&id!=Meeting&&id!=Ai&&id!=Account)ShowWindow(Control(id),SW_HIDE);
             ShowWindow(surface_,SW_HIDE);ShowWindow(remoteSurface_,SW_HIDE);
             if(meetingView_&&meetingPage_){auto r=R(left_,40,width_-left_,height_-40);MoveWindow(meetingPage_->Handle(),r.left,r.top,r.right-r.left,r.bottom-r.top,TRUE);}
             else if(accountView_){account_.Open(window_);account_.Place(R(left_,40,width_-left_,height_-40),dpi_);}
@@ -204,6 +206,7 @@ class StudioWindow {
         Place(Monitor,mx+12,lower_+118,sourceWidth-24,34);Place(Volume,mx+12,lower_+204,sourceWidth-24,30);Place(TestSound,mx+12,lower_+250,sourceWidth-24,34);
         Place(Identity,rx,CompactHeight()?118:174,right_-32,34);Place(Room,rx,CompactHeight()?186:250,right_-32,34);Place(Advanced,rx,CompactHeight()?228:298,right_-32,28);
         ShowWindow(Control(Host),connectionSettings_?SW_SHOW:SW_HIDE);Place(Host,rx,CompactHeight()?288:356,right_-32,30);
+        ShowWindow(Control(NetworkSettings),connectionSettings_?SW_SHOW:SW_HIDE);Place(NetworkSettings,rx+right_-152,CompactHeight()?260:328,120,24);
         const int connectY=ConnectY();Place(Join,rx,connectY,right_-32,38);
         Place(Peers,rx,connectY+(CompactHeight()?72:82),right_-32,140);Place(Dial,rx,connectY+(CompactHeight()?120:130),right_-32,34);
         Place(AcceptCall,rx,connectY+(CompactHeight()?162:172),(right_-40)/2,34);Place(RejectCall,rx+(right_-40)/2+8,connectY+(CompactHeight()?162:172),(right_-40)/2,34);
@@ -248,7 +251,7 @@ class StudioWindow {
         if(!CompactHeight())Label(dc,UiLabel(L"与房间内的成员发起一对一通话",L"Call someone in your room"),rx,104,right_-32,28,small_,Muted);
         Label(dc,UiLabel(L"显示名称",L"Display name"),rx,CompactHeight()?92:146,right_-32,22,small_,Muted);
         Label(dc,UiLabel(L"房间号码",L"Room"),rx,CompactHeight()?160:222,right_-32,22,small_,Muted);
-        if(connectionSettings_)Label(dc,UiLabel(L"服务器地址",L"Server address"),rx,CompactHeight()?262:330,right_-32,22,small_,Muted);
+        if(connectionSettings_)Label(dc,UiLabel(L"服务器地址",L"Server address"),rx,CompactHeight()?262:330,right_-160,22,small_,Muted);
         const int connectY=ConnectY();
         Label(dc,UiLabel(L"选择通话对象",L"Choose a participant"),rx,connectY+(CompactHeight()?46:54),right_-32,22,small_,Muted);
         const wchar_t* state=UiLabel(L"未加入房间",L"Join a room to start");switch(call_.State()){case CallState::Joining:state=UiLabel(L"正在加入",L"Joining room");break;case CallState::Ready:state=UiLabel(L"就绪 · 请选择通话对象",L"Ready. Choose a participant.");break;case CallState::Outgoing:state=UiLabel(L"呼叫中 · 等待对方接听",L"Calling. Waiting for an answer.");break;case CallState::Incoming:state=UiLabel(L"收到来电 · 请接听或拒绝",L"Incoming call. Accept or decline.");break;case CallState::Connecting:state=UiLabel(L"正在连接音视频",L"Connecting audio and video");break;case CallState::Connected:state=UiLabel(L"通话已连接",L"Call connected");break;default:break;}
@@ -292,6 +295,7 @@ class StudioWindow {
     void Command(int id){
         if(!workspaceReady_||!account_.IsAuthenticated())return;
         if(id==Advanced){connectionSettings_=!connectionSettings_;Layout();return;}
+        if(id==NetworkSettings){networkSettings_.Open(window_,[this]{return !closing_&&workspaceReady_&&account_.IsAuthenticated();});return;}
         if(meetingPage_&&meetingPage_->Active()&&(id==Camera||id==Microphone||id==ShareScreen||id==Join)){status_=UiLabel(L"请先离开会议，再开始通话或本地采集",L"Leave the meeting before starting a call or local capture.");InvalidateRect(window_,nullptr,FALSE);return;}
         switch(id){
         case Account:if(fullscreen_)Fullscreen();accountView_=true;aiView_=false;meetingView_=false;Layout();break;
@@ -350,6 +354,7 @@ class StudioWindow {
                 else {WINDOWPLACEMENT placement{sizeof(placement)};if(GetWindowPlacement(window_,&placement)){entranceWindow_=placement.rcNormalPosition;MONITORINFO info{sizeof(info)};GetMonitorInfoW(MonitorFromWindow(window_,MONITOR_DEFAULTTONEAREST),&info);OffsetRect(&entranceWindow_,info.rcWork.left-info.rcMonitor.left,info.rcWork.top-info.rcMonitor.top);}}
             }
             if(!authenticated){
+                networkSettings_.Close();
                 // Restore geometry before locking commands; account loss always ends media.
                 if(fullscreen_){fullscreen_=false;SetWindowLongPtrW(window_,GWL_STYLE,savedStyle_);SetWindowPos(window_,nullptr,savedWindow_.left,savedWindow_.top,savedWindow_.right-savedWindow_.left,savedWindow_.bottom-savedWindow_.top,SWP_FRAMECHANGED|SWP_NOZORDER);}
                 aiCallActive_=false;ai_.session.Enable(false);
@@ -377,7 +382,7 @@ class StudioWindow {
         const auto name=authenticated?account_.DisplayName():std::wstring();const auto email=authenticated?account_.Email():std::wstring();
         if(name!=accountLabel_||email!=accountEmail_){accountLabel_=name;accountEmail_=email;SetWindowTextW(Control(Account),name.empty()?UiLabel(L"账户",L"Account"):name.c_str());SetAccessibleName(Control(Account),(std::wstring(UiLabel(L"账户：",L"Account: "))+name+L" "+email).c_str());InvalidateRect(window_,nullptr,FALSE);}
     }
-    void Shutdown(){if(closing_)return;closing_=true;aiCallActive_=false;account_.Close();meetingPage_.reset();ai_.Close();KillTimer(window_,1);monitor_=false;screen_.Stop();if(capture_){capture_->StopCamera();capture_->StopMicrophone();capture_->Stop();}call_.Stop();remoteAudio_.Close();CloseFile();audio_.Close();}
+    void Shutdown(){if(closing_)return;closing_=true;networkSettings_.Close();aiCallActive_=false;account_.Close();meetingPage_.reset();ai_.Close();KillTimer(window_,1);monitor_=false;screen_.Stop();if(capture_){capture_->StopCamera();capture_->StopMicrophone();capture_->Stop();}call_.Stop();remoteAudio_.Close();CloseFile();audio_.Close();}
     LRESULT Handle(UINT message,WPARAM wp,LPARAM lp){
         switch(message){
         case RequestMeetingMedia:
@@ -452,12 +457,12 @@ public:
         }
         surface_=CreateWindowExW(0,L"LumaVideoSurface",UiLabel(L"视频预览",L"Video preview"),WS_CHILD|WS_VISIBLE,0,0,1,1,window_,nullptr,instance,this);
         remoteSurface_=CreateWindowExW(0,L"LumaVideoSurface",UiLabel(L"远端视频",L"Remote video"),WS_CHILD|WS_VISIBLE,0,0,1,1,window_,nullptr,instance,this);
-        Button(Account,UiLabel(L"账户",L"Account"));Button(Advanced,UiLabel(L"连接设置",L"Connection settings"));Button(Ai,UiLabel(L"AI \u52a9\u624b",L"AI assistant"));Button(Meeting,UiLabel(L"\u89c6\u9891\u4f1a\u8bae",L"Meetings"));Button(Open,UiLabel(L"打开媒体文件",L"Open media"));Button(CameraMode,UiLabel(L"摄像头",L"Camera"));Button(FileMode,UiLabel(L"媒体文件",L"Media"));Button(Camera,UiLabel(L"开启摄像头",L"Start camera"));Button(Refresh,UiLabel(L"刷新设备",L"Refresh"));Button(Microphone,UiLabel(L"开启麦克风",L"Start microphone"));Button(Monitor,UiLabel(L"监听：关闭",L"Monitoring off"));Button(TestSound,UiLabel(L"测试扬声器",L"Test speakers"));Button(Pause,UiLabel(L"暂停",L"Pause"));Button(Stop,UiLabel(L"停止播放",L"Stop playback"));Button(FullScreen,UiLabel(L"全屏预览",L"Fullscreen"));
+        Button(NetworkSettings,L"STUN / TURN");SetAccessibleName(Control(NetworkSettings),UiLabel(L"通话与会议网络设置",L"Call and meeting network settings"));Button(Account,UiLabel(L"账户",L"Account"));Button(Advanced,UiLabel(L"连接设置",L"Connection settings"));Button(Ai,UiLabel(L"AI \u52a9\u624b",L"AI assistant"));Button(Meeting,UiLabel(L"\u89c6\u9891\u4f1a\u8bae",L"Meetings"));Button(Open,UiLabel(L"打开媒体文件",L"Open media"));Button(CameraMode,UiLabel(L"摄像头",L"Camera"));Button(FileMode,UiLabel(L"媒体文件",L"Media"));Button(Camera,UiLabel(L"开启摄像头",L"Start camera"));Button(Refresh,UiLabel(L"刷新设备",L"Refresh"));Button(Microphone,UiLabel(L"开启麦克风",L"Start microphone"));Button(Monitor,UiLabel(L"监听：关闭",L"Monitoring off"));Button(TestSound,UiLabel(L"测试扬声器",L"Test speakers"));Button(Pause,UiLabel(L"暂停",L"Pause"));Button(Stop,UiLabel(L"停止播放",L"Stop playback"));Button(FullScreen,UiLabel(L"全屏预览",L"Fullscreen"));
         Button(RemoteMode,UiLabel(L"\u5b9e\u65f6\u8fde\u7ebf",L"Video calls"));Button(Join,UiLabel(L"加入房间",L"Join room"));Make(Host,L"EDIT",L"127.0.0.1:9000",WS_BORDER|ES_AUTOHSCROLL);Make(Room,L"EDIT",L"luma-demo",WS_BORDER|ES_AUTOHSCROLL);
         Make(Identity,L"EDIT",(L"studio-"+std::to_wstring(GetCurrentProcessId())).c_str(),WS_BORDER|ES_AUTOHSCROLL);Make(Peers,L"COMBOBOX",UiLabel(L"通话对象",L"Participant"),CBS_DROPDOWNLIST|WS_VSCROLL);Button(ShareScreen,UiLabel(L"共享主屏幕",L"Share screen"));Button(Dial,UiLabel(L"发起视频通话",L"Start call"));Button(AcceptCall,UiLabel(L"接听",L"Accept"));Button(RejectCall,UiLabel(L"拒绝",L"Decline"));Button(EndCall,UiLabel(L"结束通话",L"End call"));Button(Reconnect,UiLabel(L"重新连接",L"Reconnect"));for(int id:{Dial,AcceptCall,RejectCall,EndCall,Reconnect})EnableWindow(Control(id),FALSE);
         Make(CameraList,L"COMBOBOX",UiLabel(L"摄像头",L"Camera"),CBS_DROPDOWNLIST|WS_VSCROLL);Make(MicList,L"COMBOBOX",UiLabel(L"麦克风",L"Microphone"),CBS_DROPDOWNLIST|WS_VSCROLL);for(int id:{Peers,CameraList,MicList})UiTheme::InstallCombo(Control(id));Make(Volume,TRACKBAR_CLASSW,UiLabel(L"输出音量",L"Output volume"),TBS_HORZ|TBS_NOTICKS);SendMessageW(Control(Volume),TBM_SETRANGE,TRUE,MAKELPARAM(0,100));SendMessageW(Control(Volume),TBM_SETPOS,TRUE,volume_);EnableWindow(Control(Monitor),FALSE);
         // Native dialog traversal follows child Z order: sidebar, media, devices, then connection.
-        for(int id:{RemoteMode,Meeting,Ai,Account,Open,CameraMode,FileMode,Pause,Stop,FullScreen,CameraList,Camera,Refresh,MicList,Microphone,ShareScreen,Monitor,Volume,TestSound,Identity,Room,Advanced,Host,Join,Peers,Dial,AcceptCall,RejectCall,EndCall,Reconnect})SetWindowPos(Control(id),HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+        for(int id:{RemoteMode,Meeting,Ai,Account,Open,CameraMode,FileMode,Pause,Stop,FullScreen,CameraList,Camera,Refresh,MicList,Microphone,ShareScreen,Monitor,Volume,TestSound,Identity,Room,Advanced,NetworkSettings,Host,Join,Peers,Dial,AcceptCall,RejectCall,EndCall,Reconnect})SetWindowPos(Control(id),HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
         audio_.SetVolume(volume_/100.f);remoteAudio_.SetVolume(volume_/100.f);
         for(auto [id,label]:{std::pair<int,const wchar_t*>{Host,UiLabel(L"信令服务器",L"Signaling server")},{Room,UiLabel(L"房间号",L"Room ID")},{Identity,UiLabel(L"显示名称",L"Display name")},{Peers,UiLabel(L"通话对象",L"Participant")},{CameraList,UiLabel(L"摄像头",L"Camera")},{MicList,UiLabel(L"麦克风",L"Microphone")},{Volume,UiLabel(L"输出音量",L"Output volume")}})SetAccessibleName(Control(id),label);
         capture_=media::CreateDeviceCaptureService();uiReady_=true;accountView_=true;Layout();
@@ -465,7 +470,7 @@ public:
         // Media can be opened from the workspace after authentication.
         if(std::wstring(GetCommandLineW()).find(L"--account")!=std::wstring::npos)Command(Account);
         SetTimer(window_,1,33,nullptr);ShowWindow(window_,show);UpdateWindow(window_);account_.FocusEntry();
-        MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){if(msg.message==WM_KEYDOWN){if(msg.wParam==VK_F11){if(!(msg.lParam&(LPARAM(1)<<30)))Fullscreen();continue;}if(msg.wParam==VK_ESCAPE){if(msg.lParam&(LPARAM(1)<<30))continue;if(accountView_&&account_.CancelPendingAction())continue;if(meetingView_&&meetingPage_&&meetingPage_->CancelPendingAction())continue;if(fullscreen_){Fullscreen();continue;}}if(msg.wParam=='O'&&(GetKeyState(VK_CONTROL)&0x8000)){if(!(msg.lParam&(LPARAM(1)<<30)))OpenFile();continue;}if(msg.wParam==VK_SPACE&&msg.hwnd==window_){Command(Pause);continue;}}if(!IsDialogMessageW(window_,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
+        MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){if(networkSettings_.Owns(msg.hwnd)){if(!networkSettings_.ProcessMessage(msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}continue;}if(msg.message==WM_KEYDOWN){if(msg.wParam==VK_F11){if(!(msg.lParam&(LPARAM(1)<<30)))Fullscreen();continue;}if(msg.wParam==VK_ESCAPE){if(msg.lParam&(LPARAM(1)<<30))continue;if(accountView_&&account_.CancelPendingAction())continue;if(meetingView_&&meetingPage_&&meetingPage_->CancelPendingAction())continue;if(fullscreen_){Fullscreen();continue;}}if(msg.wParam=='O'&&(GetKeyState(VK_CONTROL)&0x8000)){if(!(msg.lParam&(LPARAM(1)<<30)))OpenFile();continue;}if(msg.wParam==VK_SPACE&&msg.hwnd==window_){Command(Pause);continue;}}if(!IsDialogMessageW(window_,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
         return static_cast<int>(msg.wParam);
     }
 };

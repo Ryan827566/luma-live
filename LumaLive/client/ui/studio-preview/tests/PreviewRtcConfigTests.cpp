@@ -4,6 +4,9 @@
 #include "MeetingMedia.hpp"
 #include "TcpSignalingServer.hpp"
 #include <array>
+#include <filesystem>
+#include <fstream>
+#include <functional>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
@@ -21,6 +24,49 @@ bool Same(const Config& a, const Config& b) {
     return a.stun_servers == b.stun_servers && a.turn_url == b.turn_url &&
         a.turn_username == b.turn_username && a.turn_password == b.turn_password &&
         a.value == b.value && a.sequence == b.sequence;
+}
+// The default loader must never read or overwrite the developer's real profile.
+class PrivateProfile {
+    std::optional<std::wstring> saved_;
+public:
+    const std::filesystem::path directory = std::filesystem::temp_directory_path() /
+        (L"luma-rtc-config-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+    const std::filesystem::path file = directory / L"LumaLive" / L"rtc-network.dat";
+    PrivateProfile() {
+        if (const auto* value = _wgetenv(L"LOCALAPPDATA")) saved_ = value;
+        Require(std::filesystem::create_directory(directory), "private profile creation failed");
+        Require(_wputenv_s(L"LOCALAPPDATA", directory.c_str()) == 0 &&
+            SetEnvironmentVariableW(L"LOCALAPPDATA", directory.c_str()), "private profile environment failed");
+    }
+    ~PrivateProfile() {
+        _wputenv_s(L"LOCALAPPDATA", saved_ ? saved_->c_str() : L"");
+        SetEnvironmentVariableW(L"LOCALAPPDATA", saved_ ? saved_->c_str() : nullptr);
+        std::error_code ignored;
+        std::filesystem::remove_all(directory, ignored);
+    }
+    void Clear() { std::filesystem::remove(file); }
+};
+PreviewNetworkSettings UserSettings(int version = 1) {
+    PreviewNetworkSettings result;
+    result.enabled = true;
+    result.stunUrl = version == 1 ? L"stun:user-one.invalid:3478" : L"stun:user-two.invalid:3478";
+    result.turnUrl = version == 1 ? L"turn:user-one.invalid:3478?transport=tcp" : L"turns:user-two.invalid:5349?transport=tcp";
+    result.turnUsername = L"stored-test-user";
+    result.turnPassword = L"stored-test-password";
+    return result;
+}
+Config UserConfig(int version = 1) {
+    Config result;
+    result.stun_servers = {version == 1 ? "stun:user-one.invalid:3478" : "stun:user-two.invalid:3478"};
+    result.turn_url = version == 1 ? "turn:user-one.invalid:3478?transport=tcp" : "turns:user-two.invalid:5349?transport=tcp";
+    result.turn_username = "stored-test-user";
+    result.turn_password = "stored-test-password";
+    return result;
+}
+void SaveUser(const PreviewNetworkSettings& value) {
+    std::wstring error;
+    Require(SavePreviewNetworkSettings(value, error), "private network settings save failed");
+    Require(error.empty(), "successful network settings save retained error");
 }
 class Environment {
     const std::array<const char*, 4> names_{{"LUMALIVE_STUN_SERVER", "LUMALIVE_TURN_URL",
@@ -107,7 +153,30 @@ void LoaderRules(Environment& env) {
     Require(Same(LoadPreviewRtcConfig(), expected), "loader unexpectedly normalized deployment values");
     std::cout << "PASS: shared environment rules\n";
 }
-void Calls(std::uint16_t port, Environment& env, const Config& expected, bool explicitConfig) {
+void UserLoaderRules(Environment& env, PrivateProfile& profile) {
+    const auto deployment = env.Deployment();
+    SaveUser(UserSettings());
+    Require(Same(LoadPreviewRtcConfig(), UserConfig()), "saved custom config did not override deployment");
+    auto value = UserSettings(); value.enabled = false; SaveUser(value);
+    Require(Same(LoadPreviewRtcConfig(), deployment), "disabled settings did not preserve deployment");
+    value = UserSettings(); value.turnUrl.clear(); value.turnUsername.clear(); value.turnPassword.clear(); SaveUser(value);
+    auto expected = UserConfig(); expected.turn_url.clear(); expected.turn_username.clear(); expected.turn_password.clear();
+    Require(Same(LoadPreviewRtcConfig(), expected), "custom STUN-only settings inherited deployment TURN");
+    value = UserSettings(); value.stunUrl.clear(); SaveUser(value);
+    expected = UserConfig(); expected.stun_servers.clear();
+    Require(Same(LoadPreviewRtcConfig(), expected), "custom TURN-only settings inherited deployment STUN");
+    value = {}; value.enabled = true; SaveUser(value);
+    Require(Same(LoadPreviewRtcConfig(), Config{}), "custom direct-only settings inherited deployment");
+    { std::ofstream broken(profile.file, std::ios::binary | std::ios::trunc); broken << "corrupt-private-test-file"; }
+    std::wstring error;
+    Require(Same(LoadPreviewRtcConfig(&error), deployment) && !error.empty(), "corrupt profile fallback or error missing");
+    profile.Clear();
+    error = L"stale error";
+    Require(Same(LoadPreviewRtcConfig(&error), deployment) && error.empty(), "missing profile fallback or cleared error changed");
+    std::cout << "PASS: saved, disabled, direct-only and corrupt user settings precedence\n";
+}
+void Calls(std::uint16_t port, Environment& env, const Config& expected, bool explicitConfig,
+           const std::function<void()>& afterStart = {}) {
     initializedConfigs.clear(); restartedConfigs.clear();
     PreviewCall a, b;
     auto start = [&](PreviewCall& call, const char* peer) {
@@ -120,6 +189,7 @@ void Calls(std::uint16_t port, Environment& env, const Config& expected, bool ex
         a.Participants().size() == 1 && b.Participants().size() == 1; });
     // A session captures deployment config at Start, not later at consent.
     env.Set("LUMALIVE_TURN_URL", "turn:changed-after-start.invalid:3478");
+    if (afterStart) afterStart();
     Require(a.Call("b"), "call invite failed");
     Until(pump, [&] { return b.State() == CallState::Incoming; });
     Require(b.Accept(), "call acceptance failed");
@@ -131,7 +201,8 @@ void Calls(std::uint16_t port, Environment& env, const Config& expected, bool ex
     a.Stop(); b.Stop();
     std::cout << "PASS: call config reaches Initialize and restart\n";
 }
-void Meetings(std::uint16_t port, Environment& env, const Config& expected, bool explicitConfig) {
+void Meetings(std::uint16_t port, Environment& env, const Config& expected, bool explicitConfig,
+              const std::function<void()>& afterStart = {}) {
     initializedConfigs.clear(); restartedConfigs.clear();
     MeetingMedia a, b;
     auto start = [&](MeetingMedia& meeting, const char* peer, bool create) {
@@ -143,6 +214,7 @@ void Meetings(std::uint16_t port, Environment& env, const Config& expected, bool
     Until(pump, [&] { return a.Session().IsHost(); });
     Require(start(b, "b", false), "meeting member start failed");
     env.Set("LUMALIVE_TURN_URL", "turn:changed-after-start.invalid:3478");
+    if (afterStart) afterStart();
     Until(pump, [&] { return a.PeerState("b") == "connected" && b.PeerState("a") == "connected"; });
     CheckCaptured(expected, 2);
     Require(a.Reconnect("b"), "meeting reconnect failed");
@@ -192,8 +264,10 @@ bool NativeWebRtcPeerConnection::IsInitialized() const noexcept { return impl_->
 
 int main() {
     try {
+        PrivateProfile profile;
         Environment env;
         LoaderRules(env);
+        UserLoaderRules(env, profile);
         luma::server::signaling::TcpSignalingServer server;
         std::uint16_t port = 19800;
         while (port < 19900 && !server.Start(port)) ++port;
@@ -207,6 +281,21 @@ int main() {
             Calls(port, env, expected, mode >= 2);
             if (mode == 0) env.Clear(); else env.Deployment();
             Meetings(port, env, expected, mode >= 2);
+        }
+        // Real controllers take a user-settings snapshot at Start. Saving a new
+        // preference before consent/transport creation must not alter that session.
+        for (int mode = 0; mode < 5; ++mode) {
+            auto prepare = [&] {
+                env.Deployment();
+                auto value = UserSettings(mode == 1 ? 2 : 1);
+                if (mode == 2) value.enabled = false;
+                SaveUser(value);
+            };
+            auto expected = mode == 0 ? UserConfig() : mode == 1 ? UserConfig(2) :
+                mode == 2 ? env.Deployment() : mode == 3 ? Config{} : Explicit();
+            auto changeSaved = [] { SaveUser(UserSettings(2)); };
+            prepare(); Calls(port, env, expected, mode >= 3, changeSaved);
+            prepare(); Meetings(port, env, expected, mode >= 3, changeSaved);
         }
         server.Stop();
         std::cout << "PASS: RTC configuration plumbing; real cross-network TURN remains untested\n";
