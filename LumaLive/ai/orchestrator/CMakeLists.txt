@@ -1,4 +1,7 @@
 add_library(luma_orchestrator STATIC src/OrchestratorImpl.cpp)
 target_include_directories(luma_orchestrator PUBLIC include)
-target_link_libraries(luma_orchestrator PUBLIC luma_shared)
+target_link_libraries(luma_orchestrator PUBLIC luma_ai_core luma_model_router)
 target_compile_features(luma_orchestrator PUBLIC cxx_std_20)
+add_executable(luma_orchestrator_tests tests/OrchestratorTests.cpp)
+target_link_libraries(luma_orchestrator_tests PRIVATE luma_orchestrator luma_model_router luma_ai_providers)
+add_test(NAME luma_orchestrator_tests COMMAND luma_orchestrator_tests)

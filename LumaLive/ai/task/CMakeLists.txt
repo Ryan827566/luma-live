@@ -1,6 +1,7 @@
 add_library(luma_ai_task STATIC src/AiTaskService.cpp)
 target_include_directories(luma_ai_task PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(luma_ai_task PUBLIC luma_ai_core luma_orchestrator)
 target_compile_features(luma_ai_task PUBLIC cxx_std_20)
 add_executable(luma_ai_task_tests tests/AiTaskServiceTests.cpp)
-target_link_libraries(luma_ai_task_tests PRIVATE luma_ai_task)
+target_link_libraries(luma_ai_task_tests PRIVATE luma_ai_task luma_orchestrator luma_model_router luma_ai_providers)
 add_test(NAME luma_ai_task_tests COMMAND luma_ai_task_tests)

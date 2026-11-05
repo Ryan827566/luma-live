@@ -1,10 +1,3 @@
-#include "IAiProviderService.hpp"
+#include "ProviderRegistry.hpp"
 #include <cassert>
-
-int main() {
-    using namespace luma::ai::providers;
-    // Interface contract smoke test; implementation is intentionally hidden behind the interface.
-    OperationResult result{false, ""};
-    assert(!result.success);
-    return 0;
-}
+int main(){using namespace luma::ai;providers::ProviderRegistry r;core::ProviderConfig c;c.name="deterministic";c.models={"test"};c.capabilities={core::Capability::Chat,core::Capability::Asr,core::Capability::Tts,core::Capability::Vision};assert(r.Register(std::make_shared<providers::DeterministicProvider>(c)));assert(!r.Register(std::make_shared<providers::DeterministicProvider>(c)));auto p=r.Find(core::Capability::Chat);assert(p);core::AiRequest q;q.request_id="1";q.input="hello";auto o=p->Execute(q);assert(o.success&&o.text.find("hello")!=std::string::npos);return 0;}
