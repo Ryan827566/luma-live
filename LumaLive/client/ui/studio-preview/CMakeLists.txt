@@ -228,6 +228,14 @@ if(LUMA_PREVIEW_STANDALONE)
     luma_ai_service_health_tests luma_local_ai_service_tests)
 endif()
 
+# Parse copied invitations without joining a meeting or changing identity.
+add_executable(luma_meeting_invitation_tests tests/MeetingInvitationTests.cpp)
+target_include_directories(luma_meeting_invitation_tests PRIVATE include)
+target_compile_features(luma_meeting_invitation_tests PRIVATE cxx_std_20)
+target_compile_options(luma_meeting_invitation_tests PRIVATE /utf-8)
+add_test(NAME luma_meeting_invitation_tests COMMAND luma_meeting_invitation_tests)
+set_tests_properties(luma_meeting_invitation_tests PROPERTIES TIMEOUT 10)
+
 # User-owned encrypted STUN/TURN defaults shared by new calls and meetings.
 add_executable(luma_preview_network_settings_tests tests/PreviewNetworkSettingsTests.cpp)
 target_include_directories(luma_preview_network_settings_tests PRIVATE include)
@@ -237,5 +245,5 @@ target_link_libraries(luma_preview_network_settings_tests PRIVATE crypt32 ole32 
 add_test(NAME luma_preview_network_settings_tests COMMAND luma_preview_network_settings_tests)
 set_tests_properties(luma_preview_network_settings_tests PROPERTIES TIMEOUT 20)
 if(TARGET luma_client_verification)
-  add_dependencies(luma_client_verification luma_preview_network_settings_tests)
+  add_dependencies(luma_client_verification luma_preview_network_settings_tests luma_meeting_invitation_tests)
 endif()
