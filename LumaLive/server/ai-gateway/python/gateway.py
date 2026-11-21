@@ -333,6 +333,11 @@ class Handler(BaseHTTPRequestHandler):
                     result = provider.keywords(transcript)
                 else:
                     result = provider.summary(transcript)
+            try:
+                # JSON may decode escaped lone surrogates that are not valid UTF-8 text.
+                result = result.encode('utf-8')
+            except UnicodeEncodeError:
+                raise GatewayError(502, 'Provider returned invalid UTF-8 text') from None
             self.reply(200, result)
         except GatewayError as error:
             self.reply(error.status, error.message)

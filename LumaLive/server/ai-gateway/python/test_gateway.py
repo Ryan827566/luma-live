@@ -170,6 +170,27 @@ class Tests(unittest.TestCase):
                 self.assertNotIn('private transcript', text)
         self.assertEqual(len(self.upstream.received), 5)
 
+    def test_provider_text_must_be_encodable_as_utf8(self):
+        buf = io.BytesIO()
+        with wave.open(buf, 'wb') as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(48000)
+            wav.writeframes(b'\0\0')
+        for path in ('/summary', '/keywords', '/translate', '/transcribe'):
+            audio = path == '/transcribe'
+            body = buf.getvalue() if audio else b'meeting'
+            headers = {'Content-Type': 'audio/wav' if audio else 'text/plain'}
+            for content in ('private transcript\ud800', '\udfff', 'Meeting \U0001f680'):
+                with self.subTest(path=path, content=repr(content)):
+                    result = ({'text': content} if audio else
+                              {'choices': [{'message': {'content': content}}]})
+                    self.upstream.payload = json.dumps(result).encode('utf-8')
+                    expected = ((200, content) if content == 'Meeting \U0001f680' else
+                                (502, 'Provider returned invalid UTF-8 text'))
+                    self.assertEqual(self.request(path, body, headers), expected)
+        self.assertEqual(len(self.upstream.received), 12)
+
     def test_config_url_policy(self):
         for url in ('http://example.com/v1', 'https://user:pass@example.com/v1',
                     'https://example.com/v1?key=bad', 'file:///tmp/file', 'https://example.com:bad'):
