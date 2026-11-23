@@ -177,6 +177,7 @@ def main(argv=None):
         run("provider-config", [sys.executable, "-m", "unittest", "discover", "-s", "LumaLive/server/ai-gateway/python", "-p", "test_provider_settings.py"], 60)
         run("native-health", [sys.executable, "LumaLive/server/ai-gateway/python/test_native_health.py", str(binary / "luma_ai_service_health_tests.exe")], 60)
         run("native-ai", [sys.executable, "LumaLive/server/ai-gateway/python/test_native_client.py", str(binary / "luma_session_ai_gateway_tests.exe")], 60)
+        run("native-ai-response-boundaries", [sys.executable, "-B", "LumaLive/server/ai-gateway/python/test_native_response_boundaries.py", str(binary / "luma_session_ai_gateway_tests.exe"), "--report", str(root / "output" / ("native-ai-response-boundaries-" + record["run_id"] + ".json"))], 360)
         run("navigation", [sys.executable, "scripts/windows/test_studio_navigation.py", str(executable), str(binary / "luma_meeting_ui_fixture.exe")], 60)
         run("meeting-ui", [sys.executable, "scripts/windows/test_meeting_ui.py", str(binary)], 90)
         status, exit_code = "passed", 0

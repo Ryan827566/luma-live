@@ -74,8 +74,22 @@ private:
   auto route=path;auto marker=route.find(L'?');if(marker!=std::wstring::npos){auto lang=route.substr(marker+1);headers+=L"X-Luma-Language: "+lang+L"\r\n";}
   if(!WinHttpSendRequest(request,headers.c_str(),DWORD(-1),const_cast<char*>(body.data()),DWORD(body.size()),DWORD(body.size()),0)||!WinHttpReceiveResponse(request,nullptr))return {false,"AI gateway unavailable or timed out. Start the local gateway and configure its provider."};
   DWORD code=0,size=sizeof(code);if(!WinHttpQueryHeaders(request,WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER,nullptr,&code,&size,nullptr))return {false,"Invalid AI response."};
+  const DWORD limit=path==L"/speech"?4194304u:131072u;
+  wchar_t contentLength[32]{};DWORD lengthSize=sizeof(contentLength),expected=0;
+  const bool hasLength=WinHttpQueryHeaders(request,WINHTTP_QUERY_CONTENT_LENGTH,nullptr,contentLength,&lengthSize,nullptr)!=FALSE;
+  if(!hasLength&&GetLastError()!=ERROR_WINHTTP_HEADER_NOT_FOUND)return {false,"Invalid AI response length."};
+  if(hasLength){
+   if(!contentLength[0])return {false,"Invalid AI response length."};
+   for(const wchar_t digit:std::wstring(contentLength)){
+    if(digit<L'0'||digit>L'9')return {false,"Invalid AI response length."};
+    const DWORD value=DWORD(digit-L'0');
+    if(expected>limit/10||(expected==limit/10&&value>limit%10))return {false,"AI response too large."};
+    expected=expected*10+value;
+   }
+  }
   std::string result;char buffer[4096];DWORD read=0;
-  do{if(!WinHttpReadData(request,buffer,sizeof(buffer),&read))return {false,"AI response interrupted."};if(result.size()+read>(path==L"/speech"?4194304u:131072u))return {false,"AI response too large."};result.append(buffer,read);}while(read);
+  do{if(!WinHttpReadData(request,buffer,sizeof(buffer),&read))return {false,"AI response interrupted."};if(result.size()+read>limit)return {false,"AI response too large."};result.append(buffer,read);}while(read);
+  if(hasLength&&result.size()!=expected)return {false,"AI response interrupted."};
   if(result.empty()&&path!=L"/transcribe")return {false,"AI returned an empty response."};
   return {code>=200&&code<300,result};
  }
