@@ -1,0 +1,21 @@
+cmake_minimum_required(VERSION 3.24)
+project(LumaLiveAiAutomation LANGUAGES CXX)
+
+add_library(luma_ai_automation STATIC
+    src/AiToolRegistry.cpp
+    src/AiWorkflowEngine.cpp
+)
+
+target_include_directories(luma_ai_automation PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_compile_features(luma_ai_automation PUBLIC cxx_std_20)
+
+add_executable(luma_ai_automation_tests
+    tests/AiWorkflowEngineTests.cpp
+)
+target_link_libraries(luma_ai_automation_tests PRIVATE luma_ai_automation)
+
+enable_testing()
+add_test(NAME luma_ai_automation_tests COMMAND luma_ai_automation_tests)
