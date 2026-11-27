@@ -1,0 +1,7 @@
+add_library(luma_ai_features STATIC src/AiFeatureService.cpp)
+target_include_directories(luma_ai_features PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(luma_ai_features PUBLIC luma_ai_core luma_gateway)
+target_compile_features(luma_ai_features PUBLIC cxx_std_20)
+add_executable(luma_ai_features_tests tests/AiFeatureServiceTests.cpp)
+target_link_libraries(luma_ai_features_tests PRIVATE luma_ai_features luma_gateway luma_ai_providers)
+add_test(NAME luma_ai_features_tests COMMAND luma_ai_features_tests)
