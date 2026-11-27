@@ -14,6 +14,7 @@ namespace {
 struct Mailbox {
     std::mutex mutex;
     std::unordered_map<std::string,std::string> messages;
+    std::unordered_map<std::string,std::string> userIds;
     bool rejectEmail{},rejectSms{};
     std::atomic<bool> rejectStorage{false};
     bool Deliver(std::string_view purpose,std::string_view code,bool email){
@@ -28,6 +29,7 @@ struct Mailbox {
         if(line=="accept-delivery"){rejectEmail=rejectSms=false;return "OK";}
         if(line=="reject-storage"){rejectStorage=true;return "OK";}
         if(line=="accept-storage"){rejectStorage=false;return "OK";}
+        if(line.rfind("user-id ",0)==0){auto found=userIds.find(line.substr(8));return found==userIds.end()?"MISSING":found->second;}
         auto found=messages.find(line);if(found==messages.end())return "MISSING";
         auto value=std::move(found->second);messages.erase(found);return value;
     }
@@ -41,7 +43,9 @@ public:
     shared::contracts::Result LoadUsers(std::vector<AuthUserRecord>& rows)override{return delegate->LoadUsers(rows);}
     shared::contracts::Result UpsertUser(const AuthUserRecord& row)override{
         if(mailbox->rejectStorage)return shared::contracts::Result::Failure(shared::contracts::ErrorCode::Internal,"fixture storage rejection");
-        return delegate->UpsertUser(row);
+        auto result=delegate->UpsertUser(row);
+        if(result.IsOk()){std::lock_guard lock(mailbox->mutex);mailbox->userIds[row.email]=row.id;}
+        return result;
     }
     shared::contracts::Result DeleteUser(std::string_view id)override{return delegate->DeleteUser(id);}
     shared::contracts::Result LoadSecurityEvents(std::vector<AuthSecurityEventRecord>& rows)override{return delegate->LoadSecurityEvents(rows);}

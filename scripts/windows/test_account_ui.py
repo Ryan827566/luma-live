@@ -306,11 +306,24 @@ try:
     done('signed in')
 
     assert text(control(2100))=='Profile';fits();assert not visible(control(2168))
+    # Expected identity comes from the private in-memory server, never from a nickname.
+    user_id=mailbox('user-id ui@example.com')
+    def profile_identity():
+        detail=control(2164);value=text(detail)
+        assert 'User ID\r\n'+user_id+'\r\n' in value, 'Profile did not show the complete server user ID'
+        assert u.GetWindowLongW(detail,-16)&0x800, 'User ID details are not read-only'
+        start=value.index(user_id)
+        u.SendMessageW(detail,0xB1,start,start+len(user_id))  # Select without touching the clipboard.
+        first,last=w.DWORD(),w.DWORD()
+        u.SendMessageW(detail,0xB0,c.addressof(first),c.addressof(last))
+        assert (first.value,last.value)==(start,start+len(user_id)), 'Full user ID cannot be selected'
+    profile_identity()
     signedin_limits=MinMaxInfo();u.SendMessageW(root,0x24,0,c.addressof(signedin_limits))
     assert (signedin_limits.min_track.x,signedin_limits.min_track.y)==(round(1024*scale),round(700*scale)), 'Workspace kept sign-in sizing restrictions'
     assert text(u.GetDlgItem(root,129))=='ui.person', 'Sidebar did not show the username as initial display name'
     fields('ui.person','ui@example.com','Updated UI','');click(2160);done('Done')
     assert 'Updated UI' in text(control(2164))
+    profile_identity()
     at_sizes(short_details)
     # Every authenticated page and security mode must fit before submitting anything.
     click(2101)
@@ -450,13 +463,16 @@ try:
     assert not u.GetWindowLongW(control(2164),-16)&0x200000, 'Short profile retained the activity scrollbar'
     at_sizes(short_details)
     click(2100);click(2161);done('signed out');assert text(control(2100))=='Sign in'
+    assert user_id not in text(control(2164)), 'Signed-out details retained the previous user ID'
     signedout=w.RECT();u.GetWindowRect(root,c.byref(signedout))
     assert (signedout.right-signedout.left,signedout.bottom-signedout.top)==(round(560*scale),round(560*scale)), 'Logout did not restore entrance dimensions'
     fields('ui@example.com','secure ui password');click(2160);done('signed in')
     assert text(control(2100))=='Profile'
+    profile_identity()
     click(2101);select_mode(2);fits();password_visibility(0,1,2);fields('wrong password','changed password','changed password');click(2160);done('incorrect')
     fields('secure ui password','changed password','changed password');click(2160);done('Password updated')
     assert text(control(2100))=='Sign in'
+    assert user_id not in text(control(2164)), 'Invalidated session retained the previous user ID'
     fields('ui.person','secure ui password','');click(2160);done('incorrect')
     fields('ui.person','changed password','');click(2160);done('signed in')
     click(2161);done('signed out')

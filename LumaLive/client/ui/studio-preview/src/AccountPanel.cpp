@@ -230,6 +230,7 @@ struct AccountPanel::Impl {
     void RefreshDetail(){
         std::wstring text;
         if(state.authenticated){text=Wide(state.profile.display_name)+L"\r\n"+Wide(state.profile.email)+L"\r\n\r\n";
+            if(page==Page::Profile&&!state.profile.user_id.empty())text+=std::wstring(UiLabel(L"用户 ID",L"User ID"))+L"\r\n"+Wide(state.profile.user_id)+L"\r\n\r\n";
             text+=state.security.email_verified?UiLabel(L"邮箱已验证",L"Email verified"):UiLabel(L"邮箱未验证",L"Email not verified");text+=L"\r\n";
             text+=state.security.phone_verified?UiLabel(L"手机已验证",L"Phone verified"):UiLabel(L"手机未验证",L"Phone not verified");text+=L"\r\n";
             text+=state.security.mfa_enabled?UiLabel(L"双重验证已启用",L"Two-step verification on"):UiLabel(L"双重验证未启用",L"Two-step verification off");
