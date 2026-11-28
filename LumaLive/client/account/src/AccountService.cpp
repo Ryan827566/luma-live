@@ -214,6 +214,7 @@ public:
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
         if(q.type!=Type::LoginOk||q.fields.size()!=11)return{false,"invalid login response"};
+        if(q.fields[5].empty())return InvalidIdentityResponseLocked();
 
         ClearSessionLocked();
         session_.token=q.fields[0];
@@ -252,6 +253,7 @@ public:
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
         if(q.type!=Type::LoginOk||q.fields.size()!=11)return{false,"invalid session response"};
+        if(q.fields[5].empty()||q.fields[5]!=session_.user.user_id)return InvalidIdentityResponseLocked();
         session_.token=q.fields[0];
         if(!q.fields[1].empty())session_.refresh_token=q.fields[1];
         session_.session_id=q.fields[2];
@@ -276,6 +278,7 @@ public:
         if(q.type==Type::Error)return Error(q);
         if(q.type!=Type::RefreshSessionOk||q.fields.size()!=11)
             return{false,"invalid refresh response"};
+        if(q.fields[5].empty()||q.fields[5]!=session_.user.user_id)return InvalidIdentityResponseLocked();
         session_.token=q.fields[0];
         session_.refresh_token=q.fields[1];
         session_.session_id=q.fields[2];
@@ -298,6 +301,7 @@ public:
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
         if(q.type!=Type::ProfileOk||q.fields.size()!=6)return{false,"invalid profile response"};
+        if(q.fields[0].empty()||q.fields[0]!=session_.user.user_id)return InvalidIdentityResponseLocked();
         session_.user.user_id=q.fields[0];
         session_.user.username=q.fields[1];
         session_.user.email=q.fields[2];
@@ -316,6 +320,7 @@ public:
         if(!Recv(q))return{false,"receive failed"};
         if(q.type==Type::Error)return Error(q);
         if(q.type!=Type::UpdateProfileOk||q.fields.size()!=6)return{false,"invalid profile update response"};
+        if(q.fields[0].empty()||q.fields[0]!=session_.user.user_id)return InvalidIdentityResponseLocked();
         session_.user.user_id=q.fields[0];
         session_.user.username=q.fields[1];
         session_.user.email=q.fields[2];
@@ -425,6 +430,7 @@ public:
         if(q.type==Type::Error)return Error(q);
         if(q.type!=Type::LoginOk||q.fields.size()!=11)
             return{false,"invalid phone login response"};
+        if(q.fields[5].empty())return InvalidIdentityResponseLocked();
 
         const auto phone=pending_phone_login_number_;
         ClearSessionLocked();
@@ -670,6 +676,11 @@ private:
     OperationResult InvalidChallengeLocked(){
         DisconnectLocked();
         return{false,"invalid authentication challenge","invalid_challenge"};
+    }
+
+    OperationResult InvalidIdentityResponseLocked(){
+        DisconnectLocked();
+        return{false,"invalid account identity response","invalid_response"};
     }
 
     void ClearSessionLocked(){

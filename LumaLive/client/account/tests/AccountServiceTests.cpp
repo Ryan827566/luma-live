@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <cstdlib>
 #include <future>
+#include <iostream>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -82,6 +83,73 @@ Packet LoggedIn(){
         std::chrono::system_clock::now().time_since_epoch()).count()+3600;
     return{Type::LoginOk,{"fixture-access","fixture-refresh","fixture-session","fixture-device","Fixture",
         "fixture-user","fixture.user","fixture@example.com","Fixture",std::to_string(future),std::to_string(future)}};
+}
+
+bool IdentityResponseCase(Type operation,const std::string& identity,bool expected_success){
+    std::uint16_t port=0;const auto listener=Listen(port);
+    std::thread server([&]{
+        const auto peer=::accept(listener,nullptr,nullptr);assert(peer!=kInvalidSocket);
+        assert(Receive(peer).type==Type::LoginBegin);
+        auto challenge=Challenge(Type::LoginChallenge);challenge.fields.back()="1";Send(peer,challenge);
+        assert(Receive(peer).type==Type::LoginProof);Send(peer,LoggedIn());
+        assert(Receive(peer).type==operation);
+        if(operation==Type::LoginBegin){
+            Send(peer,challenge);assert(Receive(peer).type==Type::LoginProof);
+        }
+        auto reply=LoggedIn();reply.fields[5]=identity;
+        if(operation==Type::RefreshSession)reply.type=Type::RefreshSessionOk;
+        if(operation==Type::ValidateSession)reply.fields[1].clear();
+        if(operation==Type::GetProfile||operation==Type::UpdateProfile)
+            reply={operation==Type::GetProfile?Type::ProfileOk:Type::UpdateProfileOk,
+                {identity,"fixture.user","fixture@example.com","Loaded profile","",""}};
+        Send(peer,reply);
+        char next=0;assert(::recv(peer,&next,1,0)==0);CloseSocket(peer);
+    });
+    auto service=luma::client::account::CreateAccountService();
+    assert(service->Connect("127.0.0.1",port).success);
+    assert(service->Login("fixture.user","fixture password").success);
+    assert(service->IsAuthenticated()&&service->Session().user.user_id=="fixture-user");
+    luma::client::account::OperationResult result;
+    bool threw=false;
+    try{
+        switch(operation){
+        case Type::LoginBegin:result=service->Login("fixture.user","fixture password");break;
+        case Type::PhoneLogin:result=service->LoginWithPhoneCode("fixture-challenge","123456");break;
+        case Type::ValidateSession:result=service->ValidateSession();break;
+        case Type::RefreshSession:result=service->RefreshSession();break;
+        case Type::GetProfile:result=service->GetProfile();break;
+        case Type::UpdateProfile:result=service->UpdateProfile("fixture.user","fixture@example.com","Loaded profile","");break;
+        default:assert(false);
+        }
+    }catch(...){threw=true;}
+    const auto snapshot=service->Session();
+    const bool running=service->IsRunning(),authenticated=service->IsAuthenticated();
+    const bool passed=!threw&&(expected_success
+        ? result.success&&running&&authenticated&&snapshot.user.user_id==identity&&
+            !snapshot.token.empty()&&!snapshot.refresh_token.empty()
+        : !result.success&&!running&&!authenticated&&snapshot.token.empty()&&
+            snapshot.refresh_token.empty()&&snapshot.user.user_id.empty()&&snapshot.user.username.empty()&&
+            snapshot.user.display_name.empty()&&service->Sessions().empty()&&service->SecurityEvents().empty());
+    std::cout<<"identity operation="<<static_cast<unsigned>(operation)<<" returned_id='"<<identity
+        <<"' success="<<result.success<<" running="<<running<<" authenticated="<<authenticated
+        <<" snapshot_id='"<<snapshot.user.user_id<<"' token_retained="<<!snapshot.token.empty()
+        <<" threw="<<threw<<" "<<(passed?"PASS":"FAIL")<<'\n';
+    assert(service->Stop().success);
+    server.join();CloseSocket(listener);
+    return passed;
+}
+
+bool IdentityResponseCases(){
+    bool passed=true;
+    for(const auto operation:{Type::LoginBegin,Type::PhoneLogin,Type::ValidateSession,
+            Type::RefreshSession,Type::GetProfile,Type::UpdateProfile}){
+        passed=IdentityResponseCase(operation,"fixture-user",true)&&passed;
+        passed=IdentityResponseCase(operation,"",false)&&passed;
+        // A fresh login may switch users; an existing session/profile cannot.
+        const bool fresh_login=operation==Type::LoginBegin||operation==Type::PhoneLogin;
+        passed=IdentityResponseCase(operation,"another-opaque-user",fresh_login)&&passed;
+    }
+    return passed;
 }
 
 void RejectChallenge(Type operation,const Packet& malformed){
@@ -253,6 +321,13 @@ int main(int argc,char** argv) {
     WSADATA sockets{};
     assert(::WSAStartup(MAKEWORD(2,2),&sockets)==0);
 #endif
+    if(argc==2&&std::string(argv[1])=="--identity-worker"){
+        const bool passed=IdentityResponseCases();
+#ifdef _WIN32
+        ::WSACleanup();
+#endif
+        return passed?0:1;
+    }
     if(argc==2&&std::string(argv[1])=="--challenge-worker"){
         ChallengeCases();
 #ifdef _WIN32
@@ -261,6 +336,7 @@ int main(int argc,char** argv) {
         return 0;
     }
     assert(argc==1);
+    assert(IdentityResponseCases());
     ChallengeWatchdog();
     FragmentedProtocolAndRefusedConnection();
     SlowResponseDeadline();
